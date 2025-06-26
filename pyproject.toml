@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aims"
-version = "0.22.0"
+version = "0.1.0"
 description = "Flexible and scalable probabilistic impact modeling"
 readme = "README.md"
 license = "Apache-2.0"

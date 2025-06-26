@@ -9,7 +9,7 @@ resolution-markers = [
 
 [[package]]
 name = "aims"
-version = "0.22.0"
+version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "arviz" },
