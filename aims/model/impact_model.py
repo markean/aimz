@@ -518,7 +518,7 @@ class ImpactModel(BaseModel):
         kwargs_key = kwargs_array._fields + kwargs_extra._fields
 
         dataloader: ArrayLoader = ArrayLoader(
-            ArrayDataset(X, *kwargs_array, asnumpy=False),
+            ArrayDataset(X, *kwargs_array),
             batch_size=batch_size,
             collate_fn=lambda batch: ArrayLoader.collate_without_output(
                 batch,
@@ -1035,7 +1035,7 @@ class ImpactModel(BaseModel):
         output_subdir = _create_output_subdir(output_dir)
 
         dataloader: ArrayLoader = ArrayLoader(
-            ArrayDataset(X, y, *kwargs_array, asnumpy=False),
+            ArrayDataset(X, y, *kwargs_array),
             batch_size=batch_size or len(X),
             collate_fn=lambda batch: ArrayLoader.collate_with_sharding(
                 batch,
