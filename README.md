@@ -1,6 +1,6 @@
 # aims: Flexible and scalable probabilistic impact modeling
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)]()
-<!-- ![coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/eunseopkim/4ff758b87b992f4ba982dcf5d60fb8b5/raw/aims_coverage.json) -->
+[![Coverage Status](https://coveralls.io/repos/github/markean/aims/badge.svg?branch=main)](https://coveralls.io/github/markean/aims?branch=main)
 
 
 ## Overview

@@ -36,3 +36,6 @@ jobs:
 
       - name: Run Tests
         run: uv run pytest tests --cov=aims --cov-report=xml --cov-report=term
+
+      - name: Coveralls GitHub Action
+        uses: coverallsapp/github-action@v2.3.6
