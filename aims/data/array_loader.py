@@ -180,7 +180,7 @@ class ArrayLoader(DataLoader):
                 - kwargs_batch (list[jax.Array]): A list of keyword arguments with
                     padding applied if necessary.
         """
-        x_batch, y_batch, *kwargs_batch = zip(*batch, strict=True)
+        x_batch, y_batch, *kwargs_batch = map(jnp.asarray, zip(*batch, strict=True))
 
         n_pad = (
             ArrayLoader.calculate_padding(
