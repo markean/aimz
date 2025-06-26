@@ -1,0 +1,47 @@
+repos:
+    - repo: https://github.com/pre-commit/pre-commit-hooks
+      rev: v5.0.0
+      hooks:
+          - id: check-added-large-files
+          - id: check-ast
+          - id: check-builtin-literals
+          - id: check-case-conflict
+          - id: check-docstring-first
+          - id: check-executables-have-shebangs
+          - id: check-illegal-windows-names
+          - id: check-json
+          - id: check-merge-conflict
+          - id: check-shebang-scripts-are-executable
+          - id: check-symlinks
+          - id: check-toml
+          - id: check-vcs-permalinks
+          - id: check-xml
+          - id: check-yaml
+          - id: debug-statements
+          - id: destroyed-symlinks
+          - id: detect-aws-credentials
+          - id: detect-private-key
+          - id: end-of-file-fixer
+          - id: name-tests-test
+            args: [--pytest-test-first]
+          - id: no-commit-to-branch
+            args: [--branch, main]
+          - id: sort-simple-yaml
+          - id: trailing-whitespace
+
+    - repo: https://github.com/Yelp/detect-secrets
+      rev: v1.5.0
+      hooks:
+          - id: detect-secrets
+
+    - repo: https://github.com/astral-sh/ruff-pre-commit
+      # Ruff version.
+      rev: v0.12.0
+      hooks:
+          # Run the linter.
+          - id: ruff
+            types_or: [python, pyi]
+            args: [--fix, --config=pyproject.toml]
+          # Run the formatter.
+          - id: ruff-format
+            types_or: [python, pyi]

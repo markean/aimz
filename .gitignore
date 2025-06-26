@@ -1,0 +1,135 @@
+# Python Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# PyInstaller
+*.manifest
+*.spec
+
+# C extensions
+*.so
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Translations
+*.mo
+*.pot
+
+# Sphinx documentation
+docs/_build/
+
+# Django stuff
+.log
+.static_storage/
+.media/
+local_settings.py
+
+# Flask stuff
+instance/
+.webassets-cache
+
+# Scrapy stuff
+.scrapy
+
+# Jupyter notebook
+.ipynb_checkpoints
+
+# VS Code settings
+.vscode/
+
+# IntelliJ
+.idea/
+*.iml
+out/
+.idea_modules/
+
+# Vim & Emacs
+*~
+.*.swo
+.*.swp
+# emacs backup files
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+
+# JIRA plugin
+atlassian-ide-plugin.xml
+
+# SageMath parsed files
+*.sage.py
+
+# Pyenv
+.python-version
+
+# Celery beat schedule file
+celerybeat-schedule
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# mypy
+.mypy_cache/
+
+# macOS system files
+*.DS_Store
+.AppleDouble
+.LSOverride
+.Trashes
+
+# Directory containing README files
+README_files/
+
+# Ignore all image/zip files
+*.jpg
+*.jpeg
+# *.png
+*.zip
+
+# Temporary files
+tmp/
+
+# Keep .gitkeep files
+!.gitkeep
+
+# mkdocs documentation
+/site

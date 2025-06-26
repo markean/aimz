@@ -1,0 +1,85 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aims"
+version = "0.22.0"
+description = "Flexible and scalable probabilistic impact modeling"
+readme = "README.md"
+license = "Apache-2.0"
+authors = [
+    { name = "Eunseop Kim", email = "markean@pm.me" },
+    { name = "Jirapat Samranvedhya"},
+]
+maintainers = [{ name = "Eunseop Kim", email = "markean@pm.me" }]
+requires-python = ">=3.11"
+dependencies = [
+    "arviz>=0.21",
+    "dask>=2025.5",
+    "jax>=0.5.3",
+    "jax-dataloader>=0.1.3",
+    "numpyro>=0.18.0",
+    "scikit-learn>=1.6.1",
+    "torch>=2.7",
+    "tqdm>=4.67",
+    "xarray>=2025.4",
+    "zarr>=3,<4",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
+[project.optional-dependencies]
+dev = ["dill>=0.4.0", "pytest>=8.3", "pytest-cov>=6"]
+gpu = ["jax[cuda12]>=0.5.3", "torch>=2.7"]
+
+[project.urls]
+homepage = "https://github.com/markean/aims"
+
+[tool.ruff]
+line-length = 88
+indent-width = 4
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = []
+pep8-naming = { ignore-names = ["X"] }
+per-file-ignores = { "tests*" = [
+    "INP001", # implicit-namespace-package
+    "ARG001", # unused-function-argument
+    "S101",   # assert
+    "S301",   # suspicious-pickle-usage
+    "S403",   # suspicious-pickle-import
+], "*.ipynb" = [
+    "ERA001", # commented-out-code
+    "T201",   # print
+    "PD901",  # pandas-df-variable-name
+    "D101",   # undocumented-public-class
+    "D102",   # undocumented-public-method
+    "D103",   # undocumented-public-function
+    "D107",   # undocumented-public-init
+    "D417",   # undocumented-param
+    "S101",   # assert
+    "S301",   # suspicious-pickle-usage
+] }
+pydocstyle = { convention = "google" }
+pylint = { max-args = 10 }
+
+[tool.setuptools.packages.find]
+include = ["aims*"]
+namespaces = false
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu128", extra = "gpu" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
