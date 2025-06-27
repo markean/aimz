@@ -16,43 +16,20 @@ Designed to work with user-defined models with probabilistic primitives, the lib
 
 
 ## Installation
-<details>
-<summary>CPU</summary>
-
-### CPU-only (default)
+CPU (default):
 ```sh
-# Specific release (replace `<release_tag>`)
-pip install aimz@git+https://github.com/markean/aimz.git@<release_tag>
-
-# Latest commit from the default branch
-pip install aimz@git+https://github.com/markean/aimz.git
-
-# Using SSH
-pip install aimz@git+ssh://git@github.com/markean/aimz.git
+pip install -U aimz
 ```
 
-</details>
-
-<details>
-<summary>GPU</summary>
-
-### GPU (NVIDIA, CUDA 12)
-Ensure your system meets the following requirements:
-- CUDA 12
-- NVIDIA driver ≥ 525.60.13
-- Linux platform
-
-To enable GPU acceleration, add the `[gpu]` extra to any of the install commands above:
+GPU (NVIDIA, CUDA 12):
 ```sh
-pip install aimz[gpu]@git+https://github.com/markean/aimz.git@<release_tag>
+pip install -U "aimz[gpu]"
 ```
 This installs `jax[cuda12]` with the version specified by the package. However, to ensure you have the latest compatible version of JAX with CUDA 12, it is recommended to update JAX separately after installation:
 ```sh
 pip install -U "jax[cuda12]"
 ```
 Refer to the [JAX installation guide](https://docs.jax.dev/en/latest/installation.html) for up-to-date compatibility and driver requirements.
-
-</details>
 
 
 ## Usage
