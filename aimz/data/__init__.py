@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Model object."""
+"""Utilities for data handling and processing."""
 
-from aims.model.impact_model import ImpactModel
+from aimz.data.array_loader import ArrayLoader
 
-__all__ = ["ImpactModel"]
+__all__ = ["ArrayLoader"]

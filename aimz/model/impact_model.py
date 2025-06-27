@@ -46,20 +46,20 @@ from tqdm.auto import tqdm
 from xarray import open_zarr
 from zarr import open_group
 
-from aims.data import (
+from aimz.data import (
     ArrayLoader,
 )
-from aims.data._sharding import _create_sharded_log_likelihood, _create_sharded_sampler
-from aims.model._core import BaseModel
-from aims.sampling._forward import _sample_forward
-from aims.utils._kwargs import _group_kwargs
-from aims.utils._output import (
+from aimz.data._sharding import _create_sharded_log_likelihood, _create_sharded_sampler
+from aimz.model._core import BaseModel
+from aimz.sampling._forward import _sample_forward
+from aimz.utils._kwargs import _group_kwargs
+from aimz.utils._output import (
     _create_output_subdir,
     _shutdown_writer_threads,
     _start_writer_threads,
     _writer,
 )
-from aims.utils._validation import (
+from aimz.utils._validation import (
     _check_is_fitted,
     _validate_group,
     _validate_kernel_body,
@@ -594,7 +594,7 @@ class ImpactModel(BaseModel):
         ds = open_zarr(output_dir, consolidated=False).expand_dims(dim="chain", axis=0)
         ds = ds.assign_coords(
             {k: np.arange(ds.sizes[k]) for k in ds.sizes},
-        ).assign_attrs(make_attrs(library=modules["aims"]))
+        ).assign_attrs(make_attrs(library=modules["aimz"]))
 
         return az.convert_to_inference_data(ds, group=group)
 
@@ -763,7 +763,7 @@ class ImpactModel(BaseModel):
                 },
             },
         )
-        out["posterior"].attrs.update(make_attrs(library=modules["aims"]))
+        out["posterior"].attrs.update(make_attrs(library=modules["aimz"]))
 
         return out
 
@@ -865,7 +865,7 @@ class ImpactModel(BaseModel):
                     model_kwargs=args_bound,
                 ).items()
             },
-        ).assign_attrs(make_attrs(library=modules["aims"]))
+        ).assign_attrs(make_attrs(library=modules["aimz"]))
 
         # Reorder the dimensions and add the return sites at the end
         dims_reordered = [
@@ -891,7 +891,7 @@ class ImpactModel(BaseModel):
                 },
             },
         )
-        out["posterior"].attrs.update(make_attrs(library=modules["aims"]))
+        out["posterior"].attrs.update(make_attrs(library=modules["aimz"]))
 
         return out
 
@@ -1108,7 +1108,7 @@ class ImpactModel(BaseModel):
         )
         ds = ds.assign_coords(
             {k: np.arange(ds.sizes[k]) for k in ds.sizes},
-        ).assign_attrs(make_attrs(library=modules["aims"]))
+        ).assign_attrs(make_attrs(library=modules["aimz"]))
 
         return az.convert_to_inference_data(ds, group="log_likelihood")
 

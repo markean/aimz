@@ -1,10 +1,10 @@
-# aims: Flexible and scalable probabilistic impact modeling
+# aimz: Flexible and scalable probabilistic impact modeling
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)]()
-[![Coverage Status](https://coveralls.io/repos/github/markean/aims/badge.svg?branch=main)](https://coveralls.io/github/markean/aims?branch=main)
+[![Coverage Status](https://coveralls.io/repos/github/markean/aimz/badge.svg?branch=main)](https://coveralls.io/github/markean/aimz?branch=main)
 
 
 ## Overview
-**aims** is a Python library for flexible and scalable probabilistic impact modeling to assess the effects of interventions on outcomes of interest.
+**aimz** is a Python library for flexible and scalable probabilistic impact modeling to assess the effects of interventions on outcomes of interest.
 Designed to work with user-defined models with probabilistic primitives, the library builds on [NumPyro](https://num.pyro.ai/en/stable/), [JAX](https://jax.readthedocs.io/en/latest/), [Xarray](https://xarray.dev/), and [Zarr](https://zarr.readthedocs.io/en/stable/) to enable efficient inference workflows.
 
 
@@ -22,13 +22,13 @@ Designed to work with user-defined models with probabilistic primitives, the lib
 ### CPU-only (default)
 ```sh
 # Specific release (replace `<release_tag>`)
-pip install aims@git+https://github.com/markean/aims.git@<release_tag>
+pip install aimz@git+https://github.com/markean/aimz.git@<release_tag>
 
 # Latest commit from the default branch
-pip install aims@git+https://github.com/markean/aims.git
+pip install aimz@git+https://github.com/markean/aimz.git
 
 # Using SSH
-pip install aims@git+ssh://git@github.com/markean/aims.git
+pip install aimz@git+ssh://git@github.com/markean/aimz.git
 ```
 
 </details>
@@ -44,7 +44,7 @@ Ensure your system meets the following requirements:
 
 To enable GPU acceleration, add the `[gpu]` extra to any of the install commands above:
 ```sh
-pip install aims[gpu]@git+https://github.com/markean/aims.git@<release_tag>
+pip install aimz[gpu]@git+https://github.com/markean/aimz.git@<release_tag>
 ```
 This installs `jax[cuda12]` with the version specified by the package. However, to ensure you have the latest compatible version of JAX with CUDA 12, it is recommended to update JAX separately after installation:
 ```sh
@@ -74,7 +74,7 @@ from numpyro.infer.autoguide import AutoNormal
 from sklearn.datasets import fetch_california_housing
 from sklearn.model_selection import train_test_split
 
-from aims.model import ImpactModel
+from aimz.model import ImpactModel
 
 # Load California Housing dataset
 housing = fetch_california_housing()
@@ -141,7 +141,7 @@ from numpyro import optim, plate, sample
 from numpyro.infer import SVI, Trace_ELBO, init_to_feasible
 from numpyro.infer.autoguide import AutoNormal
 
-from aims.model import ImpactModel
+from aimz.model import ImpactModel
 
 
 # NumPyro model: Z and y are influenced by C and X, with Z mediating part of y

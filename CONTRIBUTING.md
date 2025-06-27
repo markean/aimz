@@ -1,12 +1,12 @@
 # Contributing
-Thank you for your interest in contributing to **aims**. Whether you're fixing a bug, adding a feature, or improving documentation, we welcome your help.
+Thank you for your interest in contributing to **aimz**. Whether you're fixing a bug, adding a feature, or improving documentation, we welcome your help.
 
 
 ## Development Guide
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/markean/aims.git
-   cd aims
+   git clone https://github.com/markean/aimz.git
+   cd aimz
    ```
 
 2. **Set up your environment**

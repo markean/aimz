@@ -24,8 +24,8 @@ from jax import random
 from numpyro.infer import Predictive
 from numpyro.infer.svi import SVIRunResult
 
-from aims.model import ImpactModel
-from aims.utils._validation import _is_fitted
+from aimz.model import ImpactModel
+from aimz.utils._validation import _is_fitted
 
 if TYPE_CHECKING:
     import jax
