@@ -22,8 +22,8 @@ from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
 from numpyro.optim import Adam
 
-from aims._exceptions import KernelValidationError
-from aims.model import ImpactModel
+from aimz._exceptions import KernelValidationError
+from aimz.model import ImpactModel
 
 if TYPE_CHECKING:
     import jax

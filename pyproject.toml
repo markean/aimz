@@ -3,14 +3,14 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "aims"
+name = "aimz"
 version = "0.1.0"
 description = "Flexible and scalable probabilistic impact modeling"
 readme = "README.md"
 license = "Apache-2.0"
 authors = [
     { name = "Eunseop Kim", email = "markean@pm.me" },
-    { name = "Jirapat Samranvedhya"},
+    { name = "Jirapat Samranvedhya", email = "jirapat.samranvedhya@lilly.com" },
 ]
 maintainers = [{ name = "Eunseop Kim", email = "markean@pm.me" }]
 requires-python = ">=3.11"
@@ -40,7 +40,7 @@ dev = ["dill>=0.4.0", "pytest>=8.3", "pytest-cov>=6"]
 gpu = ["jax[cuda12]>=0.5.3", "torch>=2.7"]
 
 [project.urls]
-homepage = "https://github.com/markean/aims"
+source = "https://github.com/markean/aimz"
 
 [tool.ruff]
 line-length = 88
@@ -73,7 +73,7 @@ pydocstyle = { convention = "google" }
 pylint = { max-args = 10 }
 
 [tool.setuptools.packages.find]
-include = ["aims*"]
+include = ["aimz*"]
 namespaces = false
 
 [tool.uv.sources]

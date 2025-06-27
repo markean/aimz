@@ -8,8 +8,8 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "aims"
-version = "0.1.0"
+name = "aimz"
+version = "0.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "arviz" },
@@ -48,7 +48,7 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6" },
     { name = "scikit-learn", specifier = ">=1.6.1" },
     { name = "torch", specifier = ">=2.7" },
-    { name = "torch", marker = "extra == 'gpu'", specifier = ">=2.7", index = "https://download.pytorch.org/whl/cu128", conflict = { package = "aims", extra = "gpu" } },
+    { name = "torch", marker = "extra == 'gpu'", specifier = ">=2.7", index = "https://download.pytorch.org/whl/cu128", conflict = { package = "aimz", extra = "gpu" } },
     { name = "tqdm", specifier = ">=4.67" },
     { name = "xarray", specifier = ">=2025.4" },
     { name = "zarr", specifier = ">=3,<4" },

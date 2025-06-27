@@ -26,7 +26,7 @@ from jax.experimental.shard_map import shard_map
 from jax.sharding import PartitionSpec
 from numpyro.infer import log_likelihood as log_lik
 
-from aims.sampling._forward import _sample_forward
+from aimz.sampling._forward import _sample_forward
 
 if TYPE_CHECKING:
     from collections.abc import Callable

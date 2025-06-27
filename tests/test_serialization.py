@@ -22,7 +22,7 @@ import pytest
 from conftest import lm
 from jax import random
 
-from aims.model import ImpactModel
+from aimz.model import ImpactModel
 
 if TYPE_CHECKING:
     import jax

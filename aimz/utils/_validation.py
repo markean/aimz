@@ -17,7 +17,7 @@
 from inspect import Parameter, getfullargspec, signature
 from typing import TYPE_CHECKING
 
-from aims._exceptions import KernelValidationError, NotFittedError
+from aimz._exceptions import KernelValidationError, NotFittedError
 
 if TYPE_CHECKING:
     from collections import OrderedDict
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
     import arviz as az
 
-    from aims.model import ImpactModel
+    from aimz.model import ImpactModel
 
 
 def _check_is_fitted(model: "ImpactModel", msg: str | None = None) -> None:

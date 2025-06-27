@@ -27,9 +27,9 @@ from numpyro.infer.autoguide import AutoNormal
 from numpyro.optim import Adam
 from sklearn.exceptions import DataConversionWarning
 
-from aims._exceptions import KernelValidationError
-from aims.model import ImpactModel
-from aims.utils._validation import _is_fitted
+from aimz._exceptions import KernelValidationError
+from aimz.model import ImpactModel
+from aimz.utils._validation import _is_fitted
 
 if TYPE_CHECKING:
     import jax

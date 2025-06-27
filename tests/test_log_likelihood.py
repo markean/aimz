@@ -23,8 +23,8 @@ from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
 from numpyro.optim import Adam
 
-from aims._exceptions import NotFittedError
-from aims.model import ImpactModel
+from aimz._exceptions import NotFittedError
+from aimz.model import ImpactModel
 
 if TYPE_CHECKING:
     import jax

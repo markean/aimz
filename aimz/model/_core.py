@@ -17,7 +17,7 @@
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Self
 
-from aims.utils._validation import _validate_kernel_signature
+from aimz.utils._validation import _validate_kernel_signature
 
 if TYPE_CHECKING:
     from collections.abc import Callable
