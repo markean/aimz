@@ -1,4 +1,4 @@
-# aimz: Flexible and scalable probabilistic impact modeling
+# aimz: Flexible probabilistic impact modeling at scale
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)]()
 [![Coverage Status](https://coveralls.io/repos/github/markean/aimz/badge.svg?branch=main)](https://coveralls.io/github/markean/aimz?branch=main)
 
@@ -16,43 +16,20 @@ Designed to work with user-defined models with probabilistic primitives, the lib
 
 
 ## Installation
-<details>
-<summary>CPU</summary>
-
-### CPU-only (default)
+CPU (default):
 ```sh
-# Specific release (replace `<release_tag>`)
-pip install aimz@git+https://github.com/markean/aimz.git@<release_tag>
-
-# Latest commit from the default branch
-pip install aimz@git+https://github.com/markean/aimz.git
-
-# Using SSH
-pip install aimz@git+ssh://git@github.com/markean/aimz.git
+pip install -U aimz
 ```
 
-</details>
-
-<details>
-<summary>GPU</summary>
-
-### GPU (NVIDIA, CUDA 12)
-Ensure your system meets the following requirements:
-- CUDA 12
-- NVIDIA driver ≥ 525.60.13
-- Linux platform
-
-To enable GPU acceleration, add the `[gpu]` extra to any of the install commands above:
+GPU (NVIDIA, CUDA 12):
 ```sh
-pip install aimz[gpu]@git+https://github.com/markean/aimz.git@<release_tag>
+pip install -U "aimz[gpu]"
 ```
 This installs `jax[cuda12]` with the version specified by the package. However, to ensure you have the latest compatible version of JAX with CUDA 12, it is recommended to update JAX separately after installation:
 ```sh
 pip install -U "jax[cuda12]"
 ```
 Refer to the [JAX installation guide](https://docs.jax.dev/en/latest/installation.html) for up-to-date compatibility and driver requirements.
-
-</details>
 
 
 ## Usage
@@ -124,13 +101,7 @@ im.cleanup()
 ### Example 2: Causal Network with Confounder
 This example illustrates a simple causal network. The variable `Z` has a direct causal effect on the outcome `Y`, while both are influenced by a shared confounder, `C`. An additional variable, `X`, is an observed exogenous factor that influences `Z` but has no direct effect on `Y`.
 
-Our objective is to estimate the causal effect of `Z` (or alternatively `X`) on `Y`, while properly accounting for the confounding influence of `C`.
-
-<p align="center">
-  <img src="docs/assets/dag.svg" alt="dag">
-</p>
-
-We assume the following generative model for the observed data:
+Our objective is to estimate the causal effect of `Z` (or alternatively `X`) on `Y`, while properly accounting for the confounding influence of `C`. We assume the following generative model for the observed data:
 
 ```python
 import jax
@@ -173,10 +144,6 @@ def model(X: jax.Array, C: jax.Array, y: jax.Array | None = None) -> None:
         logits = beta_y + beta_cy * c + beta_zy * z
         sample("y", dist.Bernoulli(logits=logits), obs=y)
 ```
-
-<p align="center">
-  <img src="docs/assets/plate.svg" alt="plate">
-</p>
 
 #### Simulating data under a known structural model
 We generate synthetic data consistent with the assumed causal structure:
