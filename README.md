@@ -1,5 +1,5 @@
 # aimz: Flexible probabilistic impact modeling at scale
-[![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)]()
+[![Python](https://img.shields.io/pypi/pyversions/aimz.svg)](https://pypi.org/project/aimz/)
 [![Coverage Status](https://coveralls.io/repos/github/markean/aimz/badge.svg?branch=main)](https://coveralls.io/github/markean/aimz?branch=main)
 
 
