@@ -1,8 +1,7 @@
 name: Build GitHub Pages
 on:
   push:
-    branches:
-      - dev
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
