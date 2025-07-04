@@ -1,13 +1,13 @@
 name: Build GitHub Pages
 on:
   push:
-    branches: [ main, dev ]
+    branches: [ main ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
 
 jobs:
-  deploy:
+  build-and-deploy-docs:
     runs-on: ubuntu-latest
 
     steps:
