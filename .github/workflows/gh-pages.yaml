@@ -24,6 +24,4 @@ jobs:
           pip install mkdocs mkdocs-material mkdocstrings[python]
 
       - name: Deploy to GitHub Pages
-        env:
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
         run: mkdocs gh-deploy --force --clean --verbose
