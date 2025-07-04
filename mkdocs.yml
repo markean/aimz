@@ -1,0 +1,85 @@
+site_name: aimz
+site_url: https://github.com/markean/aimz
+site_author: Eunseop Kim
+
+repo_name: markean/aimz
+repo_url: https://github.com/markean/aimz
+
+copyright: Copyright &copy; Eli Lilly and Company
+
+theme: 
+  name: material
+  features:
+    - announce.dismiss
+    - header.autohide
+    - navigation.indexes
+    - navigation.path
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.top
+    - search.suggest
+    - search.share
+    - toc.integrate
+  palette:
+    # Palette toggle for automatic mode
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default 
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/toggle-switch
+        name: Switch to dark mode
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/toggle-switch-off-outline
+        name: Switch to system preference
+  font:
+    text: Roboto
+    code: Roboto Mono
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+- search
+- mkdocstrings:
+    handlers:
+      python:
+        paths: [.]
+        options:
+          show_bases: false
+          show_symbol_type_heading: true
+          show_symbol_type_toc: true
+          docstring_options:
+            ignore_init_summary: true
+          members_order: source
+          filters:
+            - "!^_"
+          line_length: 88
+          separate_signature: true
+          show_signature_annotations: true
+          signature_crossrefs: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github 
+      link: https://github.com/markean/aimz
+    - icon: fontawesome/solid/paper-plane
+      link: mailto:markean@pm.me
+  generator: false
+
+nav:
+  - Home: index.md
+  - API Reference: 
+    - Model:
+      - ImpactModel: impact_model.md
+    - Data:
+      - ArrayLoader: array_loader.md
