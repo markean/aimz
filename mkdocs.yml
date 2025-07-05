@@ -1,5 +1,5 @@
 site_name: aimz
-site_url: https://github.com/markean/aimz
+site_url: https://markean.github.io/aimz/
 site_author: Eunseop Kim
 
 repo_name: markean/aimz
@@ -12,6 +12,8 @@ theme:
   features:
     - announce.dismiss
     - header.autohide
+    - navigation.tracking
+    - navigation.sections
     - navigation.indexes
     - navigation.path
     - navigation.instant
@@ -19,7 +21,6 @@ theme:
     - navigation.top
     - search.suggest
     - search.share
-    - toc.integrate
   palette:
     # Palette toggle for automatic mode
     - media: "(prefers-color-scheme)"
@@ -47,6 +48,11 @@ theme:
     code: Roboto Mono
   icon:
     repo: fontawesome/brands/github
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
 
 plugins:
 - search
@@ -77,7 +83,8 @@ extra:
   generator: false
 
 nav:
-  - Home: index.md
+  - Getting Started:
+    - Installation: installation.md
   - API Reference: 
     - Model:
       - ImpactModel: impact_model.md
