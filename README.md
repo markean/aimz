@@ -16,23 +16,6 @@ Designed to work with user-defined models with probabilistic primitives, the lib
 - Support for interventional causal inference for modeling counterfactuals and causal relations.
 
 
-## Installation
-CPU (default):
-```sh
-pip install -U aimz
-```
-
-GPU (NVIDIA, CUDA 12):
-```sh
-pip install -U "aimz[gpu]"
-```
-This installs `jax[cuda12]` with the version specified by the package. However, to ensure you have the latest compatible version of JAX with CUDA 12, it is recommended to update JAX separately after installation:
-```sh
-pip install -U "jax[cuda12]"
-```
-Refer to the [JAX installation guide](https://docs.jax.dev/en/latest/installation.html) for up-to-date compatibility and driver requirements.
-
-
 ## Usage
 ### Workflow
 1. Outline the model, considering the data generating process, latent variables, and causal relationships, if any.
