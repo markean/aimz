@@ -33,6 +33,7 @@ from arviz.data.base import make_attrs
 from jax import (
     default_backend,
     device_put,
+    jit,
     local_device_count,
     make_mesh,
     random,
@@ -40,7 +41,7 @@ from jax import (
 from jax.sharding import Mesh, NamedSharding, PartitionSpec
 from jax_dataloader import ArrayDataset
 from numpyro.handlers import do, seed, substitute, trace
-from numpyro.infer.svi import SVIRunResult
+from numpyro.infer.svi import SVIRunResult, SVIState
 from sklearn.utils.validation import check_array, check_X_y
 from tqdm.auto import tqdm
 from xarray import open_zarr
@@ -96,14 +97,28 @@ class ImpactModel(BaseModel):
                 the main input data. Defaults to `"X"`.
             param_output (str, optional): The name of the parameter in the `kernel` for
                 the output data. Defaults to `"y"`.
+
+        Warning:
+            The `rng_key` parameter should be provided as a **typed key array**
+            created with `jax.random.key()`, rather than a legacy `uint32` key created
+            with `jax.random.PRNGKey()`.
         """
         super().__init__(kernel, param_input, param_output)
+
+        if rng_key.dtype == jnp.uint32:
+            msg = "Legacy `uint32` PRNGKey detected; converting to a typed key array."
+            warn(msg, category=UserWarning, stacklevel=2)
+            rng_key = random.wrap_key_data(rng_key)
+
         self.rng_key = rng_key
         self.vi = vi
+        self._vi_state = None
+
         self._init_runtime_attrs()
 
     def _init_runtime_attrs(self) -> None:
         """Initialize runtime attributes."""
+        self._fn_vi_update: Callable | None = None
         self._fn_sample_posterior_predictive: Callable | None = None
         self._fn_log_likelihood: Callable | None = None
         self._num_devices: int = local_device_count()
@@ -133,7 +148,7 @@ class ImpactModel(BaseModel):
         """Return the state of the object excluding runtime attributes.
 
         Returns:
-            dict: The state of the object, excluding runtime attributes.
+            The state of the object, excluding runtime attributes.
         """
         return {
             k: v
@@ -158,7 +173,7 @@ class ImpactModel(BaseModel):
         """Get the current variational guide function.
 
         Returns:
-            Callable: The guide function used for variational inference.
+            The guide function used for variational inference.
         """
         return self._guide
 
@@ -182,7 +197,7 @@ class ImpactModel(BaseModel):
         """Get the current variational inference result.
 
         Returns:
-            SVIRunResult: The stored result from variational inference.
+            The stored result from variational inference.
         """
         return self._vi_result
 
@@ -198,9 +213,8 @@ class ImpactModel(BaseModel):
             vi_result (SVIRunResult): The result from a prior variational inference run.
                 It must be a NamedTuple or similar object with the following fields:
                 - params (dict): Learned parameters from inference.
-                - state (numpyro.infer.svi.SVIState): Internal SVI state object.
-                - losses (list[float]): List of loss values recorded during
-                    optimization.
+                - state (SVIState): Internal SVI state object.
+                - losses (jax.Array): Loss values recorded during optimization.
         """
         if np.any(np.isnan(vi_result.losses)):
             msg = "Loss contains NaN or Inf, indicating numerical instability."
@@ -230,12 +244,11 @@ class ImpactModel(BaseModel):
             return_sites (tuple[str] | None, optional): Names of variables (sites) to
                 return. If `None`, samples all latent, observed, and deterministic
                 sites. Defaults to `None`.
-            **kwargs (object): Additional arguments passed to the model, except for
-                `X` and `y`. All array-like objects in `**kwargs` are expected to be
-                JAX arrays.
+            **kwargs (object): Additional arguments passed to the model. All array-like
+                values are expected to be JAX arrays.
 
         Returns:
-            dict[str, jax.Array]: The prior predictive samples.
+            The prior predictive samples.
 
         Raises:
             TypeError: If `self.param_output` is passed as an argument.
@@ -270,7 +283,7 @@ class ImpactModel(BaseModel):
         """Draw posterior samples from a fitted model.
 
         Args:
-            num_samples (int | None, optional): The number of posterior samples.
+            num_samples (int | None, optional): The number of posterior samples to draw.
                 Defaults to `1000`.
             rng_key (jax.Array | None, optional): A pseudo-random number generator key.
                 Defaults to `None`, then an internal key is used and split as needed.
@@ -278,7 +291,7 @@ class ImpactModel(BaseModel):
                 return. If `None`, samples all latent sites. Defaults to `None`.
 
         Returns:
-            dict[str, jax.Array]: The posterior samples.
+            The posterior samples.
 
         """
         _check_is_fitted(self)
@@ -317,12 +330,11 @@ class ImpactModel(BaseModel):
                 their corresponding intervention values. Interventions enable
                 counterfactual analysis by modifying the specified sample sites during
                 prediction (posterior predictive sampling). Defaults to `None`.
-            **kwargs (object): Additional arguments passed to the model, except for
-                `X` and `y`. All array-like objects in `**kwargs` are expected to be
-                JAX arrays.
+            **kwargs (object): Additional arguments passed to the model. All array-like
+                values are expected to be JAX arrays.
 
         Returns:
-            dict[str, jax.Array]: The posterior predictive samples.
+            The posterior predictive samples.
 
         Raises:
             TypeError: If `self.param_output` is passed as an argument.
@@ -358,6 +370,129 @@ class ImpactModel(BaseModel):
             model_kwargs=args_bound,
         )
 
+    def train_on_batch(
+        self,
+        X: "jax.Array",
+        y: "jax.Array",
+        **kwargs: object,
+    ) -> tuple[SVIState, "jax.Array"]:
+        """Run a single VI step on the given batch of data.
+
+        Args:
+            X (jax.Array): Input data with shape `(n_samples_X, n_features)`.
+            y (jax.Array): Output data with shape `(n_samples_Y,)`.
+            **kwargs (object): Additional arguments passed to the model. All array-like
+                values are expected to be JAX arrays.
+
+        Returns:
+            (SVIState): Updated SVI state after the training step.
+            (jax.Array): Loss value as a scalar array.
+
+        Note:
+            This method updates the internal SVI state on every call, so it is not
+            necessary to capture the returned state externally unless explicitly needed.
+            However, the returned loss value can be used for monitoring or logging.
+        """
+        batch = {self.param_input: X, self.param_output: y, **kwargs}
+
+        if self._vi_state is None:
+            self.rng_key, rng_key = random.split(self.rng_key)
+            self._vi_state = self.vi.init(rng_key, **batch)
+        if self._fn_vi_update is None:
+            self._fn_vi_update = jit(self.vi.update)
+
+        self._vi_state, loss = self._fn_vi_update(self._vi_state, **batch)
+
+        return self._vi_state, loss
+
+    def fit_on_batch(
+        self,
+        X: "jax.Array",
+        y: "jax.Array",
+        *,
+        num_steps: int = 10000,
+        num_samples: int = 1000,
+        rng_key: "jax.Array | None" = None,
+        progress: bool = True,
+        **kwargs: object,
+    ) -> Self:
+        """Fit the impact model to the provided batch of data.
+
+        This method runs variational inference by invoking the `run()` method of the
+        `SVI` instance from NumPyro to estimate the posterior distribution, and then
+        draws samples from it.
+
+        Args:
+            X (jax.Array): Input data with shape `(n_samples_X, n_features)`.
+            y (jax.Array): Output data with shape `(n_samples_Y,)`.
+            num_steps (int, optional): Number of steps for variational inference
+                optimization. Defaults to `10000`.
+            num_samples (int | None, optional): The number of posterior samples to draw.
+                Defaults to `1000`.
+            rng_key (jax.Array | None, optional): A pseudo-random number generator key.
+                Defaults to `None`, then an internal key is used and split as needed.
+            progress (bool, optional): Whether to display a progress bar. Defaults to
+                `True`.
+            **kwargs (object): Additional arguments passed to the model. All array-like
+                values are expected to be JAX arrays.
+
+        Returns:
+            The fitted model instance, enabling method chaining.
+
+        Note:
+            This method continues training from the existing SVI state if available. To
+            start training from scratch, create a new model instance.
+        """
+        if rng_key is None:
+            self.rng_key, rng_key = random.split(self.rng_key)
+
+        X, y = map(jnp.asarray, check_X_y(X, y, y_numeric=True))
+
+        # Validate the provided parameters against the kernel's signature
+        args_bound = (
+            signature(self.kernel)
+            .bind(**{self.param_input: X, self.param_output: y, **kwargs})
+            .arguments
+        )
+        model_trace = trace(seed(self.kernel, rng_seed=self.rng_key)).get_trace(
+            **args_bound,
+        )
+        # Validate the kernel body for output sample site and naming conflicts
+        _validate_kernel_body(
+            self.kernel,
+            self.param_output,
+            model_trace,
+        )
+        self._return_sites = (
+            *(k for k, site in model_trace.items() if site["type"] == "deterministic"),
+            self.param_output,
+        )
+
+        self.num_samples = num_samples
+
+        logger.info("Performing variational inference optimization...")
+        rng_key, rng_subkey = random.split(rng_key)
+        self.guide = self.vi.guide
+        self.vi_result = self.vi.run(
+            rng_subkey,
+            num_steps=num_steps,
+            progress_bar=progress,
+            init_state=self._vi_state,
+            **args_bound,
+        )
+        self._vi_state = self.vi_result.state
+        if np.any(np.isnan(self.vi_result.losses)):
+            msg = "Loss contains NaN or Inf, indicating numerical instability."
+            warn(msg, category=RuntimeWarning, stacklevel=2)
+
+        self._is_fitted = True
+
+        logger.info("Posterior sampling...")
+        rng_key, rng_subkey = random.split(rng_key)
+        self.posterior_sample_ = self.sample(self.num_samples, rng_key=rng_subkey)
+
+        return self
+
     def fit(
         self,
         X: "jax.Array",
@@ -379,18 +514,17 @@ class ImpactModel(BaseModel):
             y (jax.Array): Output data with shape `(n_samples_Y,)`.
             num_steps (int, optional): Number of steps for variational inference
                 optimization. Defaults to `10000`.
-            num_samples (int | None, optional): The number of posterior samples.
+            num_samples (int | None, optional): The number of posterior samples to draw.
                 Defaults to `1000`.
             rng_key (jax.Array | None, optional): A pseudo-random number generator key.
                 Defaults to `None`, then an internal key is used and split as needed.
             progress (bool, optional): Whether to display a progress bar. Defaults to
                 `True`.
-            **kwargs (object): Additional arguments passed to the model, except for
-                `X` and `y`. All array-like objects in `**kwargs` are expected to be
-                JAX arrays.
+            **kwargs (object): Additional arguments passed to the model. All array-like
+                values are expected to be JAX arrays.
 
         Returns:
-            ImpactModel: The fitted model instance, enabling method chaining.
+            The fitted model instance, enabling method chaining.
         """
         if rng_key is None:
             self.rng_key, rng_key = random.split(self.rng_key)
@@ -444,7 +578,7 @@ class ImpactModel(BaseModel):
         """Check fitted status.
 
         Returns:
-            bool: `True` if the model is fitted, `False` otherwise.
+            `True` if the model is fitted, `False` otherwise.
 
         """
         return hasattr(self, "_is_fitted") and self._is_fitted
@@ -476,8 +610,8 @@ class ImpactModel(BaseModel):
                 if not specified.
 
         Returns:
-            ImpactModel: The model instance, treated as fitted with posterior samples
-                set, enabling method chaining.
+            The model instance, treated as fitted with posterior samples set, enabling
+                method chaining.
 
         Raises:
             ValueError: If the batch shapes in `posterior_sample` are inconsistent
@@ -598,6 +732,133 @@ class ImpactModel(BaseModel):
 
         return az.convert_to_inference_data(ds, group=group)
 
+    def predict_on_batch(
+        self,
+        X: "jax.Array",
+        *,
+        intervention: dict | None = None,
+        rng_key: "jax.Array | None" = None,
+        in_sample: bool = True,
+        **kwargs: object,
+    ) -> az.InferenceData:
+        """Predict the output based on the fitted model.
+
+        This method returns predictions for a single batch of input data and is better
+        suited for:
+            1) Models incompatible with `.predict()` due to their posterior sample
+                shapes.
+            2) Scenarios where writing results to to files (e.g., disk, cloud storage)
+                is not desired.
+            3) Smaller datasets, as this method may be slower due to limited
+                parallelism.
+
+        Args:
+            X (jax.Array): Input data with shape `(n_samples_X, n_features)`.
+            intervention (dict | None, optional): A dictionary mapping sample sites to
+                their corresponding intervention values. Interventions enable
+                counterfactual analysis by modifying the specified sample sites during
+                prediction (posterior predictive sampling). Defaults to `None`.
+            rng_key (jax.Array | None, optional): A pseudo-random number generator key.
+                Defaults to `None`, then an internal key is used and split as needed.
+            in_sample (bool, optional): Specifies the group where posterior predictive
+                samples are stored in the returned output. If `True`, samples are stored
+                in the `posterior_predictive` group, indicating they were generated
+                based on data used during model fitting. If `False`, samples are stored
+                in the `predictions` group, indicating they were generated based on
+                out-of-sample data.
+            **kwargs (object): Additional arguments passed to the model. All array-like
+                values are expected to be JAX arrays.
+
+        Returns:
+            An object containing posterior predictive samples.
+
+        Raises:
+            TypeError: If `self.param_output` is passed as an argument.
+        """
+        _check_is_fitted(self)
+
+        if rng_key is None:
+            self.rng_key, rng_key = random.split(self.rng_key)
+
+        X = jnp.asarray(check_array(X))
+
+        # Validate the provided parameters against the kernel's signature
+        args_bound = (
+            signature(self.kernel).bind(**{self.param_input: X, **kwargs}).arguments
+        )
+        if self.param_output in args_bound:
+            sub = self.param_output
+            msg = f"{sub!r} is not allowed in `.predict_on_batch()`."
+            raise TypeError(msg)
+
+        if intervention is None:
+            kernel = self.kernel
+        else:
+            rng_key, rng_subkey = random.split(rng_key)
+            kernel = seed(do(self.kernel, data=intervention), rng_seed=rng_subkey)
+
+        posterior_predictive_sample = xr.Dataset(
+            {
+                site: xr.DataArray(
+                    np.expand_dims(arr, axis=0),
+                    coords={
+                        "chain": np.arange(1),
+                        "draw": np.arange(self.num_samples),
+                        **{
+                            f"{site}_dim{i}": np.arange(arr.shape[i + 1])
+                            for i in range(arr.ndim - 1)
+                        },
+                    },
+                    dims=(
+                        # Adding the 'chain' dimension to support MCMC-style data
+                        # structures.
+                        "chain",
+                        "draw",
+                        # arr has shape (draw, dim0, dim1, ...), so arr.ndim includes
+                        # 'draw' and we subtract 1
+                        *[f"{site}_dim{i}" for i in range(arr.ndim - 1)],
+                    ),
+                    name=site,
+                )
+                for site, arr in _sample_forward(
+                    kernel,
+                    rng_key=rng_key,
+                    num_samples=self.num_samples,
+                    return_sites=self._return_sites,
+                    posterior_samples=self.posterior_sample_,
+                    model_kwargs=args_bound,
+                ).items()
+            },
+        ).assign_attrs(make_attrs(library=modules["aimz"]))
+
+        # Reorder the dimensions and add the return sites at the end
+        dims_reordered = [
+            "chain",
+            "draw",
+            *sorted(
+                str(x)
+                for x in list(posterior_predictive_sample.dims)
+                if x not in {"chain", "draw"}
+            ),
+            *self._return_sites,
+        ]
+
+        out = az.convert_to_inference_data(
+            posterior_predictive_sample[dims_reordered],
+            group="posterior_predictive" if in_sample else "predictions",
+        )
+        out.add_groups(
+            {
+                "posterior": {
+                    k: jnp.expand_dims(v, axis=0)
+                    for k, v in self.posterior_sample_.items()
+                },
+            },
+        )
+        out["posterior"].attrs.update(make_attrs(library=modules["aimz"]))
+
+        return out
+
     def predict(
         self,
         X: "jax.Array",
@@ -646,12 +907,11 @@ class ImpactModel(BaseModel):
                 directory to store the outputs. Outputs are saved in the Zarr format.
             progress (bool, optional): Whether to display a progress bar. Defaults to
                 `True`.
-            **kwargs (object): Additional arguments passed to the model, except for `X`
-                and `y`. All array-like objects in `**kwargs` are expected to be JAX
-                arrays.
+            **kwargs (object): Additional arguments passed to the model. All array-like
+                values are expected to be JAX arrays.
 
         Returns:
-            az.InferenceData: An object containing posterior predictive samples.
+            An object containing posterior predictive samples.
 
         Raises:
             TypeError: If `self.param_output` is passed as an argument.
@@ -677,6 +937,7 @@ class ImpactModel(BaseModel):
                 "`.predict_on_batch()`."
             )
             warn(msg, category=UserWarning, stacklevel=2)
+
             return self.predict_on_batch(
                 X,
                 intervention=intervention,
@@ -767,134 +1028,6 @@ class ImpactModel(BaseModel):
 
         return out
 
-    def predict_on_batch(
-        self,
-        X: "jax.Array",
-        *,
-        intervention: dict | None = None,
-        rng_key: "jax.Array | None" = None,
-        in_sample: bool = True,
-        **kwargs: object,
-    ) -> az.InferenceData:
-        """Predict the output based on the fitted model.
-
-        This method returns predictions for a single batch of input data and is better
-        suited for:
-            1) Models incompatible with `.predict()` due to their posterior sample
-                shapes.
-            2) Scenarios where writing results to to files (e.g., disk, cloud storage)
-                is not desired.
-            3) Smaller datasets, as this method may be slower due to limited
-                parallelism.
-
-        Args:
-            X (jax.Array): Input data with shape `(n_samples_X, n_features)`.
-            intervention (dict | None, optional): A dictionary mapping sample sites to
-                their corresponding intervention values. Interventions enable
-                counterfactual analysis by modifying the specified sample sites during
-                prediction (posterior predictive sampling). Defaults to `None`.
-            rng_key (jax.Array | None, optional): A pseudo-random number generator key.
-                Defaults to `None`, then an internal key is used and split as needed.
-            in_sample (bool, optional): Specifies the group where posterior predictive
-                samples are stored in the returned output. If `True`, samples are stored
-                in the `posterior_predictive` group, indicating they were generated
-                based on data used during model fitting. If `False`, samples are stored
-                in the `predictions` group, indicating they were generated based on
-                out-of-sample data.
-            **kwargs (object): Additional arguments passed to the model, except for `X`
-                and `y`. All array-like objects in `**kwargs` are expected to be JAX
-                arrays.
-
-        Returns:
-            az.InferenceData: An object containing posterior predictive samples.
-
-        Raises:
-            TypeError: If `self.param_output` is passed as an argument.
-        """
-        _check_is_fitted(self)
-
-        if rng_key is None:
-            self.rng_key, rng_key = random.split(self.rng_key)
-
-        X = jnp.asarray(check_array(X))
-
-        # Validate the provided parameters against the kernel's signature
-        args_bound = (
-            signature(self.kernel).bind(**{self.param_input: X, **kwargs}).arguments
-        )
-        if self.param_output in args_bound:
-            sub = self.param_output
-            msg = f"{sub!r} is not allowed in `.predict_on_batch()`."
-            raise TypeError(msg)
-
-        if intervention is None:
-            kernel = self.kernel
-        else:
-            rng_key, rng_subkey = random.split(rng_key)
-            kernel = seed(do(self.kernel, data=intervention), rng_seed=rng_subkey)
-
-        posterior_predictive_sample = xr.Dataset(
-            {
-                site: xr.DataArray(
-                    np.expand_dims(arr, axis=0),
-                    coords={
-                        "chain": np.arange(1),
-                        "draw": np.arange(self.num_samples),
-                        **{
-                            f"{site}_dim{i}": np.arange(arr.shape[i + 1])
-                            for i in range(arr.ndim - 1)
-                        },
-                    },
-                    dims=(
-                        # Adding the 'chain' dimension to support MCMC-style data
-                        # structures.
-                        "chain",
-                        "draw",
-                        # arr has shape (draw, dim0, dim1, ...), so arr.ndim includes
-                        # 'draw' and we subtract 1
-                        *[f"{site}_dim{i}" for i in range(arr.ndim - 1)],
-                    ),
-                    name=site,
-                )
-                for site, arr in _sample_forward(
-                    kernel,
-                    rng_key=rng_key,
-                    num_samples=self.num_samples,
-                    return_sites=self._return_sites,
-                    posterior_samples=self.posterior_sample_,
-                    model_kwargs=args_bound,
-                ).items()
-            },
-        ).assign_attrs(make_attrs(library=modules["aimz"]))
-
-        # Reorder the dimensions and add the return sites at the end
-        dims_reordered = [
-            "chain",
-            "draw",
-            *sorted(
-                str(x)
-                for x in list(posterior_predictive_sample.dims)
-                if x not in {"chain", "draw"}
-            ),
-            *self._return_sites,
-        ]
-
-        out = az.convert_to_inference_data(
-            posterior_predictive_sample[dims_reordered],
-            group="posterior_predictive" if in_sample else "predictions",
-        )
-        out.add_groups(
-            {
-                "posterior": {
-                    k: jnp.expand_dims(v, axis=0)
-                    for k, v in self.posterior_sample_.items()
-                },
-            },
-        )
-        out["posterior"].attrs.update(make_attrs(library=modules["aimz"]))
-
-        return out
-
     def estimate_effect(
         self,
         output_baseline: az.InferenceData | None = None,
@@ -919,7 +1052,7 @@ class ImpactModel(BaseModel):
                 `output_intervention` is already given.
 
         Returns:
-            az.InferenceData: The estimated impact of an intervention.
+            The estimated impact of an intervention.
 
         Raises:
             ValueError: If neither `output_baseline` nor `args_baseline` is provided, or
@@ -983,12 +1116,11 @@ class ImpactModel(BaseModel):
                 directory to store the outputs. Outputs are saved in the Zarr format.
             progress (bool, optional): Whether to display a progress bar. Defaults to
                 `True`.
-            **kwargs (object): Additional arguments passed to the model, except for `X`
-                and `y`. All array-like objects in `**kwargs` are expected to be JAX
-                arrays.
+            **kwargs (object): Additional arguments passed to the model. All array-like
+                values are expected to be JAX arrays.
 
         Returns:
-            az.InferenceData: An object containing log-likelihood values.
+            An object containing log-likelihood values.
         """
         _check_is_fitted(self)
 

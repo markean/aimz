@@ -67,8 +67,6 @@ plugins:
           docstring_options:
             ignore_init_summary: true
           members_order: source
-          filters:
-            - "!^_"
           line_length: 88
           separate_signature: true
           show_signature_annotations: true
@@ -83,6 +81,7 @@ extra:
   generator: false
 
 nav:
+  - Home: index.md
   - Getting Started:
     - Installation: installation.md
   - API Reference: 

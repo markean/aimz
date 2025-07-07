@@ -44,16 +44,20 @@ class TestKernelSignatureValidation:
         def kernel(X: "jax.Array", y: "jax.Array | None" = None) -> None:
             pass
 
-        im = ImpactModel(
-            kernel,
-            rng_key=random.key(42),
-            vi=SVI(
+        with pytest.warns(
+            UserWarning,
+            match="Legacy `uint32` PRNGKey detected; converting to a typed key array.",
+        ):
+            im = ImpactModel(
                 kernel,
-                guide=AutoNormal(kernel),
-                optim=Adam(step_size=1e-3),
-                loss=Trace_ELBO(),
-            ),
-        )
+                rng_key=random.PRNGKey(42),
+                vi=SVI(
+                    kernel,
+                    guide=AutoNormal(kernel),
+                    optim=Adam(step_size=1e-3),
+                    loss=Trace_ELBO(),
+                ),
+            )
         with pytest.raises(TypeError):
             im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)), extra=True)
 
