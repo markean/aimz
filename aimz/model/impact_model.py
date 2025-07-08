@@ -85,7 +85,7 @@ class ImpactModel(BaseModel):
         param_input: str = "X",
         param_output: str = "y",
     ) -> None:
-        """Initialize the ImpactModel.
+        """Initialize an ImpactModel instance.
 
         Args:
             kernel (Callable): A probabilistic model with Pyro primitives.

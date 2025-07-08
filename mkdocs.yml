@@ -88,6 +88,7 @@ nav:
     - Model:
       - ImpactModel: impact_model.md
     - Data:
+      - ArrayDataset: array_dataset.md
       - ArrayLoader: array_loader.md
   - Examples:
     - WIP: wip.md

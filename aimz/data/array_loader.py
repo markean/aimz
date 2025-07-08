@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
 
 class ArrayLoader(DataLoader):
-    """A custom DataLoader class that extends PyTorch's DataLoader."""
+    """Custom DataLoader class for JAX arrays based on PyTorch's DataLoader."""
 
     def __init__(
         self,
