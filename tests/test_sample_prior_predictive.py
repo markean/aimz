@@ -19,11 +19,11 @@ from typing import TYPE_CHECKING
 import pytest
 from conftest import lm
 from jax import random
+from jax.typing import ArrayLike
 
 from aimz.model import ImpactModel
 
 if TYPE_CHECKING:
-    import jax
     from numpyro.infer import SVI
 
 
@@ -33,7 +33,7 @@ class TestKernelParameterValidation:
 
     def test_invalid_parameter(
         self,
-        synthetic_data: tuple["jax.Array", "jax.Array"],
+        synthetic_data: tuple[ArrayLike, ArrayLike],
         vi: "SVI",
     ) -> None:
         """An invalid parameter raise an error."""
@@ -45,7 +45,7 @@ class TestKernelParameterValidation:
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
 def test_sample_prior_predictive_lm(
-    synthetic_data: tuple["jax.Array", "jax.Array"],
+    synthetic_data: tuple[ArrayLike, ArrayLike],
     vi: "SVI",
 ) -> None:
     """Test the `.sample_prior_predictive()` method of `ImpactModel`."""

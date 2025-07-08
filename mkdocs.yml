@@ -5,12 +5,16 @@ site_author: Eunseop Kim
 repo_name: markean/aimz
 repo_url: https://github.com/markean/aimz
 
+watch: [mkdocs.yml, README.md, CONTRIBUTING.md, CHANGELOG.md, docs]
+
 copyright: Copyright &copy; Eli Lilly and Company
 
 theme: 
   name: material
   features:
     - announce.dismiss
+    - content.code.copy
+    - content.action.view
     - header.autohide
     - navigation.tracking
     - navigation.sections
@@ -53,6 +57,7 @@ markdown_extensions:
   - admonition
   - pymdownx.details
   - pymdownx.superfences
+  - pymdownx.snippets
 
 plugins:
 - search
@@ -84,10 +89,13 @@ nav:
   - Home: index.md
   - Getting Started:
     - Installation: installation.md
+  - Examples:
+    - WIP: wip.md
   - API Reference: 
     - Model:
       - ImpactModel: impact_model.md
-    - Data:
-      - ArrayLoader: array_loader.md
-  - Examples:
-    - WIP: wip.md
+    - Utils:
+      - Data:
+        - ArrayDataset: array_dataset.md
+        - ArrayLoader: array_loader.md
+  - Changelog: changelog.md

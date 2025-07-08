@@ -1,6 +1,8 @@
 # aimz: Flexible probabilistic impact modeling at scale
-[![Python](https://img.shields.io/pypi/pyversions/aimz.svg)](https://pypi.org/project/aimz/)
 [![PyPI version](https://img.shields.io/pypi/v/aimz)](https://pypi.org/project/aimz/)
+[![Python](https://img.shields.io/pypi/pyversions/aimz.svg)](https://pypi.org/project/aimz/)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![codecov](https://codecov.io/gh/markean/aimz/graph/badge.svg?token=34OH7KQBXE)](https://codecov.io/gh/markean/aimz)
 
 
@@ -26,9 +28,9 @@ Designed to work with user-defined models with probabilistic primitives, the lib
 This example demonstrates a simple regression model following a typical ML workflow. The `ImpactModel` class provides `.fit()` for variational inference and posterior sampling, and `.predict()` for posterior predictive sampling. The optional `.cleanup()` removes posterior predictive samples saved as temporary files.
 ```python
 import jax.numpy as jnp
-import numpy as np
 import numpyro.distributions as dist
 from jax import random
+from jax.typing import ArrayLike
 from numpyro import optim, plate, sample
 from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
@@ -44,7 +46,7 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
 
 
 # NumPyro model: linear regression
-def model(X: np.ndarray, y: np.ndarray | None = None) -> None:
+def model(X: ArrayLike, y: ArrayLike | None = None) -> None:
     """Bayesian linear regression."""
     n_features = X.shape[1]
 
@@ -88,10 +90,10 @@ This example illustrates a simple causal network. The variable `Z` has a direct 
 Our objective is to estimate the causal effect of `Z` (or alternatively `X`) on `Y`, while properly accounting for the confounding influence of `C`. We assume the following generative model for the observed data:
 
 ```python
-import jax
 import jax.numpy as jnp
 import numpyro.distributions as dist
 from jax import nn, random
+from jax.typing import ArrayLike
 from numpyro import optim, plate, sample
 from numpyro.infer import SVI, Trace_ELBO, init_to_feasible
 from numpyro.infer.autoguide import AutoNormal
@@ -100,7 +102,7 @@ from aimz.model import ImpactModel
 
 
 # NumPyro model: Z and y are influenced by C and X, with Z mediating part of y
-def model(X: jax.Array, C: jax.Array, y: jax.Array | None = None) -> None:
+def model(X: ArrayLike, C: ArrayLike, y: ArrayLike | None = None) -> None:
     # Observed confounder
     c = sample("c", dist.Exponential(), obs=C)
 

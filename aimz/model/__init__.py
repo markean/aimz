@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Model object."""
+"""Model implementations."""
 
 from aimz.model.impact_model import ImpactModel
 

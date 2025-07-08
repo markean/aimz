@@ -14,13 +14,13 @@
 
 """Tests for the `.fit()` method."""
 
-from typing import TYPE_CHECKING
 
 import jax.numpy as jnp
 import numpyro.distributions as dist
 import pytest
 from conftest import lm
 from jax import random
+from jax.typing import ArrayLike
 from numpyro import deterministic, sample
 from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
@@ -31,9 +31,6 @@ from aimz._exceptions import KernelValidationError
 from aimz.model import ImpactModel
 from aimz.utils._validation import _is_fitted
 
-if TYPE_CHECKING:
-    import jax
-
 
 class TestKernelSignatureValidation:
     """Test class for validating parameter compatibility with the kernel signature."""
@@ -41,7 +38,7 @@ class TestKernelSignatureValidation:
     def test_extra_parameters(self) -> None:
         """Extra parameters not present in the kernel raise an error."""
 
-        def kernel(X: "jax.Array", y: "jax.Array | None" = None) -> None:
+        def kernel(X: ArrayLike, y: ArrayLike | None = None) -> None:
             pass
 
         with pytest.warns(
@@ -64,7 +61,7 @@ class TestKernelSignatureValidation:
     def test_missing_parameters(self) -> None:
         """Missing required parameters in the kernel raise an error."""
 
-        def kernel(X: "jax.Array", arg: object, y: "jax.Array | None" = None) -> None:
+        def kernel(X: ArrayLike, arg: object, y: ArrayLike | None = None) -> None:
             pass
 
         im = ImpactModel(
@@ -87,7 +84,7 @@ class TestKernelBodyValidation:
     def test_missing_output_site(self) -> None:
         """Missing output sample site in the kernel raises an error."""
 
-        def kernel(X: "jax.Array", y: "jax.Array | None" = None) -> None:
+        def kernel(X: ArrayLike, y: ArrayLike | None = None) -> None:
             sample("z", dist.Normal(0.0, 1.0), obs=y)
 
         im = ImpactModel(
@@ -106,7 +103,7 @@ class TestKernelBodyValidation:
     def test_sample_output_site(self) -> None:
         """Raises error if output site is not a sample site."""
 
-        def kernel(X: "jax.Array", y: "jax.Array | None" = None) -> None:
+        def kernel(X: ArrayLike, y: ArrayLike | None = None) -> None:
             deterministic("y", jnp.zeros_like(y))
 
         im = ImpactModel(
@@ -125,7 +122,7 @@ class TestKernelBodyValidation:
     def test_unobserved_output_site(self) -> None:
         """Raises error if output site is not observed."""
 
-        def kernel(X: "jax.Array", y: "jax.Array | None" = None) -> None:
+        def kernel(X: ArrayLike, y: ArrayLike | None = None) -> None:
             sample("y", dist.Normal(0.0, 1.0))
 
         im = ImpactModel(
@@ -144,7 +141,7 @@ class TestKernelBodyValidation:
     def test_parameter_site_conflict(self) -> None:
         """Raises an error if a parameter name conflicts with a site name."""
 
-        def kernel(X: "jax.Array", y: "jax.Array | None" = None) -> None:
+        def kernel(X: ArrayLike, y: ArrayLike | None = None) -> None:
             sample("X", dist.Normal(0.0, 1.0))
             sample("y", dist.Normal(0.0, 1.0), obs=y)
 
@@ -165,7 +162,7 @@ class TestKernelBodyValidation:
 def test_fit_unexpected_y_shape() -> None:
     """Calling `.fit()` with an unexpected shape of `y` raises a warning."""
 
-    def kernel(X: "jax.Array", y: "jax.Array | None" = None) -> None:
+    def kernel(X: ArrayLike, y: ArrayLike | None = None) -> None:
         sample("y", dist.Normal(0.0, 1.0), obs=y)
 
     im = ImpactModel(
@@ -183,7 +180,7 @@ def test_fit_unexpected_y_shape() -> None:
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
-def test_fit_lm(synthetic_data: tuple["jax.Array", "jax.Array"], vi: SVI) -> None:
+def test_fit_lm(synthetic_data: tuple[ArrayLike, ArrayLike], vi: SVI) -> None:
     """Test the `.fit()` method of `ImpactModel`."""
     X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), vi=vi)

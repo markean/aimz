@@ -14,11 +14,11 @@
 
 """Tests for the `.log_likelihood()` method."""
 
-from typing import TYPE_CHECKING
 
 import pytest
 from conftest import lm
 from jax import random
+from jax.typing import ArrayLike
 from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
 from numpyro.optim import Adam
@@ -26,14 +26,11 @@ from numpyro.optim import Adam
 from aimz._exceptions import NotFittedError
 from aimz.model import ImpactModel
 
-if TYPE_CHECKING:
-    import jax
-
 
 def test_model_not_fitted() -> None:
     """Calling `.log_likelihood()` on an unfitted model raises an error."""
 
-    def kernel(X: "jax.Array", y: "jax.Array | None" = None) -> None:
+    def kernel(X: ArrayLike, y: ArrayLike | None = None) -> None:
         pass
 
     im = ImpactModel(
@@ -56,7 +53,7 @@ class TestBatchSize:
     @pytest.mark.parametrize("vi", [lm], indirect=True)
     def test_default_batch_size(
         self,
-        synthetic_data: tuple["jax.Array", "jax.Array"],
+        synthetic_data: tuple[ArrayLike, ArrayLike],
         vi: SVI,
     ) -> None:
         """Warns if `batch_size` is not explicitly set."""

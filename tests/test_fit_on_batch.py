@@ -14,22 +14,19 @@
 
 """Tests for the `.fit_on_batch()` method."""
 
-from typing import TYPE_CHECKING
 
 import pytest
 from conftest import lm
 from jax import random
+from jax.typing import ArrayLike
 from numpyro.infer import SVI
 
 from aimz.model import ImpactModel
 from aimz.utils._validation import _is_fitted
 
-if TYPE_CHECKING:
-    import jax
-
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
-def test_fit_lm(synthetic_data: tuple["jax.Array", "jax.Array"], vi: SVI) -> None:
+def test_fit_lm(synthetic_data: tuple[ArrayLike, ArrayLike], vi: SVI) -> None:
     """Test the `.fit()` method of `ImpactModel`."""
     X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), vi=vi)

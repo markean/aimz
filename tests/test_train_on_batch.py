@@ -14,22 +14,18 @@
 
 """Tests for the `.train_on_batch()` method."""
 
-from typing import TYPE_CHECKING
-
 import pytest
 from conftest import lm_with_kwargs_array
 from jax import random
+from jax.typing import ArrayLike
 from numpyro.infer import SVI
 
 from aimz.model import ImpactModel
 
-if TYPE_CHECKING:
-    import jax
-
 
 @pytest.mark.parametrize("vi", [lm_with_kwargs_array], indirect=True)
 def test_train_on_batch_lm_with_kwargs_array(
-    synthetic_data: tuple["jax.Array", "jax.Array"],
+    synthetic_data: tuple[ArrayLike, ArrayLike],
     vi: SVI,
 ) -> None:
     """Test the `.train_on_batch()` method of `ImpactModel`."""

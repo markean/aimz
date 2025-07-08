@@ -16,7 +16,7 @@
 
 from typing import NamedTuple
 
-import jax
+from jax.typing import ArrayLike
 from sklearn.utils.validation import _is_arraylike
 
 
@@ -38,7 +38,7 @@ def _group_kwargs(kwargs: dict) -> tuple[NamedTuple, NamedTuple]:
     # Dynamically create NamedTuple classes
     KwargsArray = NamedTuple(
         "KwargsArray",
-        [(k, jax.Array) for k in dict_kwargs_array],
+        [(k, ArrayLike) for k in dict_kwargs_array],
     )
     KwargsExtra = NamedTuple(
         "KwargsExtra",

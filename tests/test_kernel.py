@@ -14,19 +14,16 @@
 
 """Tests for the model kernel."""
 
-from typing import TYPE_CHECKING
 
 import pytest
 from jax import random
+from jax.typing import ArrayLike
 from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
 from numpyro.optim import Adam
 
 from aimz._exceptions import KernelValidationError
 from aimz.model import ImpactModel
-
-if TYPE_CHECKING:
-    import jax
 
 
 @pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
@@ -36,7 +33,7 @@ class TestModelKernel:
     def test_kernel_with_args(self) -> None:
         """Kernel with *args raises an error."""
 
-        def kernel(X: "jax.Array", y: "jax.Array | None" = None, *args: tuple) -> None:
+        def kernel(X: ArrayLike, y: ArrayLike | None = None, *args: tuple) -> None:
             pass
 
         with pytest.raises(KernelValidationError):
@@ -55,8 +52,8 @@ class TestModelKernel:
         """Kernel with **kwargs raises an error."""
 
         def kernel(
-            X: "jax.Array",
-            y: "jax.Array | None" = None,
+            X: ArrayLike,
+            y: ArrayLike | None = None,
             **kwargs: object,
         ) -> None:
             pass
@@ -76,7 +73,7 @@ class TestModelKernel:
     def test_kernel_with_no_input(self) -> None:
         """Kernel without input raises an error."""
 
-        def kernel(x: object, y: "jax.Array | None" = None) -> None:
+        def kernel(x: object, y: ArrayLike | None = None) -> None:
             pass
 
         with pytest.raises(KernelValidationError):
@@ -94,7 +91,7 @@ class TestModelKernel:
     def test_kernel_with_no_ouput(self) -> None:
         """Kernel without output raises an error."""
 
-        def kernel(X: "jax.Array", yy: object) -> None:
+        def kernel(X: ArrayLike, yy: object) -> None:
             pass
 
         with pytest.raises(KernelValidationError):
@@ -112,7 +109,7 @@ class TestModelKernel:
     def test_kernel_with_default_input(self) -> None:
         """Kernel with a `None` default input parameter raises an error."""
 
-        def kernel(X: "jax.Array | None" = None, y: "jax.Array | None" = None) -> None:
+        def kernel(X: ArrayLike | None = None, y: ArrayLike | None = None) -> None:
             pass
 
         with pytest.raises(KernelValidationError):
@@ -130,7 +127,7 @@ class TestModelKernel:
     def test_kernel_with_non_default_output(self) -> None:
         """Kernel with a non-`None` default output parameter raises an error."""
 
-        def kernel(X: "jax.Array", y: "jax.Array") -> None:
+        def kernel(X: ArrayLike, y: ArrayLike) -> None:
             pass
 
         with pytest.raises(KernelValidationError):

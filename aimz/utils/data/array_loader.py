@@ -22,20 +22,21 @@ devices.
 from typing import TYPE_CHECKING
 
 import jax.numpy as jnp
-from jax import device_put
-from jax_dataloader import ArrayDataset
+from jax import Array, device_put
+from jax.typing import ArrayLike
 from torch.utils.data import DataLoader
+
+from aimz.utils.data import ArrayDataset
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    import jax
     from jax.sharding import NamedSharding
     from torch.utils.data import Sampler
 
 
 class ArrayLoader(DataLoader):
-    """A custom DataLoader class that extends PyTorch's DataLoader."""
+    """Custom DataLoader class for JAX arrays based on PyTorch's DataLoader."""
 
     def __init__(
         self,
@@ -73,16 +74,16 @@ class ArrayLoader(DataLoader):
         return 0 if remainder == 0 else num_devices - remainder
 
     @staticmethod
-    def pad_array(x: "jax.Array", n_pad: int, axis: int) -> "jax.Array":
+    def pad_array(x: ArrayLike, n_pad: int, axis: int) -> Array:
         """Pad an array to ensure compatibility with sharding.
 
         Args:
-            x (jax.Array): The input array to be padded.
+            x (ArrayLike): The input array to be padded.
             n_pad (int): The number of padding elements to add.
             axis (int): The axis along which to apply the padding.
 
         Returns:
-            jax.Array: The padded array with padding applied along the specified axis.
+            Array: The padded array with padding applied along the specified axis.
 
         Raises:
             ValueError: If padding is requested along an unsupported axis for a 1D
@@ -124,9 +125,8 @@ class ArrayLoader(DataLoader):
             tuple: A tuple containing:
                 - n_pad (int): The number of padding rows/elements added (0 if no
                     padding was required).
-                - x_batch (jax.Array): The input batch with padding applied if
-                    necessary.
-                - kwargs_batch (list[jax.Array]): A list of keyword arguments with
+                - x_batch (Array): The input batch with padding applied if necessary.
+                - kwargs_batch (list[Array]): A list of keyword arguments with
                     padding applied if necessary.
         """
         x_batch, *kwargs_batch = map(jnp.asarray, zip(*batch, strict=True))
@@ -174,11 +174,10 @@ class ArrayLoader(DataLoader):
             tuple: A tuple containing:
                 - n_pad (int): The number of padding rows/elements added (0 if no
                     padding was required).
-                - x_batch (jax.Array): The input batch with padding applied if
-                    necessary.
-                - y_batch (jax.Array): The target batch with padding applied.
-                - kwargs_batch (list[jax.Array]): A list of keyword arguments with
-                    padding applied if necessary.
+                - x_batch (Array): The input batch with padding applied if necessary.
+                - y_batch (Array): The target batch with padding applied.
+                - kwargs_batch (list[Array]): A list of keyword arguments with padding
+                    applied if necessary.
         """
         x_batch, y_batch, *kwargs_batch = map(jnp.asarray, zip(*batch, strict=True))
 

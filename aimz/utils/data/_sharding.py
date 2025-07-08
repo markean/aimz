@@ -21,9 +21,10 @@ to distribute computations across devices. Tested on CPU and GPU.
 from functools import partial
 from typing import TYPE_CHECKING
 
-from jax import jit
+from jax import Array, jit
 from jax.experimental.shard_map import shard_map
 from jax.sharding import PartitionSpec
+from jax.typing import ArrayLike
 from numpyro.infer import log_likelihood as log_lik
 
 from aimz.sampling._forward import _sample_forward
@@ -31,7 +32,6 @@ from aimz.sampling._forward import _sample_forward
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    import jax
     from jax.sharding import Mesh
 
 
@@ -51,7 +51,7 @@ def _create_sharded_sampler(
 
     Returns:
         Callable: A sharded function that takes the following arguments:
-            - rng_key (jax.Array): A pseudo-random number generator key.
+            - rng_key (Array): A pseudo-random number generator key.
             - kernel (Callable): A probabilistic model with Pyro primitives.
             - posterior_samples (dict): A dictionary of posterior samples.
             - batch_shape (tuple[int]): The shape of the batch dimension, specifically
@@ -59,7 +59,7 @@ def _create_sharded_sampler(
             - param_input (str): The name of the parameter in the `kernel` for the
                 input data.
             - kwargs_key (tuple[str]): A tuple of keyword argument names.
-            - X (jax.Array): Input data.
+            - X (Array): Input data.
             - *args (tuple): Additional arguments constructed from the original keyword
                 arguments (both sharded and non-sharded).
 
@@ -68,14 +68,14 @@ def _create_sharded_sampler(
     def f(
         kernel: "Callable",
         num_samples: int,
-        rng_key: "jax.Array",
+        rng_key: ArrayLike,
         return_sites: tuple[str],
-        posterior_samples: dict[str, "jax.Array"],
+        posterior_samples: dict[str, ArrayLike],
         param_input: str,
         kwargs_key: tuple[str],
-        X: "jax.Array",
+        X: ArrayLike,
         *args: tuple,
-    ) -> dict[str, "jax.Array"]:
+    ) -> dict[str, ArrayLike]:
         return _sample_forward(
             model=kernel,
             num_samples=num_samples,
@@ -159,8 +159,8 @@ def _create_sharded_log_likelihood(
             - param_output (str): The name of the parameter in the `kernel` for the
                 output data.
             - kwargs_key (tuple[str]): A tuple of keyword argument names.
-            - X (jax.Array): Input data.
-            - y (jax.Array): Output data.
+            - X (Array): Input data.
+            - y (Array): Output data.
             - *args (tuple): Additional arguments constructed from the original keyword
                 arguments (both sharded and non-sharded).
 
@@ -172,10 +172,10 @@ def _create_sharded_log_likelihood(
         param_input: str,
         param_output: str,
         kwargs_key: tuple[str],
-        X: "jax.Array",
-        y: "jax.Array",
+        X: ArrayLike,
+        y: ArrayLike,
         *args: tuple,
-    ) -> "jax.Array":
+    ) -> Array:
         return log_lik(
             kernel,
             posterior_samples=posterior_samples,

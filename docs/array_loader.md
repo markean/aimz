@@ -1,1 +1,1 @@
-::: aimz.data.array_loader.ArrayLoader
+::: aimz.utils.data.array_loader.ArrayLoader

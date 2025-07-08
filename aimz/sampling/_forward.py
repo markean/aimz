@@ -16,24 +16,23 @@
 
 from typing import TYPE_CHECKING, Any
 
-from jax import lax, random
+from jax import Array, lax, random
+from jax.typing import ArrayLike
 from numpyro.handlers import mask, seed, substitute, trace
 
 if TYPE_CHECKING:
     from collections import OrderedDict
     from collections.abc import Callable
 
-    import jax
-
 
 def _sample_forward(
     model: "Callable",
     num_samples: int,
-    rng_key: "jax.Array",
+    rng_key: ArrayLike,
     return_sites: tuple[str] | None,
-    posterior_samples: dict[str, "jax.Array"] | None,
-    model_kwargs: dict[str, "jax.Array"] | None,
-) -> dict[str, "jax.Array"]:
+    posterior_samples: dict[str, ArrayLike] | None,
+    model_kwargs: dict[str, ArrayLike] | None,
+) -> dict[str, Array]:
     """Generates forward samples from a model conditioned on parameter draws.
 
     This function repeatedly traces the model with different random keys and sets of
@@ -42,24 +41,24 @@ def _sample_forward(
     Args:
         model (Callable): A probabilistic model with Pyro primitives.
         num_samples (int): The number of samples to draw.
-        rng_key (jax.Array): A pseudo-random number generator key.
+        rng_key (ArrayLike): A pseudo-random number generator key.
         return_sites (tuple[str] | None): Names of variables (sites) to return.
-        posterior_samples (dict[str, jax.Array]| None): Dictionary of parameter samples
+        posterior_samples (dict[str, ArrayLike]| None): Dictionary of parameter samples
             where each array has shape (num_samples, ...).
-        model_kwargs (dict[str, jax.Array] | None): Additional arguments passed to the
+        model_kwargs (dict[str, ArrayLike] | None): Additional arguments passed to the
             model.
 
     Returns:
-        dict[str, jax.Array]: A dictionary mapping each return site to an array of
+        dict[str, Array]: A dictionary mapping each return site to an array of
             traced values with shape (num_samples, ...).
     """
 
     def _trace_one_sample(
-        sample_input: tuple["jax.Array", dict[str, "jax.Array"]],
-    ) -> dict[str, "jax.Array"]:
+        sample_input: tuple[ArrayLike, dict[str, ArrayLike]],
+    ) -> dict[str, Array]:
         rng_key, posterior_sample = sample_input
 
-        def _exclude_deterministic(msg: "OrderedDict[str, Any]") -> "jax.Array | None":
+        def _exclude_deterministic(msg: "OrderedDict[str, Any]") -> Array| None:
             return (
                 posterior_sample.get(msg["name"])
                 if msg["type"] != "deterministic"

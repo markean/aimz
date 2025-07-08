@@ -21,17 +21,17 @@ import dill
 import pytest
 from conftest import lm
 from jax import random
+from jax.typing import ArrayLike
 
 from aimz.model import ImpactModel
 
 if TYPE_CHECKING:
-    import jax
     from numpyro.infer import SVI
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
 def test_save_load(
-    synthetic_data: tuple["jax.Array", "jax.Array"],
+    synthetic_data: tuple[ArrayLike, ArrayLike],
     vi: "SVI",
     tmp_path: "Path",
 ) -> None:

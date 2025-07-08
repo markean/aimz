@@ -14,6 +14,7 @@
 
 """Utilities for data handling and processing."""
 
-from aimz.data.array_loader import ArrayLoader
+from aimz.utils.data.array_dataset import ArrayDataset
+from aimz.utils.data.array_loader import ArrayLoader
 
-__all__ = ["ArrayLoader"]
+__all__ = ["ArrayDataset", "ArrayLoader"]
