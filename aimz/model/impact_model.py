@@ -530,7 +530,7 @@ class ImpactModel(BaseModel):
         if rng_key is None:
             self.rng_key, rng_key = random.split(self.rng_key)
 
-        X, y = check_X_y(X, y, y_numeric=True)
+        X, y = map(jnp.asarray, check_X_y(X, y, y_numeric=True))
 
         # Validate the provided parameters against the kernel's signature
         args_bound = (
