@@ -14,30 +14,26 @@
 
 """pytest configuration."""
 
-from typing import TYPE_CHECKING
 
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
 import pytest
-from jax import random
+from jax import Array, random
+from jax.typing import ArrayLike
 from numpyro import sample
 from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
-
-if TYPE_CHECKING:
-    import jax
 
 numpyro.set_host_device_count(3)
 
 
 @pytest.fixture(scope="module")
-def synthetic_data() -> tuple["jax.Array", "jax.Array"]:
+def synthetic_data() -> tuple[Array, Array]:
     """Fixture for generating synthetic data.
 
     Returns:
-        tuple[jax.Array, jax.Array]: A tuple containing the input data and
-            output data.
+        tuple[Array, Array]: A tuple containing the input data and output data.
     """
     rng_key = random.key(42)
     key_w, key_b, key_x, key_e = random.split(rng_key, 4)
@@ -73,7 +69,7 @@ def vi(request: pytest.FixtureRequest) -> SVI:
     )
 
 
-def lm(X: "jax.Array", y: "jax.Array | None" = None) -> None:
+def lm(X: ArrayLike, y: ArrayLike | None = None) -> None:
     """Linear regression model."""
     n_features = X.shape[1]
 
@@ -88,9 +84,9 @@ def lm(X: "jax.Array", y: "jax.Array | None" = None) -> None:
 
 
 def lm_with_kwargs_array(
-    X: "jax.Array",
-    c: "jax.Array",
-    y: "jax.Array | None" = None,
+    X: ArrayLike,
+    c: ArrayLike,
+    y: ArrayLike | None = None,
 ) -> None:
     """Linear regression model with an extra array argument."""
     n_features = X.shape[1]
@@ -105,7 +101,7 @@ def lm_with_kwargs_array(
     sample("y", dist.Normal(mu, sigma), obs=y)
 
 
-def latent_variable_model(X: "jax.Array", y: "jax.Array | None" = None) -> None:
+def latent_variable_model(X: ArrayLike, y: ArrayLike | None = None) -> None:
     """Latent variable model."""
     z = numpyro.sample(
         "z",

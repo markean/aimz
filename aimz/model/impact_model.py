@@ -31,6 +31,7 @@ import numpy as np
 import xarray as xr
 from arviz.data.base import make_attrs
 from jax import (
+    Array,
     default_backend,
     device_put,
     jit,
@@ -39,7 +40,7 @@ from jax import (
     random,
 )
 from jax.sharding import Mesh, NamedSharding, PartitionSpec
-from jax_dataloader import ArrayDataset
+from jax.typing import ArrayLike
 from numpyro.handlers import do, seed, substitute, trace
 from numpyro.infer.svi import SVIRunResult, SVIState
 from sklearn.utils.validation import check_array, check_X_y
@@ -47,10 +48,6 @@ from tqdm.auto import tqdm
 from xarray import open_zarr
 from zarr import open_group
 
-from aimz.data import (
-    ArrayLoader,
-)
-from aimz.data._sharding import _create_sharded_log_likelihood, _create_sharded_sampler
 from aimz.model._core import BaseModel
 from aimz.sampling._forward import _sample_forward
 from aimz.utils._kwargs import _group_kwargs
@@ -65,9 +62,13 @@ from aimz.utils._validation import (
     _validate_group,
     _validate_kernel_body,
 )
+from aimz.utils.data import ArrayDataset, ArrayLoader
+from aimz.utils.data._sharding import (
+    _create_sharded_log_likelihood,
+    _create_sharded_sampler,
+)
 
 if TYPE_CHECKING:
-    import jax
     from numpyro.infer import SVI
 
 logger = logging.getLogger(__name__)
@@ -79,7 +80,7 @@ class ImpactModel(BaseModel):
     def __init__(
         self,
         kernel: Callable,
-        rng_key: "jax.Array",
+        rng_key: ArrayLike,
         vi: "SVI",
         *,
         param_input: str = "X",
@@ -89,7 +90,7 @@ class ImpactModel(BaseModel):
 
         Args:
             kernel (Callable): A probabilistic model with Pyro primitives.
-            rng_key (jax.Array): A pseudo-random number generator key.
+            rng_key (ArrayLike): A pseudo-random number generator key.
             vi (SVI): A variational inference object supported by NumPyro, such as an
                 instance of `numpyro.infer.svi.SVI` or any other object that implements
                 variational inference.
@@ -214,7 +215,7 @@ class ImpactModel(BaseModel):
                 It must be a NamedTuple or similar object with the following fields:
                 - params (dict): Learned parameters from inference.
                 - state (SVIState): Internal SVI state object.
-                - losses (jax.Array): Loss values recorded during optimization.
+                - losses (ArrayLike): Loss values recorded during optimization.
         """
         if np.any(np.isnan(vi_result.losses)):
             msg = "Loss contains NaN or Inf, indicating numerical instability."
@@ -226,20 +227,20 @@ class ImpactModel(BaseModel):
 
     def sample_prior_predictive(
         self,
-        X: "jax.Array",
+        X: ArrayLike,
         *,
         num_samples: int = 1000,
-        rng_key: "jax.Array | None" = None,
+        rng_key: ArrayLike| None = None,
         return_sites: tuple[str] | None = None,
         **kwargs: object,
-    ) -> dict["str", "jax.Array"]:
+    ) -> dict[str, Array]:
         """Draw samples from the prior predictive distribution.
 
         Args:
-            X (jax.Array): Input data with shape `(n_samples_X, n_features)`.
+            X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
             num_samples (int, optional): The number of samples to draw. Defaults to
                 `1000`.
-            rng_key (jax.Array | None, optional): A pseudo-random number generator key.
+            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
                 Defaults to `None`, then an internal key is used and split as needed.
             return_sites (tuple[str] | None, optional): Names of variables (sites) to
                 return. If `None`, samples all latent, observed, and deterministic
@@ -277,15 +278,15 @@ class ImpactModel(BaseModel):
     def sample(
         self,
         num_samples: int = 1000,
-        rng_key: "jax.Array | None" = None,
+        rng_key: ArrayLike | None = None,
         return_sites: tuple[str] | None = None,
-    ) -> dict["str", "jax.Array"]:
+    ) -> dict[str, Array]:
         """Draw posterior samples from a fitted model.
 
         Args:
             num_samples (int | None, optional): The number of posterior samples to draw.
                 Defaults to `1000`.
-            rng_key (jax.Array | None, optional): A pseudo-random number generator key.
+            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
                 Defaults to `None`, then an internal key is used and split as needed.
             return_sites (tuple[str] | None, optional): Names of variables (sites) to
                 return. If `None`, samples all latent sites. Defaults to `None`.
@@ -310,18 +311,18 @@ class ImpactModel(BaseModel):
 
     def sample_posterior_predictive(
         self,
-        X: "jax.Array",
+        X: ArrayLike,
         *,
-        rng_key: "jax.Array | None" = None,
+        rng_key: ArrayLike | None = None,
         return_sites: tuple[str] | None = None,
         intervention: dict | None = None,
         **kwargs: object,
-    ) -> dict["str", "jax.Array"]:
+    ) -> dict[str, Array]:
         """Draw samples from the posterior predictive distribution.
 
         Args:
-            X (jax.Array): Input data with shape `(n_samples_X, n_features)`.
-            rng_key (jax.Array | None, optional): A pseudo-random number generator key.
+            X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
+            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
                 Defaults to `None`, then an internal key is used and split as needed.
             return_sites (tuple[str] | None, optional): Names of variables (sites) to
                 return. If `None`, samples all latent, observed, and deterministic
@@ -372,21 +373,21 @@ class ImpactModel(BaseModel):
 
     def train_on_batch(
         self,
-        X: "jax.Array",
-        y: "jax.Array",
+        X: ArrayLike,
+        y: ArrayLike,
         **kwargs: object,
-    ) -> tuple[SVIState, "jax.Array"]:
+    ) -> tuple[SVIState, Array]:
         """Run a single VI step on the given batch of data.
 
         Args:
-            X (jax.Array): Input data with shape `(n_samples_X, n_features)`.
-            y (jax.Array): Output data with shape `(n_samples_Y,)`.
+            X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
+            y (ArrayLike): Output data with shape `(n_samples_Y,)`.
             **kwargs (object): Additional arguments passed to the model. All array-like
                 values are expected to be JAX arrays.
 
         Returns:
             (SVIState): Updated SVI state after the training step.
-            (jax.Array): Loss value as a scalar array.
+            (ArrayLike): Loss value as a scalar array.
 
         Note:
             This method updates the internal SVI state on every call, so it is not
@@ -407,12 +408,12 @@ class ImpactModel(BaseModel):
 
     def fit_on_batch(
         self,
-        X: "jax.Array",
-        y: "jax.Array",
+        X: ArrayLike,
+        y: ArrayLike,
         *,
         num_steps: int = 10000,
         num_samples: int = 1000,
-        rng_key: "jax.Array | None" = None,
+        rng_key: ArrayLike | None = None,
         progress: bool = True,
         **kwargs: object,
     ) -> Self:
@@ -423,13 +424,13 @@ class ImpactModel(BaseModel):
         draws samples from it.
 
         Args:
-            X (jax.Array): Input data with shape `(n_samples_X, n_features)`.
-            y (jax.Array): Output data with shape `(n_samples_Y,)`.
+            X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
+            y (ArrayLike): Output data with shape `(n_samples_Y,)`.
             num_steps (int, optional): Number of steps for variational inference
                 optimization. Defaults to `10000`.
             num_samples (int | None, optional): The number of posterior samples to draw.
                 Defaults to `1000`.
-            rng_key (jax.Array | None, optional): A pseudo-random number generator key.
+            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
                 Defaults to `None`, then an internal key is used and split as needed.
             progress (bool, optional): Whether to display a progress bar. Defaults to
                 `True`.
@@ -495,12 +496,12 @@ class ImpactModel(BaseModel):
 
     def fit(
         self,
-        X: "jax.Array",
-        y: "jax.Array",
+        X: ArrayLike,
+        y: ArrayLike,
         *,
         num_steps: int = 10000,
         num_samples: int = 1000,
-        rng_key: "jax.Array | None" = None,
+        rng_key: ArrayLike | None = None,
         progress: bool = True,
         **kwargs: object,
     ) -> Self:
@@ -510,13 +511,13 @@ class ImpactModel(BaseModel):
         and then draws samples from it.
 
         Args:
-            X (jax.Array): Input data with shape `(n_samples_X, n_features)`.
-            y (jax.Array): Output data with shape `(n_samples_Y,)`.
+            X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
+            y (ArrayLike): Output data with shape `(n_samples_Y,)`.
             num_steps (int, optional): Number of steps for variational inference
                 optimization. Defaults to `10000`.
             num_samples (int | None, optional): The number of posterior samples to draw.
                 Defaults to `1000`.
-            rng_key (jax.Array | None, optional): A pseudo-random number generator key.
+            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
                 Defaults to `None`, then an internal key is used and split as needed.
             progress (bool, optional): Whether to display a progress bar. Defaults to
                 `True`.
@@ -585,7 +586,7 @@ class ImpactModel(BaseModel):
 
     def set_posterior_sample(
         self,
-        posterior_sample: dict[str, "jax.Array"],
+        posterior_sample: dict[str, ArrayLike],
         return_sites: tuple[str] | None = None,
     ) -> Self:
         """Set posterior samples for the model.
@@ -603,7 +604,7 @@ class ImpactModel(BaseModel):
         (https://num.pyro.ai/en/stable/utilities.html#predictive).
 
         Args:
-            posterior_sample (dict[str, jax.Array]): Posterior samples to set for the
+            posterior_sample (dict[str, ArrayLike]): Posterior samples to set for the
                 model.
             return_sites (tuple[str] | None, optional): Names of variable (sites) to
                 return in `.predict()`. Defaults to `None` and is set to `param_output`
@@ -640,8 +641,8 @@ class ImpactModel(BaseModel):
         *,
         fn_sample_posterior_predictive: Callable,
         kernel: Callable,
-        X: "jax.Array",
-        rng_key: "jax.Array",
+        X: ArrayLike,
+        rng_key: ArrayLike,
         group: str,
         batch_size: int,
         output_dir: Path,
@@ -734,10 +735,10 @@ class ImpactModel(BaseModel):
 
     def predict_on_batch(
         self,
-        X: "jax.Array",
+        X: ArrayLike,
         *,
         intervention: dict | None = None,
-        rng_key: "jax.Array | None" = None,
+        rng_key: ArrayLike | None = None,
         in_sample: bool = True,
         **kwargs: object,
     ) -> az.InferenceData:
@@ -753,12 +754,12 @@ class ImpactModel(BaseModel):
                 parallelism.
 
         Args:
-            X (jax.Array): Input data with shape `(n_samples_X, n_features)`.
+            X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
             intervention (dict | None, optional): A dictionary mapping sample sites to
                 their corresponding intervention values. Interventions enable
                 counterfactual analysis by modifying the specified sample sites during
                 prediction (posterior predictive sampling). Defaults to `None`.
-            rng_key (jax.Array | None, optional): A pseudo-random number generator key.
+            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
                 Defaults to `None`, then an internal key is used and split as needed.
             in_sample (bool, optional): Specifies the group where posterior predictive
                 samples are stored in the returned output. If `True`, samples are stored
@@ -861,10 +862,10 @@ class ImpactModel(BaseModel):
 
     def predict(
         self,
-        X: "jax.Array",
+        X: ArrayLike,
         *,
         intervention: dict | None = None,
-        rng_key: "jax.Array | None" = None,
+        rng_key: ArrayLike | None = None,
         in_sample: bool = True,
         batch_size: int | None = None,
         output_dir: str | Path | None = None,
@@ -880,12 +881,12 @@ class ImpactModel(BaseModel):
         and executed concurrently.
 
         Args:
-            X (jax.Array): Input data with shape `(n_samples_X, n_features)`.
+            X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
             intervention (dict | None, optional): A dictionary mapping sample sites to
                 their corresponding intervention values. Interventions enable
                 counterfactual analysis by modifying the specified sample sites during
                 prediction (posterior predictive sampling). Defaults to `None`.
-            rng_key (jax.Array | None, optional): A pseudo-random number generator key.
+            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
                 Defaults to `None`, then an internal key is used and split as needed.
             in_sample (bool, optional): Specifies the group where posterior predictive
                 samples are stored in the returned output. If `True`, samples are stored
@@ -1087,8 +1088,8 @@ class ImpactModel(BaseModel):
 
     def log_likelihood(
         self,
-        X: "jax.Array",
-        y: "jax.Array",
+        X: ArrayLike,
+        y: ArrayLike,
         *,
         batch_size: int | None = None,
         output_dir: str | Path | None = None,
@@ -1101,8 +1102,8 @@ class ImpactModel(BaseModel):
         decoupled and executed concurrently.
 
         Args:
-            X (jax.Array): Input data with shape `(n_samples_X, n_features)`.
-            y (jax.Array): Output data with shape `(n_samples_Y,)`.
+            X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
+            y (ArrayLike): Output data with shape `(n_samples_Y,)`.
             batch_size (int | None, optional): The size of batches for data loading
                 during posterior predictive sampling. Defaults to `None`, which sets the
                 batch size to the total number of samples (`n_samples_X`). This value

@@ -17,12 +17,13 @@
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Self
 
+from jax.typing import ArrayLike
+
 from aimz.utils._validation import _validate_kernel_signature
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    import jax
 
 
 class BaseModel(ABC):
@@ -55,15 +56,15 @@ class BaseModel(ABC):
     @abstractmethod
     def fit(
         self,
-        X: "jax.Array",
-        y: "jax.Array",
+        X: ArrayLike,
+        y: ArrayLike,
         **kwargs: object,
     ) -> Self:
         """Fit the model to the input data `X` and output data `y`.
 
         Args:
-            X (jax.Array): Input data with shape `(n_samples_X, n_features)`.
-            y (jax.Array): Output data with shape `(n_samples_Y,)`.
+            X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
+            y (ArrayLike): Output data with shape `(n_samples_Y,)`.
             **kwargs (object): Additional arguments passed to the model, except for `X`
                 and `y`. All array-like objects in `**kwargs` are expected to be JAX
                 arrays.
@@ -74,11 +75,11 @@ class BaseModel(ABC):
         return self
 
     @abstractmethod
-    def predict(self, X: "jax.Array", **kwargs: object) -> None:
+    def predict(self, X: ArrayLike, **kwargs: object) -> None:
         """Predict the output based on the fitted model.
 
         Args:
-            X (jax.Array): Input data with shape `(n_samples_X, n_features)`.
+            X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
             **kwargs (object): Additional arguments passed to the model, except for `X`
                 and `y`. All array-like objects in `**kwargs` are expected to be JAX
                 arrays.

@@ -13,18 +13,20 @@
 # limitations under the License.
 
 """Module for custom dataset for JAX arrays."""
+
 from typing import TYPE_CHECKING
 
+import numpy as np
 from jax import tree
 from torch.utils.data import Dataset
 
 if TYPE_CHECKING:
-    import jax
+    from jax.typing import ArrayLike
 
 class ArrayDataset(Dataset):
     """Custom Dataset class for JAX arrays based on PyTorch's Dataset."""
 
-    def __init__(self, *arrays: "jax.Array") -> None:
+    def __init__(self, *arrays: "ArrayLike") -> None:
         """Initialize an ArrayDataset instance.
 
         Args:
@@ -41,8 +43,10 @@ class ArrayDataset(Dataset):
         if any(len(arr) != length for arr in arrays):
             msg = "All arrays must have the same length."
             raise ValueError(msg)
-
-        self.arrays = tuple(arrays)
+        # Convert inputs to NumPy arrays for efficient CPU-based batching and slicing.
+        # Keeping data as NumPy arrays until batch collation speeds up data loading
+        # and reduces overhead from host-to-device data transfers.
+        self.arrays = tuple(np.asarray(arr) for arr in arrays)
 
     def __len__(self) -> int:
         """Get the number of samples in the dataset.

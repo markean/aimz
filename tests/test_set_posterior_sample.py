@@ -21,6 +21,7 @@ import pytest
 from conftest import lm
 from jax import numpy as jnp
 from jax import random
+from jax.typing import ArrayLike
 from numpyro.infer import Predictive
 from numpyro.infer.svi import SVIRunResult
 
@@ -28,13 +29,12 @@ from aimz.model import ImpactModel
 from aimz.utils._validation import _is_fitted
 
 if TYPE_CHECKING:
-    import jax
     from numpyro.infer import SVI
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
 def test_set_posterior_sample(
-    synthetic_data: tuple["jax.Array", "jax.Array"],
+    synthetic_data: tuple[ArrayLike, ArrayLike],
     vi: "SVI",
 ) -> None:
     """Test the `.set_posterior_sample()` method of `ImpactModel`."""
