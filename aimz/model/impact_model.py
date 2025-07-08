@@ -530,7 +530,7 @@ class ImpactModel(BaseModel):
         if rng_key is None:
             self.rng_key, rng_key = random.split(self.rng_key)
 
-        X, y = map(jnp.asarray, check_X_y(X, y, y_numeric=True))
+        X, y = check_X_y(X, y, y_numeric=True)
 
         # Validate the provided parameters against the kernel's signature
         args_bound = (
@@ -950,7 +950,7 @@ class ImpactModel(BaseModel):
         if rng_key is None:
             self.rng_key, rng_key = random.split(self.rng_key)
 
-        X = jnp.asarray(check_array(X))
+        X = check_array(X)
 
         # Validate the provided parameters against the kernel's signature
         args_bound = (
@@ -1128,7 +1128,7 @@ class ImpactModel(BaseModel):
         # Validate the provided parameters against the kernel's signature
         signature(self.kernel).bind(**{self.param_input: X, **kwargs})
 
-        X, y = map(jnp.asarray, check_X_y(X, y, y_numeric=True))
+        X, y = check_X_y(X, y, y_numeric=True)
 
         kwargs_array, kwargs_extra = _group_kwargs(kwargs)
         if self._fn_log_likelihood is None:

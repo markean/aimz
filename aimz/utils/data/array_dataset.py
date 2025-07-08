@@ -14,19 +14,17 @@
 
 """Module for custom dataset for JAX arrays."""
 
-from typing import TYPE_CHECKING
 
 import numpy as np
 from jax import tree
+from jax.typing import ArrayLike
 from torch.utils.data import Dataset
 
-if TYPE_CHECKING:
-    from jax.typing import ArrayLike
 
 class ArrayDataset(Dataset):
     """Custom Dataset class for JAX arrays based on PyTorch's Dataset."""
 
-    def __init__(self, *arrays: "ArrayLike") -> None:
+    def __init__(self, *arrays: ArrayLike) -> None:
         """Initialize an ArrayDataset instance.
 
         Args:
