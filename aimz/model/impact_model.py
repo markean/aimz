@@ -33,6 +33,7 @@ from arviz.data.base import make_attrs
 from jax import (
     Array,
     default_backend,
+    device_get,
     device_put,
     jit,
     local_device_count,
@@ -499,10 +500,11 @@ class ImpactModel(BaseModel):
         X: ArrayLike,
         y: ArrayLike,
         *,
-        num_steps: int = 10000,
         num_samples: int = 1000,
         rng_key: ArrayLike | None = None,
-        progress: bool = True,
+        batch_size: int | None = None,
+        epochs: int = 1,
+        shuffle: bool = True,
         **kwargs: object,
     ) -> Self:
         """Fit the impact model to the provided data.
@@ -513,19 +515,25 @@ class ImpactModel(BaseModel):
         Args:
             X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
             y (ArrayLike): Output data with shape `(n_samples_Y,)`.
-            num_steps (int, optional): Number of steps for variational inference
-                optimization. Defaults to `10000`.
             num_samples (int | None, optional): The number of posterior samples to draw.
                 Defaults to `1000`.
             rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
                 Defaults to `None`, then an internal key is used and split as needed.
-            progress (bool, optional): Whether to display a progress bar. Defaults to
-                `True`.
+            batch_size (int | None, optional): The number of data points processed at
+                each step of variational inference. If `None` (default), the entire
+                dataset is used as a single batch in each epoch.
+            epochs (int, optional): The number of epochs for variational inference
+                optimization. Defaults to `1`.
+            shuffle (bool, optional): Whether to shuffle the data at each epoch.
+                Defaults to `True`.
             **kwargs (object): Additional arguments passed to the model. All array-like
                 values are expected to be JAX arrays.
 
         Returns:
             The fitted model instance, enabling method chaining.
+
+        Note:
+            subsampling!
         """
         if rng_key is None:
             self.rng_key, rng_key = random.split(self.rng_key)
@@ -554,15 +562,64 @@ class ImpactModel(BaseModel):
 
         self.num_samples = num_samples
 
-        logger.info("Performing variational inference optimization...")
-        rng_key, rng_subkey = random.split(rng_key)
-        self.guide = self.vi.guide
-        self.vi_result = self.vi.run(
-            rng_subkey,
-            num_steps=num_steps,
-            progress_bar=progress,
-            **args_bound,
+        kwargs_array, kwargs_extra = _group_kwargs(kwargs)
+
+        if batch_size is None:
+            batch_size = len(X)
+            msg = (
+                f"No `batch_size` specified. Using full dataset size ({batch_size}). "
+                "Specify `batch_size` to prevent memory issues."
+            )
+            warn(msg, category=UserWarning, stacklevel=2)
+        if batch_size % self._num_devices != 0:
+            msg = (
+                f"The `batch_size` ({batch_size}) is not divisible by the number of "
+                f"devices ({self._num_devices}). Use a multiple of {self._num_devices} "
+                "for optimal performance."
+            )
+            warn(msg, category=UserWarning, stacklevel=2)
+
+        dataloader = ArrayLoader(
+            ArrayDataset(X, y, *kwargs_array),
+            batch_size=batch_size or len(X),
+            shuffle=shuffle,
+            collate_fn=lambda batch: ArrayLoader.collate_with_sharding(
+                batch,
+                device=self._device,
+            ),
         )
+        sample_batch = next(iter(dataloader))
+        sample_batch_dict = {
+            self.param_input: sample_batch[1],
+            self.param_output: sample_batch[2],
+            **dict(zip(kwargs_array._fields, sample_batch[3:], strict=True)),
+        }
+
+        logger.info("Performing variational inference optimization...")
+        if self._vi_state is None:
+            rng_key, rng_subkey = random.split(rng_key)
+            self._vi_state = self.vi.init(rng_subkey, **sample_batch_dict)
+        if self._fn_vi_update is None:
+            self._fn_vi_update = jit(self.vi.update)
+        losses = []
+        for _ in range(epochs):
+            losses_epoch = []
+            for batch in dataloader:
+                batch_dict = {
+                    self.param_input: batch[1],
+                    self.param_output: batch[2],
+                    **dict(zip(kwargs_array._fields, batch[3:], strict=True)),
+                }
+                self._vi_state, loss = self._fn_vi_update(self._vi_state, **batch_dict)
+                loss_batch = float(device_get(loss))
+                losses_epoch.append(loss_batch)
+            losses.extend(losses_epoch)
+        self.vi_result = SVIRunResult(
+            params=self.vi.get_params(self._vi_state),
+            state=self._vi_state,
+            losses=jnp.asarray(losses),
+        )
+        self.guide = self.vi.guide
         if np.any(np.isnan(self.vi_result.losses)):
             msg = "Loss contains NaN or Inf, indicating numerical instability."
             warn(msg, category=RuntimeWarning, stacklevel=2)

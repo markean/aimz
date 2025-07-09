@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Custom `ArrayDataset` class for handling data in `ImpactModel`, removing the need for the `jax-dataloader` dependency (@markean, [#14](https://github.com/markean/aimz/issues/14)).
 - GitHub Pages documentation site (@markean, [#10](https://github.com/markean/aimz/issues/10)).
 - Installation instructions in the documentation site (@markean, [#10](https://github.com/markean/aimz/issues/10)).
+- `ArrayLoader` class supports `shuffle` and `drop_last` parameters for epoch training for `.fit()` (@markean, [#15](https://github.com/markean/aimz/issues/15)).
 
 ### Changed
 

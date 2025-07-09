@@ -43,19 +43,23 @@ class ArrayLoader(DataLoader):
         dataset: ArrayDataset,
         *,
         batch_size: int = 1,
+        shuffle: bool = False,
         sampler: "Sampler | None" = None,
         num_workers: int = 0,
         collate_fn: "Callable | None" = None,
         pin_memory: bool = False,
+        drop_last: bool = False,
     ) -> None:
         """Initializes an ArrayLoader instance."""
         super().__init__(
             dataset,
             batch_size=batch_size,
+            shuffle=shuffle,
             sampler=sampler,
             num_workers=num_workers,
             collate_fn=collate_fn,
             pin_memory=pin_memory,
+            drop_last=drop_last,
         )
 
     @staticmethod
