@@ -25,7 +25,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-
 class BaseModel(ABC):
     """Abstract base class for the impact model.
 

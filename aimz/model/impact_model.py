@@ -230,7 +230,7 @@ class ImpactModel(BaseModel):
         X: ArrayLike,
         *,
         num_samples: int = 1000,
-        rng_key: ArrayLike| None = None,
+        rng_key: ArrayLike | None = None,
         return_sites: tuple[str] | None = None,
         **kwargs: object,
     ) -> dict[str, Array]:

@@ -2,8 +2,8 @@
 
 !!! warning
 
-    Due to its dependence on JAX and NumPyro, GPU support is **not available on Windows**. 
-    For GPU acceleration, please use Linux or WSL2 (Windows Subsystem for Linux 2) with a compatible NVIDIA GPU and CUDA drivers. 
+    Due to its dependence on JAX and NumPyro, GPU support is **not available on Windows**.
+    For GPU acceleration, please use Linux or WSL2 (Windows Subsystem for Linux 2) with a compatible NVIDIA GPU and CUDA drivers.
 
 **aimz** is available on [PyPI](https://pypi.org/project/aimz/) for both CPU and GPU environments. Install or update using `pip`:
 
@@ -23,5 +23,3 @@ pip install -U "aimz[gpu]"
     pip install -U "jax[cuda12]"
     ```
     Refer to the [JAX installation guide](https://docs.jax.dev/en/latest/installation.html) for up-to-date compatibility and driver requirements.
-
-

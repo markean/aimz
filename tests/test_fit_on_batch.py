@@ -14,7 +14,6 @@
 
 """Tests for the `.fit_on_batch()` method."""
 
-
 import pytest
 from conftest import lm
 from jax import random

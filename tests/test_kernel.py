@@ -14,7 +14,6 @@
 
 """Tests for the model kernel."""
 
-
 import pytest
 from jax import random
 from jax.typing import ArrayLike

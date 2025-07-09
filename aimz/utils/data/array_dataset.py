@@ -14,7 +14,6 @@
 
 """Module for custom dataset for JAX arrays."""
 
-
 import numpy as np
 from jax import tree
 from jax.typing import ArrayLike

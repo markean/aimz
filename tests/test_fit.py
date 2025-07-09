@@ -14,7 +14,6 @@
 
 """Tests for the `.fit()` method."""
 
-
 import jax.numpy as jnp
 import numpyro.distributions as dist
 import pytest
