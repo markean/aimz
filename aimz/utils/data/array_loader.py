@@ -26,7 +26,7 @@ from jax import Array, device_put
 from jax.typing import ArrayLike
 from torch.utils.data import DataLoader
 
-from aimz.utils.data import ArrayDataset
+from aimz.utils.data import ArrayDataset, jax_collate
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -46,7 +46,7 @@ class ArrayLoader(DataLoader):
         shuffle: bool = False,
         sampler: "Sampler | None" = None,
         num_workers: int = 0,
-        collate_fn: "Callable | None" = None,
+        collate_fn: "Callable | None" = jax_collate,
         pin_memory: bool = False,
         drop_last: bool = False,
     ) -> None:

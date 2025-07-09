@@ -401,7 +401,11 @@ class ImpactModel(BaseModel):
             self.rng_key, rng_key = random.split(self.rng_key)
             self._vi_state = self.vi.init(rng_key, **batch)
         if self._fn_vi_update is None:
-            self._fn_vi_update = jit(self.vi.update)
+            _, kwargs_extra = _group_kwargs(kwargs)
+            self._fn_vi_update = jit(
+                self.vi.update,
+                static_argnames=tuple(kwargs_extra._fields),
+            )
 
         self._vi_state, loss = self._fn_vi_update(self._vi_state, **batch)
 
@@ -533,6 +537,8 @@ class ImpactModel(BaseModel):
             The fitted model instance, enabling method chaining.
 
         Note:
+            This method continues training from the existing SVI state if available. To
+            start training from scratch, create a new model instance.
             subsampling!
         """
         if rng_key is None:
@@ -583,36 +589,41 @@ class ImpactModel(BaseModel):
             ArrayDataset(X, y, *kwargs_array),
             batch_size=batch_size or len(X),
             shuffle=shuffle,
-            collate_fn=lambda batch: ArrayLoader.collate_with_sharding(
-                batch,
-                device=self._device,
-            ),
         )
-        sample_batch = next(iter(dataloader))
-        sample_batch_dict = {
-            self.param_input: sample_batch[1],
-            self.param_output: sample_batch[2],
-            **dict(zip(kwargs_array._fields, sample_batch[3:], strict=True)),
-        }
 
         logger.info("Performing variational inference optimization...")
         if self._vi_state is None:
+            sample_batch = next(iter(dataloader))
             rng_key, rng_subkey = random.split(rng_key)
-            self._vi_state = self.vi.init(rng_subkey, **sample_batch_dict)
+            self._vi_state = self.vi.init(
+                rng_subkey,
+                **{
+                    self.param_input: sample_batch[0],
+                    self.param_output: sample_batch[1],
+                    **dict(zip(kwargs_array._fields, sample_batch[2:], strict=True)),
+                    **kwargs_extra._asdict(),
+                },
+            )
         if self._fn_vi_update is None:
-            self._fn_vi_update = jit(self.vi.update)
+            self._fn_vi_update = jit(
+                self.vi.update,
+                static_argnames=tuple(kwargs_extra._fields),
+            )
         losses = []
         for _ in range(epochs):
             losses_epoch = []
             for batch in dataloader:
-                batch_dict = {
-                    self.param_input: batch[1],
-                    self.param_output: batch[2],
-                    **dict(zip(kwargs_array._fields, batch[3:], strict=True)),
-                }
-                self._vi_state, loss = self._fn_vi_update(self._vi_state, **batch_dict)
-                loss_batch = float(device_get(loss))
-                losses_epoch.append(loss_batch)
+                self._vi_state, loss = self._fn_vi_update(
+                    self._vi_state,
+                    **{
+                        self.param_input: batch[0],
+                        self.param_output: batch[1],
+                        **dict(zip(kwargs_array._fields, batch[2:], strict=True)),
+                        **kwargs_extra._asdict(),
+                    },
+                )
+                losses_epoch.append(device_get(loss))
+            losses_epoch = jnp.stack(losses_epoch)
             losses.extend(losses_epoch)
         self.vi_result = SVIRunResult(
             params=self.vi.get_params(self._vi_state),
@@ -709,7 +720,7 @@ class ImpactModel(BaseModel):
     ) -> az.InferenceData:
         kwargs_key = kwargs_array._fields + kwargs_extra._fields
 
-        dataloader: ArrayLoader = ArrayLoader(
+        dataloader = ArrayLoader(
             ArrayDataset(X, *kwargs_array),
             batch_size=batch_size,
             collate_fn=lambda batch: ArrayLoader.collate_without_output(
@@ -1224,7 +1235,7 @@ class ImpactModel(BaseModel):
             )
         output_subdir = _create_output_subdir(output_dir)
 
-        dataloader: ArrayLoader = ArrayLoader(
+        dataloader = ArrayLoader(
             ArrayDataset(X, y, *kwargs_array),
             batch_size=batch_size or len(X),
             collate_fn=lambda batch: ArrayLoader.collate_with_sharding(
