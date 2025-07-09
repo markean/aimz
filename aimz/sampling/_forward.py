@@ -58,7 +58,7 @@ def _sample_forward(
     ) -> dict[str, Array]:
         rng_key, posterior_sample = sample_input
 
-        def _exclude_deterministic(msg: "OrderedDict[str, Any]") -> Array| None:
+        def _exclude_deterministic(msg: "OrderedDict[str, Any]") -> Array | None:
             return (
                 posterior_sample.get(msg["name"])
                 if msg["type"] != "deterministic"

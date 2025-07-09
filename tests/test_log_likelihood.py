@@ -14,7 +14,6 @@
 
 """Tests for the `.log_likelihood()` method."""
 
-
 import pytest
 from conftest import lm
 from jax import random

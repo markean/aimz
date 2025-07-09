@@ -9,7 +9,7 @@ watch: [mkdocs.yml, README.md, CONTRIBUTING.md, CHANGELOG.md, docs]
 
 copyright: Copyright &copy; Eli Lilly and Company
 
-theme: 
+theme:
   name: material
   features:
     - announce.dismiss
@@ -33,7 +33,7 @@ theme:
         name: Switch to light mode
     # Palette toggle for light mode
     - media: "(prefers-color-scheme: light)"
-      scheme: default 
+      scheme: default
       primary: indigo
       accent: indigo
       toggle:
@@ -79,7 +79,7 @@ plugins:
 
 extra:
   social:
-    - icon: fontawesome/brands/github 
+    - icon: fontawesome/brands/github
       link: https://github.com/markean/aimz
     - icon: fontawesome/solid/paper-plane
       link: mailto:markean@pm.me
@@ -91,7 +91,7 @@ nav:
     - Installation: installation.md
   - Examples:
     - WIP: wip.md
-  - API Reference: 
+  - API Reference:
     - Model:
       - ImpactModel: impact_model.md
     - Utils:

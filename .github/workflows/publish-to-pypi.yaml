@@ -6,8 +6,8 @@ on:
       version:
         description: 'Version to publish'
         required: true
-      pypi_repo:
-        description: 'Repo to upload to (testpypi or pypi)'
+      destination:
+        description: 'Where to upload (testpypi or pypi)'
         default: 'testpypi'
         required: true
 
@@ -36,7 +36,7 @@ jobs:
 
   publish-to-pypi:
     name: Publish to PyPI
-    if: ${{ github.event.inputs.pypi_repo == 'pypi' }}
+    if: ${{ github.event.inputs.destination == 'pypi' }}
     needs: build
     runs-on: ubuntu-latest
     environment:
@@ -56,7 +56,7 @@ jobs:
 
   publish-to-testpypi:
     name: Publish to TestPyPI
-    if: ${{ github.event.inputs.pypi_repo == 'testpypi' }}
+    if: ${{ github.event.inputs.destination == 'testpypi' }}
     needs: build
     runs-on: ubuntu-latest
     environment:

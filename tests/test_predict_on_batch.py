@@ -14,7 +14,6 @@
 
 """Tests for the `.predict_on_batch()` method."""
 
-
 import numpyro.distributions as dist
 import pytest
 from conftest import lm, lm_with_kwargs_array
