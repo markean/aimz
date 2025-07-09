@@ -74,7 +74,7 @@ class BaseModel(ABC):
         return self
 
     @abstractmethod
-    def predict(self, X: ArrayLike, **kwargs: object) -> None:
+    def predict(self, X: ArrayLike, **kwargs: object) -> object:
         """Predict the output based on the fitted model.
 
         Args:
@@ -83,9 +83,3 @@ class BaseModel(ABC):
                 and `y`. All array-like objects in `**kwargs` are expected to be JAX
                 arrays.
         """
-
-    @abstractmethod
-    def estimate_effect(
-        self,
-    ) -> None:
-        """Estimate the effect of an intervention."""
