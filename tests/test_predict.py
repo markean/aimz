@@ -56,7 +56,9 @@ def test_predict_fall_back(
     """Calling `.predict()` warns and falls back on an incompatible model."""
     X, y = synthetic_data
     im = ImpactModel(latent_variable_model, rng_key=random.key(42), vi=vi)
-    im.fit(X=X, y=y, progress=False)
+    msg = r"The `batch_size` \(\d+\) is not divisible by the number of devices"
+    with pytest.warns(UserWarning, match=msg):
+        im.fit(X=X, y=y, batch_size=len(X))
     msg = "One or more posterior sample shapes are not compatible"
     with pytest.warns(UserWarning, match=msg):
         im.predict(X=X, batch_size=len(X), progress=False)
@@ -74,7 +76,7 @@ class TestKernelParameterValidation:
         """An invalid parameter raise an error."""
         X, y = synthetic_data
         im = ImpactModel(lm, rng_key=random.key(42), vi=vi)
-        im.fit(X=X, y=y, progress=False)
+        im.fit(X=X, y=y, batch_size=3)
         with pytest.raises(TypeError):
             im.predict(X=X, y=y)
 
@@ -87,7 +89,7 @@ class TestKernelParameterValidation:
         """Extra parameters not present in the kernel raise an error."""
         X, y = synthetic_data
         im = ImpactModel(lm, rng_key=random.key(42), vi=vi)
-        im.fit(X=X, y=y, progress=False)
+        im.fit(X=X, y=y, batch_size=3)
         with pytest.raises(TypeError):
             im.predict(X=X, extra=True)
 
@@ -109,7 +111,7 @@ class TestKernelParameterValidation:
             loss=Trace_ELBO(),
         )
         im = ImpactModel(kernel, rng_key=random.key(42), vi=vi)
-        im.fit(X=X, y=y, arg=arg, progress=False)
+        im.fit(X=X, y=y, arg=arg, batch_size=3)
         with pytest.raises(TypeError):
             im.predict(X=X)
 
@@ -126,7 +128,7 @@ class TestBatchSize:
         """Warns if `batch_size` is not explicitly set."""
         X, y = synthetic_data
         im = ImpactModel(lm, rng_key=random.key(42), vi=vi)
-        im.fit(X=X, y=y, progress=False)
+        im.fit(X=X, y=y, batch_size=3)
         # NOTE: An additional warning about batch size not being divisible by the number
         # of devices may also be raised.
         with pytest.warns(UserWarning, match=".*"):
@@ -141,7 +143,7 @@ def test_predict_after_cleanup(
     """Test `.predict()` recreates tempdir after `.cleanup()`."""
     X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), vi=vi)
-    im.fit(X=X, y=y, progress=False)
+    im.fit(X=X, y=y, batch_size=3)
     msg = (
         r"The `batch_size` \(\d+\) is not divisible by the number of devices \(\d+\)\."
     )

@@ -26,7 +26,8 @@ from jax import Array, device_put
 from jax.typing import ArrayLike
 from torch.utils.data import DataLoader
 
-from aimz.utils.data import ArrayDataset, jax_collate
+from aimz.utils.data.array_dataset import ArrayDataset
+from aimz.utils.data.collate import jax_collate
 
 if TYPE_CHECKING:
     from collections.abc import Callable

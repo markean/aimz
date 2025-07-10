@@ -58,7 +58,7 @@ class TestBatchSize:
         """Warns if `batch_size` is not explicitly set."""
         X, y = synthetic_data
         im = ImpactModel(lm, rng_key=random.key(42), vi=vi)
-        im.fit(X=X, y=y, progress=False)
+        im.fit(X=X, y=y, batch_size=3)
         # NOTE: An additional warning about batch size not being divisible by the number
         # of devices may also be raised.
         with pytest.warns(UserWarning, match=".*"):
