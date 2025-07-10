@@ -428,7 +428,7 @@ class ImpactModel(BaseModel):
         if rng_key is None:
             self.rng_key, rng_key = random.split(self.rng_key)
 
-        X, y = map(jnp.asarray, check_X_y(X, y, y_numeric=True))
+        X, y = map(jnp.asarray, check_X_y(X, y, force_writeable=True, y_numeric=True))
 
         # Validate the provided parameters against the kernel's signature
         args_bound = (
@@ -525,7 +525,7 @@ class ImpactModel(BaseModel):
         if rng_key is None:
             self.rng_key, rng_key = random.split(self.rng_key)
 
-        X, y = map(jnp.asarray, check_X_y(X, y, y_numeric=True))
+        X, y = check_X_y(X, y, force_writeable=True, y_numeric=True)
 
         # Validate the provided parameters against the kernel's signature
         args_bound = (
@@ -583,9 +583,12 @@ class ImpactModel(BaseModel):
             )
             for batch in pbar:
                 self._vi_state, loss = self.train_on_batch(
-                    batch[0],
-                    batch[1],
-                    **dict(zip(kwargs_array._fields, batch[2:], strict=True)),
+                    jnp.asarray(batch[0]),
+                    jnp.asarray(batch[1]),
+                    **{
+                        k: jnp.asarray(v)
+                        for k, v in zip(kwargs_array._fields, batch[2:], strict=True)
+                    },
                     **kwargs_extra._asdict(),
                 )
                 loss_batch = device_get(loss)
@@ -1163,7 +1166,7 @@ class ImpactModel(BaseModel):
         # Validate the provided parameters against the kernel's signature
         signature(self.kernel).bind(**{self.param_input: X, **kwargs})
 
-        X, y = check_X_y(X, y, y_numeric=True)
+        X, y = check_X_y(X, y, force_writeable=True, y_numeric=True)
 
         kwargs_array, kwargs_extra = _group_kwargs(kwargs)
         if self._fn_log_likelihood is None:

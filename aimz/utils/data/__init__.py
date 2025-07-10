@@ -16,6 +16,5 @@
 
 from aimz.utils.data.array_dataset import ArrayDataset
 from aimz.utils.data.array_loader import ArrayLoader
-from aimz.utils.data.collate import jax_collate
 
-__all__ = ["ArrayDataset", "ArrayLoader", "jax_collate"]
+__all__ = ["ArrayDataset", "ArrayLoader"]
