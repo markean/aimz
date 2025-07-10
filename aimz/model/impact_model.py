@@ -33,6 +33,7 @@ from arviz.data.base import make_attrs
 from jax import (
     Array,
     default_backend,
+    device_get,
     device_put,
     jit,
     local_device_count,
@@ -170,30 +171,6 @@ class ImpactModel(BaseModel):
         self._init_runtime_attrs()
 
     @property
-    def guide(self) -> Callable:
-        """Get the current variational guide function.
-
-        Returns:
-            The guide function used for variational inference.
-        """
-        return self._guide
-
-    @guide.setter
-    def guide(self, guide_fn: Callable) -> None:
-        """Set the guide function used for variational inference.
-
-        This allows manual assignment of a custom or pre-defined guide function. It is
-        primarily intended for use with `.sample()` without calling `.fit()`. Note that
-        calling `.fit()` will overwrite any existing guide.
-
-        Args:
-            guide_fn (Callable): A guide function, typically created using NumPyro's
-                `AutoGuide` classes or a user-defined guide following the NumPyro
-                convention.
-        """
-        self._guide = guide_fn
-
-    @property
     def vi_result(self) -> SVIRunResult:
         """Get the current variational inference result.
 
@@ -301,7 +278,7 @@ class ImpactModel(BaseModel):
             self.rng_key, rng_key = random.split(self.rng_key)
 
         return _sample_forward(
-            substitute(self.guide, data=self.vi_result.params),
+            substitute(self.vi.guide, data=self.vi_result.params),
             rng_key=rng_key,
             num_samples=num_samples,
             return_sites=return_sites,
@@ -400,7 +377,11 @@ class ImpactModel(BaseModel):
             self.rng_key, rng_key = random.split(self.rng_key)
             self._vi_state = self.vi.init(rng_key, **batch)
         if self._fn_vi_update is None:
-            self._fn_vi_update = jit(self.vi.update)
+            _, kwargs_extra = _group_kwargs(kwargs)
+            self._fn_vi_update = jit(
+                self.vi.update,
+                static_argnames=tuple(kwargs_extra._fields),
+            )
 
         self._vi_state, loss = self._fn_vi_update(self._vi_state, **batch)
 
@@ -473,7 +454,6 @@ class ImpactModel(BaseModel):
 
         logger.info("Performing variational inference optimization...")
         rng_key, rng_subkey = random.split(rng_key)
-        self.guide = self.vi.guide
         self.vi_result = self.vi.run(
             rng_subkey,
             num_steps=num_steps,
@@ -499,33 +479,48 @@ class ImpactModel(BaseModel):
         X: ArrayLike,
         y: ArrayLike,
         *,
-        num_steps: int = 10000,
         num_samples: int = 1000,
         rng_key: ArrayLike | None = None,
         progress: bool = True,
+        batch_size: int | None = None,
+        epochs: int = 1,
+        shuffle: bool = True,
         **kwargs: object,
     ) -> Self:
-        """Fit the impact model to the provided data.
+        """Fit the impact model to the provided data using epoch-based training.
 
-        This method runs variational inference to estimate the posterior distribution
-        and then draws samples from it.
+        This method implements an epoch-based training loop, where the data is iterated
+        over in minibatches for a specified number of epochs. Variational inference is
+        performed by repeatedly updating the model parameters on each minibatch, and
+        then posterior samples are drawn from the fitted model.
 
         Args:
             X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
             y (ArrayLike): Output data with shape `(n_samples_Y,)`.
-            num_steps (int, optional): Number of steps for variational inference
-                optimization. Defaults to `10000`.
             num_samples (int | None, optional): The number of posterior samples to draw.
                 Defaults to `1000`.
             rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
                 Defaults to `None`, then an internal key is used and split as needed.
             progress (bool, optional): Whether to display a progress bar. Defaults to
                 `True`.
+            batch_size (int | None, optional): The number of data points processed at
+                each step of variational inference. If `None` (default), the entire
+                dataset is used as a single batch in each epoch.
+            epochs (int, optional): The number of epochs for variational inference
+                optimization. Defaults to `1`.
+            shuffle (bool, optional): Whether to shuffle the data at each epoch.
+                Defaults to `True`.
             **kwargs (object): Additional arguments passed to the model. All array-like
                 values are expected to be JAX arrays.
 
         Returns:
             The fitted model instance, enabling method chaining.
+
+        Note:
+            This method continues training from the existing SVI state if available.
+            To start training from scratch, create a new model instance. It does not
+            check whether the model or guide is written to support subsampling semantics
+            (e.g., using NumPyro's `subsample` or similar constructs).
         """
         if rng_key is None:
             self.rng_key, rng_key = random.split(self.rng_key)
@@ -554,14 +549,58 @@ class ImpactModel(BaseModel):
 
         self.num_samples = num_samples
 
+        kwargs_array, kwargs_extra = _group_kwargs(kwargs)
+
+        if batch_size is None:
+            batch_size = len(X)
+            msg = (
+                f"No `batch_size` specified. Using full dataset size ({batch_size}). "
+                "Specify `batch_size` to prevent memory issues."
+            )
+            warn(msg, category=UserWarning, stacklevel=2)
+        if batch_size % self._num_devices != 0:
+            msg = (
+                f"The `batch_size` ({batch_size}) is not divisible by the number of "
+                f"devices ({self._num_devices}). Use a multiple of {self._num_devices} "
+                "for optimal performance."
+            )
+            warn(msg, category=UserWarning, stacklevel=2)
+
+        dataloader = ArrayLoader(
+            ArrayDataset(X, y, *kwargs_array),
+            batch_size=batch_size or len(X),
+            shuffle=shuffle,
+        )
+
         logger.info("Performing variational inference optimization...")
-        rng_key, rng_subkey = random.split(rng_key)
-        self.guide = self.vi.guide
-        self.vi_result = self.vi.run(
-            rng_subkey,
-            num_steps=num_steps,
-            progress_bar=progress,
-            **args_bound,
+        losses = []
+        for epoch in range(epochs):
+            losses_epoch = []
+            pbar = tqdm(
+                dataloader,
+                desc=f"Epoch {epoch + 1}/{epochs}",
+                disable=not progress,
+            )
+            for batch in pbar:
+                self._vi_state, loss = self.train_on_batch(
+                    batch[0],
+                    batch[1],
+                    **dict(zip(kwargs_array._fields, batch[2:], strict=True)),
+                    **kwargs_extra._asdict(),
+                )
+                loss_batch = device_get(loss)
+                losses_epoch.append(loss_batch)
+                pbar.set_postfix({"loss": f"{float(loss_batch):.4f}"})
+            losses_epoch = jnp.stack(losses_epoch)
+            losses.extend(losses_epoch)
+            tqdm.write(
+                f"Epoch {epoch + 1}/{epochs} - "
+                f"Average loss: {float(jnp.mean(losses_epoch)):.4f}",
+            )
+        self.vi_result = SVIRunResult(
+            params=self.vi.get_params(self._vi_state),
+            state=self._vi_state,
+            losses=jnp.asarray(losses),
         )
         if np.any(np.isnan(self.vi_result.losses)):
             msg = "Loss contains NaN or Inf, indicating numerical instability."
@@ -652,7 +691,7 @@ class ImpactModel(BaseModel):
     ) -> az.InferenceData:
         kwargs_key = kwargs_array._fields + kwargs_extra._fields
 
-        dataloader: ArrayLoader = ArrayLoader(
+        dataloader = ArrayLoader(
             ArrayDataset(X, *kwargs_array),
             batch_size=batch_size,
             collate_fn=lambda batch: ArrayLoader.collate_without_output(
@@ -898,9 +937,7 @@ class ImpactModel(BaseModel):
                 during posterior predictive sampling. Defaults to `None`, which sets the
                 batch size to the total number of samples (`n_samples_X`). This value
                 also determines the chunk size for storing the posterior predictive
-                samples. It should be carefully selected to optimize memory usage and
-                computational efficiency, ensuring balanced performance for downstream
-                tasks.
+                samples.
             output_dir (str | Path | None, optional): The directory where the outputs
                 will be saved. If the specified directory does not exist, it will be
                 created automatically. If `None`, a default temporary directory will be
@@ -1107,9 +1144,7 @@ class ImpactModel(BaseModel):
             batch_size (int | None, optional): The size of batches for data loading
                 during posterior predictive sampling. Defaults to `None`, which sets the
                 batch size to the total number of samples (`n_samples_X`). This value
-                also determines the chunk size for storing the log-likelihood values. It
-                should be carefully selected to optimize memory usage and computational
-                efficiency, ensuring balanced performance for downstream tasks.
+                also determines the chunk size for storing the log-likelihood values.
             output_dir (str | Path | None, optional): The directory where the outputs
                 will be saved. If the specified directory does not exist, it will be
                 created automatically. If `None`, a default temporary directory will be
@@ -1167,7 +1202,7 @@ class ImpactModel(BaseModel):
             )
         output_subdir = _create_output_subdir(output_dir)
 
-        dataloader: ArrayLoader = ArrayLoader(
+        dataloader = ArrayLoader(
             ArrayDataset(X, y, *kwargs_array),
             batch_size=batch_size or len(X),
             collate_fn=lambda batch: ArrayLoader.collate_with_sharding(

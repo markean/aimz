@@ -26,7 +26,8 @@ from jax import Array, device_put
 from jax.typing import ArrayLike
 from torch.utils.data import DataLoader
 
-from aimz.utils.data import ArrayDataset
+from aimz.utils.data.array_dataset import ArrayDataset
+from aimz.utils.data.collate import jax_collate
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -43,19 +44,23 @@ class ArrayLoader(DataLoader):
         dataset: ArrayDataset,
         *,
         batch_size: int = 1,
+        shuffle: bool = False,
         sampler: "Sampler | None" = None,
         num_workers: int = 0,
-        collate_fn: "Callable | None" = None,
+        collate_fn: "Callable | None" = jax_collate,
         pin_memory: bool = False,
+        drop_last: bool = False,
     ) -> None:
         """Initializes an ArrayLoader instance."""
         super().__init__(
             dataset,
             batch_size=batch_size,
+            shuffle=shuffle,
             sampler=sampler,
             num_workers=num_workers,
             collate_fn=collate_fn,
             pin_memory=pin_memory,
+            drop_last=drop_last,
         )
 
     @staticmethod

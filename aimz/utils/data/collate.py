@@ -12,10 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Utilities for data handling and processing."""
+"""Module for collate functions for batching data."""
 
-from aimz.utils.data.array_dataset import ArrayDataset
-from aimz.utils.data.array_loader import ArrayLoader
-from aimz.utils.data.collate import jax_collate
+import jax.numpy as jnp
+from jax import Array
+from jax.typing import ArrayLike
 
-__all__ = ["ArrayDataset", "ArrayLoader", "jax_collate"]
+
+def jax_collate(batch: list[tuple[ArrayLike]]) -> tuple[Array]:
+    """Collate function that stacks and returns a tuple of JAX arrays.
+
+    Args:
+        batch (list[tuple[ArrayLike]]): A list of tuples, where each tuple contains
+        elements that can be converted to JAX arrays (e.g., numpy arrays).
+
+    """
+    transposed = list(zip(*batch, strict=True))
+
+    return tuple(jnp.stack(field) for field in transposed)

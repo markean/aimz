@@ -55,7 +55,7 @@ class TestKernelSignatureValidation:
                 ),
             )
         with pytest.raises(TypeError):
-            im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)), extra=True)
+            im.fit(X=jnp.ones((3, 1)), y=jnp.ones((3,)), batch_size=3, extra=True)
 
     def test_missing_parameters(self) -> None:
         """Missing required parameters in the kernel raise an error."""
@@ -74,7 +74,7 @@ class TestKernelSignatureValidation:
             ),
         )
         with pytest.raises(TypeError):
-            im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)))
+            im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)), batch_size=10)
 
 
 class TestKernelBodyValidation:
@@ -175,7 +175,7 @@ def test_fit_unexpected_y_shape() -> None:
         ),
     )
     with pytest.warns(DataConversionWarning):
-        im.fit(X=jnp.zeros((10, 2)), y=jnp.zeros((10, 1)))
+        im.fit(X=jnp.zeros((3, 2)), y=jnp.zeros((3, 1)), batch_size=3)
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
@@ -183,5 +183,5 @@ def test_fit_lm(synthetic_data: tuple[ArrayLike, ArrayLike], vi: SVI) -> None:
     """Test the `.fit()` method of `ImpactModel`."""
     X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), vi=vi)
-    im.fit(X=X, y=y)
+    im.fit(X=X, y=y, batch_size=3)
     assert _is_fitted(im), "Model fitting check failed"

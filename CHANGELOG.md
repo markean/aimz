@@ -13,16 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Custom `ArrayDataset` class for handling data in `ImpactModel`, removing the need for the `jax-dataloader` dependency (@markean, [#14](https://github.com/markean/aimz/issues/14)).
 - GitHub Pages documentation site (@markean, [#10](https://github.com/markean/aimz/issues/10)).
 - Installation instructions in the documentation site (@markean, [#10](https://github.com/markean/aimz/issues/10)).
+- `ArrayLoader` class supports `shuffle` and `drop_last` parameters for epoch training for `.fit()` (@markean, [#15](https://github.com/markean/aimz/issues/15)).
+- Added the `aimz.utils.data.collate` module with `jax_collate()`, which is now the default collate function for `ArrayLoader` (@markean, [#15](https://github.com/markean/aimz/issues/15)).
 
 ### Changed
 
 - Adopted `jax.typing` module for improved type hints.
 - Removed unnecessary JAX array type conversion in `ImpactModel` methods.
+- The `.fit()` method now uses epoch-based (minibatch) training (@markean, [#15](https://github.com/markean/aimz/issues/15)).
 - Updated `.fit()`, `.train_on_batch()`, and `.fit_on_batch()` to train the model using the internal SVI state, continuing from the last state if available (@markean, [#15](https://github.com/markean/aimz/issues/15)).
 
 ### Removed
 
-- Removed `jax-dataloader` dependency (@markean, [#14](https://github.com/markean/aimz/issues/14)).
+- Removed the `jax-dataloader` dependency (@markean, [#14](https://github.com/markean/aimz/issues/14)).
+- Removed the `guide` property, as it is part of the `vi` property.
 
 ## [v0.1.0](https://github.com/markean/aimz/releases/tag/v0.1.0) - 2025-06-27
 
