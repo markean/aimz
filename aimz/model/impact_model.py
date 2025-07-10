@@ -171,30 +171,6 @@ class ImpactModel(BaseModel):
         self._init_runtime_attrs()
 
     @property
-    def guide(self) -> Callable:
-        """Get the current variational guide function.
-
-        Returns:
-            The guide function used for variational inference.
-        """
-        return self._guide
-
-    @guide.setter
-    def guide(self, guide_fn: Callable) -> None:
-        """Set the guide function used for variational inference.
-
-        This allows manual assignment of a custom or pre-defined guide function. It is
-        primarily intended for use with `.sample()` without calling `.fit()`. Note that
-        calling `.fit()` will overwrite any existing guide.
-
-        Args:
-            guide_fn (Callable): A guide function, typically created using NumPyro's
-                `AutoGuide` classes or a user-defined guide following the NumPyro
-                convention.
-        """
-        self._guide = guide_fn
-
-    @property
     def vi_result(self) -> SVIRunResult:
         """Get the current variational inference result.
 
@@ -302,7 +278,7 @@ class ImpactModel(BaseModel):
             self.rng_key, rng_key = random.split(self.rng_key)
 
         return _sample_forward(
-            substitute(self.guide, data=self.vi_result.params),
+            substitute(self.vi.guide, data=self.vi_result.params),
             rng_key=rng_key,
             num_samples=num_samples,
             return_sites=return_sites,
@@ -478,7 +454,6 @@ class ImpactModel(BaseModel):
 
         logger.info("Performing variational inference optimization...")
         rng_key, rng_subkey = random.split(rng_key)
-        self.guide = self.vi.guide
         self.vi_result = self.vi.run(
             rng_subkey,
             num_steps=num_steps,
@@ -506,6 +481,7 @@ class ImpactModel(BaseModel):
         *,
         num_samples: int = 1000,
         rng_key: ArrayLike | None = None,
+        progress: bool = True,
         batch_size: int | None = None,
         epochs: int = 1,
         shuffle: bool = True,
@@ -523,6 +499,8 @@ class ImpactModel(BaseModel):
                 Defaults to `1000`.
             rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
                 Defaults to `None`, then an internal key is used and split as needed.
+            progress (bool, optional): Whether to display a progress bar. Defaults to
+                `True`.
             batch_size (int | None, optional): The number of data points processed at
                 each step of variational inference. If `None` (default), the entire
                 dataset is used as a single batch in each epoch.
@@ -610,9 +588,14 @@ class ImpactModel(BaseModel):
                 static_argnames=tuple(kwargs_extra._fields),
             )
         losses = []
-        for _ in range(epochs):
+        for epoch in range(epochs):
             losses_epoch = []
-            for batch in dataloader:
+            pbar = tqdm(
+                dataloader,
+                desc=f"Epoch {epoch + 1}/{epochs}",
+                disable=not progress,
+            )
+            for batch in pbar:
                 self._vi_state, loss = self._fn_vi_update(
                     self._vi_state,
                     **{
@@ -622,15 +605,20 @@ class ImpactModel(BaseModel):
                         **kwargs_extra._asdict(),
                     },
                 )
-                losses_epoch.append(device_get(loss))
+                loss_batch = device_get(loss)
+                losses_epoch.append(loss_batch)
+                pbar.set_postfix({"loss": f"{float(loss_batch):.4f}"})
             losses_epoch = jnp.stack(losses_epoch)
             losses.extend(losses_epoch)
+            tqdm.write(
+                f"Epoch {epoch + 1}/{epochs} - "
+                f"Average loss: {float(jnp.mean(losses_epoch)):.4f}",
+            )
         self.vi_result = SVIRunResult(
             params=self.vi.get_params(self._vi_state),
             state=self._vi_state,
             losses=jnp.asarray(losses),
         )
-        self.guide = self.vi.guide
         if np.any(np.isnan(self.vi_result.losses)):
             msg = "Loss contains NaN or Inf, indicating numerical instability."
             warn(msg, category=RuntimeWarning, stacklevel=2)
@@ -966,9 +954,7 @@ class ImpactModel(BaseModel):
                 during posterior predictive sampling. Defaults to `None`, which sets the
                 batch size to the total number of samples (`n_samples_X`). This value
                 also determines the chunk size for storing the posterior predictive
-                samples. It should be carefully selected to optimize memory usage and
-                computational efficiency, ensuring balanced performance for downstream
-                tasks.
+                samples.
             output_dir (str | Path | None, optional): The directory where the outputs
                 will be saved. If the specified directory does not exist, it will be
                 created automatically. If `None`, a default temporary directory will be
@@ -1175,9 +1161,7 @@ class ImpactModel(BaseModel):
             batch_size (int | None, optional): The size of batches for data loading
                 during posterior predictive sampling. Defaults to `None`, which sets the
                 batch size to the total number of samples (`n_samples_X`). This value
-                also determines the chunk size for storing the log-likelihood values. It
-                should be carefully selected to optimize memory usage and computational
-                efficiency, ensuring balanced performance for downstream tasks.
+                also determines the chunk size for storing the log-likelihood values.
             output_dir (str | Path | None, optional): The directory where the outputs
                 will be saved. If the specified directory does not exist, it will be
                 created automatically. If `None`, a default temporary directory will be

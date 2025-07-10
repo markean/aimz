@@ -24,7 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- Removed `jax-dataloader` dependency (@markean, [#14](https://github.com/markean/aimz/issues/14)).
+- Removed the `jax-dataloader` dependency (@markean, [#14](https://github.com/markean/aimz/issues/14)).
+- Removed the `guide` property, as it is part of the `vi` property.
 
 ## [v0.1.0](https://github.com/markean/aimz/releases/tag/v0.1.0) - 2025-06-27
 
