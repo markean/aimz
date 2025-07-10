@@ -487,10 +487,12 @@ class ImpactModel(BaseModel):
         shuffle: bool = True,
         **kwargs: object,
     ) -> Self:
-        """Fit the impact model to the provided data.
+        """Fit the impact model to the provided data using epoch-based training.
 
-        This method runs variational inference to estimate the posterior distribution
-        and then draws samples from it.
+        This method implements an epoch-based training loop, where the data is iterated
+        over in minibatches for a specified number of epochs. Variational inference is
+        performed by repeatedly updating the model parameters on each minibatch, and
+        then posterior samples are drawn from the fitted model.
 
         Args:
             X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
@@ -515,9 +517,10 @@ class ImpactModel(BaseModel):
             The fitted model instance, enabling method chaining.
 
         Note:
-            This method continues training from the existing SVI state if available. To
-            start training from scratch, create a new model instance.
-            subsampling!
+            This method continues training from the existing SVI state if available.
+            To start training from scratch, create a new model instance. It does not
+            check whether the model or guide is written to support subsampling semantics
+            (e.g., using NumPyro's `subsample` or similar constructs).
         """
         if rng_key is None:
             self.rng_key, rng_key = random.split(self.rng_key)
@@ -570,23 +573,6 @@ class ImpactModel(BaseModel):
         )
 
         logger.info("Performing variational inference optimization...")
-        if self._vi_state is None:
-            sample_batch = next(iter(dataloader))
-            rng_key, rng_subkey = random.split(rng_key)
-            self._vi_state = self.vi.init(
-                rng_subkey,
-                **{
-                    self.param_input: sample_batch[0],
-                    self.param_output: sample_batch[1],
-                    **dict(zip(kwargs_array._fields, sample_batch[2:], strict=True)),
-                    **kwargs_extra._asdict(),
-                },
-            )
-        if self._fn_vi_update is None:
-            self._fn_vi_update = jit(
-                self.vi.update,
-                static_argnames=tuple(kwargs_extra._fields),
-            )
         losses = []
         for epoch in range(epochs):
             losses_epoch = []
@@ -596,14 +582,11 @@ class ImpactModel(BaseModel):
                 disable=not progress,
             )
             for batch in pbar:
-                self._vi_state, loss = self._fn_vi_update(
-                    self._vi_state,
-                    **{
-                        self.param_input: batch[0],
-                        self.param_output: batch[1],
-                        **dict(zip(kwargs_array._fields, batch[2:], strict=True)),
-                        **kwargs_extra._asdict(),
-                    },
+                self._vi_state, loss = self.train_on_batch(
+                    batch[0],
+                    batch[1],
+                    **dict(zip(kwargs_array._fields, batch[2:], strict=True)),
+                    **kwargs_extra._asdict(),
                 )
                 loss_batch = device_get(loss)
                 losses_epoch.append(loss_batch)

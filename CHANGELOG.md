@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Adopted `jax.typing` module for improved type hints.
 - Removed unnecessary JAX array type conversion in `ImpactModel` methods.
+- The `.fit()` method now uses epoch-based (minibatch) training (@markean, [#15](https://github.com/markean/aimz/issues/15)).
 - Updated `.fit()`, `.train_on_batch()`, and `.fit_on_batch()` to train the model using the internal SVI state, continuing from the last state if available (@markean, [#15](https://github.com/markean/aimz/issues/15)).
 
 ### Removed
