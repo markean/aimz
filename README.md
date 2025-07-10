@@ -25,7 +25,7 @@ Designed to work with user-defined models with probabilistic primitives, the lib
 3. Integrate the kernel into the provided API to train the model and perform inference.
 
 ### Example 1: Regression Using a scikit-learn-like Workflow
-This example demonstrates a simple regression model following a typical ML workflow. The `ImpactModel` class provides `.fit()` for variational inference and posterior sampling, and `.predict()` for posterior predictive sampling. The optional `.cleanup()` removes posterior predictive samples saved as temporary files.
+This example demonstrates a simple regression model following a typical ML workflow. The `ImpactModel` class provides `.fit()` and `.fit_on_batch()` for variational inference and posterior sampling, and `.predict()` and `.predict_on_batch()` for posterior predictive sampling. The optional `.cleanup()` removes posterior predictive samples saved as temporary files.
 ```python
 import jax.numpy as jnp
 import numpyro.distributions as dist
@@ -74,7 +74,7 @@ im = ImpactModel(
 )
 
 # Fit the model: variational inference followed by posterior sampling
-im.fit(X_train, y_train)
+im.fit_on_batch(X_train, y_train)
 
 # Predict on new data using posterior predictive sampling
 idata = im.predict(X_test)
@@ -82,7 +82,7 @@ idata = im.predict(X_test)
 # Clean up posterior predictive samples saved to disk during `.predict()`
 im.cleanup()
 ```
-> The `.fit()` step can be skipped if pre-trained variational inference results or posterior samples are available. These can be integrated into the `ImpactModel`, allowing `.predict()` to be available subsequently.
+> The training step can be skipped if pre-trained variational inference results or posterior samples are available. These can be integrated into the `ImpactModel`, allowing `.predict()` to be available subsequently.
 
 ### Example 2: Causal Network with Confounder
 This example illustrates a simple causal network. The variable `Z` has a direct causal effect on the outcome `Y`, while both are influenced by a shared confounder, `C`. An additional variable, `X`, is an observed exogenous factor that influences `Z` but has no direct effect on `Y`.
@@ -181,7 +181,7 @@ im = ImpactModel(
         loss=Trace_ELBO(),
     ),
 )
-im.fit(X, y, C=C)
+im.fit_on_batch(X, y, C=C)
 
 # Predict under factual (Z) and counterfactual (zeroed Z) scenarios
 idata_factual = im.predict_on_batch(X, C=C, intervention={"z": Z})
