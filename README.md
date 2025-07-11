@@ -1,6 +1,6 @@
 # aimz: Flexible probabilistic impact modeling at scale
 [![Project Status: Active – The project has reached a stable, usable state and is being actively developed.](https://www.repostatus.org/badges/latest/active.svg)](https://www.repostatus.org/#active)
-![Run Pytest](https://github.com/markean/aimz/actions/workflows/test-coverage.yaml/badge.svg)
+![Run Pytest](https://github.com/markean/aimz/actions/workflows/coverage.yaml/badge.svg)
 [![Build GitHub Pages](https://github.com/markean/aimz/actions/workflows/gh-pages.yaml/badge.svg)](https://markean.github.io/aimz/)
 [![PyPI version](https://img.shields.io/pypi/v/aimz)](https://pypi.org/project/aimz/)
 [![Python](https://img.shields.io/pypi/pyversions/aimz.svg)](https://pypi.org/project/aimz/)
