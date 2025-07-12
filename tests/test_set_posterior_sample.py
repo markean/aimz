@@ -14,7 +14,6 @@
 
 """Tests for the `.set_posterior_sample()` method."""
 
-from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import pytest
@@ -49,8 +48,6 @@ def test_set_posterior_sample(
     posterior_sample = posterior(rng_subkey)
 
     im = ImpactModel(lm, rng_key=rng_key, vi=vi)
-    im.guide = vi.guide
-    assert isinstance(im.guide, Callable)
     im.vi_result = vi_result
     # Use the same key for reproducibility
     im.set_posterior_sample(im.sample(num_samples=100, rng_key=rng_subkey))

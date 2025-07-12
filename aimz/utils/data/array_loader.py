@@ -19,75 +19,67 @@ padding to ensure the batch size is compatible with sharding across multiple XLA
 devices.
 """
 
+from collections.abc import Iterator
+from math import ceil
 from typing import TYPE_CHECKING
+from warnings import warn
 
 import jax.numpy as jnp
-from jax import Array, device_put
+from jax import Array, device_put, local_device_count, random, tree
 from jax.typing import ArrayLike
-from torch.utils.data import DataLoader
 
 from aimz.utils.data.array_dataset import ArrayDataset
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from jax.sharding import NamedSharding
-    from torch.utils.data import Sampler
+    from jax.sharding import Sharding
 
 
-class ArrayLoader(DataLoader):
-    """Custom DataLoader class for JAX arrays based on PyTorch's DataLoader."""
+class ArrayLoader:
+    """ArrayLoader class for JAX arrays."""
 
     def __init__(
         self,
         dataset: ArrayDataset,
+        rng_key: ArrayLike,
         *,
-        batch_size: int = 1,
+        batch_size: int = 32,
         shuffle: bool = False,
-        sampler: "Sampler | None" = None,
-        num_workers: int = 0,
-        collate_fn: "Callable | None" = None,
-        pin_memory: bool = False,
-        drop_last: bool = False,
+        device: "Sharding | None" = None,
     ) -> None:
-        """Initializes an ArrayLoader instance."""
-        super().__init__(
-            dataset,
-            batch_size=batch_size,
-            shuffle=shuffle,
-            sampler=sampler,
-            num_workers=num_workers,
-            collate_fn=collate_fn,
-            pin_memory=pin_memory,
-            drop_last=drop_last,
-        )
-
-    @staticmethod
-    def calculate_padding(batch_size: int, num_devices: int) -> int:
-        """Calculate the number of padding needed.
+        """Initialize an ArrayLoader instance.
 
         Args:
-            batch_size (int): The size of the batch.
-            num_devices (int): The number of devices.
-
-        Returns:
-            int: The number of padding rows (or elements) needed to make the batch size
-                divisible by the number of devices.
+            dataset (ArrayDataset): The dataset to load.
+            rng_key (ArrayLike): A pseudo-random number generator key.
+            batch_size (int): The number of samples per batch. Defaults to `32`.
+            shuffle (bool, optional): Whether to shuffle the dataset before batching.
+                Defaults to `False`.
+            device (Sharding | None, optional): The device or sharding specification to
+                which the data should be moved. Defaults to `None`, meaning no device
+                transfer is applied.
         """
-        remainder = batch_size % num_devices
-        return 0 if remainder == 0 else num_devices - remainder
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.indices = jnp.arange(len(self.dataset))
+        if rng_key.dtype == jnp.uint32:
+            msg = "Legacy `uint32` PRNGKey detected; converting to a typed key array."
+            warn(msg, category=UserWarning, stacklevel=2)
+            rng_key = random.wrap_key_data(rng_key)
+        self.rng_key = rng_key
+        self._num_devices = local_device_count()
+        self.device = device
 
-    @staticmethod
-    def pad_array(x: ArrayLike, n_pad: int, axis: int) -> Array:
+    def pad_array(self, x: ArrayLike, n_pad: int, axis: int = 0) -> Array:
         """Pad an array to ensure compatibility with sharding.
 
         Args:
             x (ArrayLike): The input array to be padded.
             n_pad (int): The number of padding elements to add.
-            axis (int): The axis along which to apply the padding.
+            axis (int): The axis along which to apply the padding. Defaults to `0`.
 
         Returns:
-            Array: The padded array with padding applied along the specified axis.
+            The padded array with padding applied along the specified axis.
 
         Raises:
             ValueError: If padding is requested along an unsupported axis for a 1D
@@ -106,103 +98,36 @@ class ArrayLoader(DataLoader):
 
         return jnp.pad(x, pad_width=pad_width, mode="edge")
 
-    @staticmethod
-    def collate_without_output(
-        batch: list[tuple],
-        device: "NamedSharding | None" = None,
-    ) -> tuple:
-        """Collate function to process batches with sharding and padding.
+    def __iter__(self) -> Iterator[tuple[dict[str, Array], int]]:
+        """Iterate over the dataset in batches.
 
-        This function unpacks the batch of data, converts it into JAX arrays, and
-        applies padding to ensure the batch size is compatible with the number of
-        devices, if sharding is necessary. When a device is provided, the data is
-        automatically distributed across the available devices.
+        Yields:
+            A batch of arrays with data from the dataset.
+            The number of padded samples added for sharding compatibility.
+        """
+        indices = self.indices
+        if self.shuffle:
+            self.rng_key, subkey = random.split(self.rng_key)
+            indices = random.permutation(subkey, self.indices)
+        for start in range(0, len(self.dataset), self.batch_size):
+            end = start + self.batch_size
+            batch_idx = indices[start:end]
+            if self.device is not None:
+                n_pad = (-len(batch_idx)) % self._num_devices
+                batch = {
+                    k: self.pad_array(arr[batch_idx], n_pad=n_pad)
+                    for k, arr in self.dataset.arrays.items()
+                }
+                batch = tree.map(lambda x: device_put(x, self.device), batch)
+            else:
+                n_pad = 0
+                batch = {k: arr[batch_idx] for k, arr in self.dataset.arrays.items()}
+            yield batch, n_pad
 
-        Args:
-            batch (list[tuple]): A list of tuples, where each tuple contains the input
-                data, optional target data, and array-like keyword arguments.
-            device (NamedSharding | None, optional): Sharding using named axes for
-                parallel data distribution across devices. Defaults to `None`, meaning
-                no sharding is applied.
+    def __len__(self) -> int:
+        """Return the number of batches.
 
         Returns:
-            tuple: A tuple containing:
-                - n_pad (int): The number of padding rows/elements added (0 if no
-                    padding was required).
-                - x_batch (Array): The input batch with padding applied if necessary.
-                - kwargs_batch (list[Array]): A list of keyword arguments with
-                    padding applied if necessary.
+            The total number of batches.
         """
-        x_batch, *kwargs_batch = map(jnp.asarray, zip(*batch, strict=True))
-
-        n_pad = (
-            ArrayLoader.calculate_padding(
-                len(x_batch),
-                num_devices=device.num_devices,
-            )
-            if device
-            else 0
-        )
-        if n_pad:
-            x_batch = ArrayLoader.pad_array(x_batch, n_pad=n_pad, axis=0)
-            kwargs_batch = [
-                ArrayLoader.pad_array(x, n_pad=n_pad, axis=0) for x in kwargs_batch
-            ]
-
-        if device:
-            x_batch = device_put(x_batch, device=device)
-            kwargs_batch = [device_put(x, device=device) for x in kwargs_batch]
-
-        return n_pad, x_batch, *kwargs_batch
-
-    @staticmethod
-    def collate_with_sharding(
-        batch: list[tuple],
-        device: "NamedSharding | None" = None,
-    ) -> tuple:
-        """Collate function to process batches with sharding and padding.
-
-        This function unpacks the batch of data, converts it into JAX arrays, and
-        applies padding to ensure the batch size is compatible with the number of
-        devices, if sharding is necessary. When a device is provided, the data is
-        automatically distributed across the available devices.
-
-        Args:
-            batch (list[tuple]): A list of tuples, where each tuple contains the input
-                data, optional target data, and array-like keyword arguments.
-            device (NamedSharding | None, optional): Sharding using named axes for
-                parallel data distribution across devices. Defaults to `None`, meaning
-                no sharding is applied.
-
-        Returns:
-            tuple: A tuple containing:
-                - n_pad (int): The number of padding rows/elements added (0 if no
-                    padding was required).
-                - x_batch (Array): The input batch with padding applied if necessary.
-                - y_batch (Array): The target batch with padding applied.
-                - kwargs_batch (list[Array]): A list of keyword arguments with padding
-                    applied if necessary.
-        """
-        x_batch, y_batch, *kwargs_batch = map(jnp.asarray, zip(*batch, strict=True))
-
-        n_pad = (
-            ArrayLoader.calculate_padding(
-                len(x_batch),
-                num_devices=device.num_devices,
-            )
-            if device
-            else 0
-        )
-        if n_pad:
-            x_batch = ArrayLoader.pad_array(x_batch, n_pad=n_pad, axis=0)
-            y_batch = ArrayLoader.pad_array(y_batch, n_pad=n_pad, axis=0)
-            kwargs_batch = [
-                ArrayLoader.pad_array(x, n_pad=n_pad, axis=0) for x in kwargs_batch
-            ]
-
-        if device:
-            x_batch = device_put(x_batch, device=device)
-            y_batch = device_put(y_batch, device=device)
-            kwargs_batch = [device_put(x, device=device) for x in kwargs_batch]
-
-        return n_pad, x_batch, y_batch, *kwargs_batch
+        return ceil(len(self.dataset) / self.batch_size)
