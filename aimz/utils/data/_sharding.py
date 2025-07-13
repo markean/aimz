@@ -75,7 +75,7 @@ def _create_sharded_sampler(
         kwargs_key: tuple[str],
         X: ArrayLike,
         *args: tuple,
-    ) -> dict[str, ArrayLike]:
+    ) -> dict[str, Array]:
         return _sample_forward(
             model=kernel,
             num_samples=num_samples,
