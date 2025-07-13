@@ -115,6 +115,7 @@ class ImpactModel(BaseModel):
         self.rng_key = rng_key
         self.vi = vi
         self._vi_state = None
+        self.posterior = None
 
         self._init_runtime_attrs()
 
@@ -344,7 +345,7 @@ class ImpactModel(BaseModel):
             rng_key=rng_key,
             num_samples=self.num_samples,
             return_sites=return_sites or self._return_sites,
-            posterior_samples=self.posterior_sample_,
+            posterior_samples=self.posterior,
             model_kwargs=args_bound,
         )
 
@@ -470,7 +471,7 @@ class ImpactModel(BaseModel):
 
         logger.info("Posterior sampling...")
         rng_key, rng_subkey = random.split(rng_key)
-        self.posterior_sample_ = self.sample(self.num_samples, rng_key=rng_subkey)
+        self.posterior = self.sample(self.num_samples, rng_key=rng_subkey)
 
         return self
 
@@ -611,7 +612,7 @@ class ImpactModel(BaseModel):
 
         logger.info("Posterior sampling...")
         rng_key, rng_subkey = random.split(rng_key)
-        self.posterior_sample_ = self.sample(self.num_samples, rng_key=rng_subkey)
+        self.posterior = self.sample(self.num_samples, rng_key=rng_subkey)
 
         return self
 
@@ -658,13 +659,13 @@ class ImpactModel(BaseModel):
             ValueError: If the batch shapes in `posterior_sample` are inconsistent
                 (i.e., have different shapes).
         """
-        self.posterior_sample_ = posterior_sample
+        self.posterior = posterior_sample
 
         self._return_sites = return_sites or (self.param_output,)
 
         batch_ndims = 1
         batch_shapes = {
-            sample.shape[:batch_ndims] for sample in self.posterior_sample_.values()
+            sample.shape[:batch_ndims] for sample in self.posterior.values()
         }
         if len(batch_shapes) > 1:
             msg = f"Inconsistent batch shapes found in posterior_sample: {batch_shapes}"
@@ -732,7 +733,7 @@ class ImpactModel(BaseModel):
                     self.num_samples,
                     subkey,
                     self._return_sites,
-                    self.posterior_sample_,
+                    self.posterior,
                     self.param_input,
                     kwargs_key,
                     batch[self.param_input],
@@ -868,7 +869,7 @@ class ImpactModel(BaseModel):
                     rng_key=rng_key,
                     num_samples=self.num_samples,
                     return_sites=self._return_sites,
-                    posterior_samples=self.posterior_sample_,
+                    posterior_samples=self.posterior,
                     model_kwargs=args_bound,
                 ).items()
             },
@@ -893,8 +894,7 @@ class ImpactModel(BaseModel):
         out.add_groups(
             {
                 "posterior": {
-                    k: jnp.expand_dims(v, axis=0)
-                    for k, v in self.posterior_sample_.items()
+                    k: jnp.expand_dims(v, axis=0) for k, v in self.posterior.items()
                 },
             },
         )
@@ -970,7 +970,7 @@ class ImpactModel(BaseModel):
         ndim_posterior_sample = 2
         if any(
             v.ndim == ndim_posterior_sample and v.shape[1] == len(X)
-            for v in self.posterior_sample_.values()
+            for v in self.posterior.values()
         ):
             msg = (
                 "One or more posterior sample shapes are not compatible with "
@@ -1060,8 +1060,7 @@ class ImpactModel(BaseModel):
         out.add_groups(
             {
                 "posterior": {
-                    k: jnp.expand_dims(v, axis=0)
-                    for k, v in self.posterior_sample_.items()
+                    k: jnp.expand_dims(v, axis=0) for k, v in self.posterior.items()
                 },
             },
         )
@@ -1238,7 +1237,7 @@ class ImpactModel(BaseModel):
                     # Although computing the log-likelihood is deterministic, the model
                     # still needs to be seeded in order to trace its graph.
                     seed(self.kernel, rng_seed=self.rng_key),
-                    self.posterior_sample_,
+                    self.posterior,
                     self.param_input,
                     site,
                     kwargs_array._fields + kwargs_extra._fields,

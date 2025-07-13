@@ -53,11 +53,11 @@ def test_set_posterior_sample(
     im.set_posterior_sample(im.sample(num_samples=100, rng_key=rng_subkey))
     assert _is_fitted(im), "Model fitting check failed"
     assert isinstance(im.vi_result, SVIRunResult)
-    assert posterior_sample.keys() == im.posterior_sample_.keys()
+    assert posterior_sample.keys() == im.posterior.keys()
     for key in posterior_sample:
-        assert jnp.allclose(posterior_sample[key], im.posterior_sample_[key])
+        assert jnp.allclose(posterior_sample[key], im.posterior[key])
 
     im.set_posterior_sample(im.sample(num_samples=100))
     for key in posterior_sample:
         # Without the `rng_key` argument, we get different posterior samples
-        assert not jnp.allclose(posterior_sample[key], im.posterior_sample_[key])
+        assert not jnp.allclose(posterior_sample[key], im.posterior[key])
