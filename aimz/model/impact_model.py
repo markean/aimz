@@ -566,8 +566,10 @@ class ImpactModel(BaseModel):
             )
             warn(msg, category=UserWarning, stacklevel=2)
 
+        rng_key, rng_subkey = random.split(rng_key)
         dataloader = ArrayLoader(
-            ArrayDataset(X, y, *kwargs_array),
+            ArrayDataset(X=X, y=y, **kwargs_array._asdict()),
+            rng_key=rng_subkey,
             batch_size=batch_size or len(X),
             shuffle=shuffle,
         )
@@ -578,17 +580,13 @@ class ImpactModel(BaseModel):
             losses_epoch = []
             pbar = tqdm(
                 dataloader,
+                total=len(dataloader),
                 desc=f"Epoch {epoch + 1}/{epochs}",
                 disable=not progress,
             )
-            for batch in pbar:
+            for batch, _ in pbar:
                 self._vi_state, loss = self.train_on_batch(
-                    jnp.asarray(batch[0]),
-                    jnp.asarray(batch[1]),
-                    **{
-                        k: jnp.asarray(v)
-                        for k, v in zip(kwargs_array._fields, batch[2:], strict=True)
-                    },
+                    **batch,
                     **kwargs_extra._asdict(),
                 )
                 loss_batch = device_get(loss)
@@ -695,12 +693,10 @@ class ImpactModel(BaseModel):
         kwargs_key = kwargs_array._fields + kwargs_extra._fields
 
         dataloader = ArrayLoader(
-            ArrayDataset(X, *kwargs_array),
+            ArrayDataset(X=X, **kwargs_array._asdict()),
+            rng_key=self.rng_key,
             batch_size=batch_size,
-            collate_fn=lambda batch: ArrayLoader.collate_without_output(
-                batch,
-                device=self._device,
-            ),
+            device=self._device,
         )
 
         pbar = tqdm(
@@ -725,8 +721,12 @@ class ImpactModel(BaseModel):
             queue_size=min(cpu_count() or 1, 4),
         )
         try:
-            for batch, subkey in zip(dataloader, subkeys, strict=True):
-                n_pad, x_batch, *kwargs_batch = batch
+            for (batch, n_pad), subkey in zip(dataloader, subkeys, strict=True):
+                kwargs_batch = [
+                    v
+                    for k, v in batch.items()
+                    if k not in (self.param_input, self.param_output)
+                ]
                 dict_arr = fn_sample_posterior_predictive(
                     kernel,
                     self.num_samples,
@@ -735,7 +735,7 @@ class ImpactModel(BaseModel):
                     self.posterior_sample_,
                     self.param_input,
                     kwargs_key,
-                    x_batch,
+                    batch[self.param_input],
                     *(*kwargs_batch, *kwargs_extra),
                 )
                 for site, arr in dict_arr.items():
@@ -1206,12 +1206,10 @@ class ImpactModel(BaseModel):
         output_subdir = _create_output_subdir(output_dir)
 
         dataloader = ArrayLoader(
-            ArrayDataset(X, y, *kwargs_array),
-            batch_size=batch_size or len(X),
-            collate_fn=lambda batch: ArrayLoader.collate_with_sharding(
-                batch,
-                device=self._device,
-            ),
+            ArrayDataset(X=X, y=y, **kwargs_array._asdict()),
+            rng_key=self.rng_key,
+            batch_size=batch_size,
+            device=self._device,
         )
 
         site = self.param_output
@@ -1230,8 +1228,12 @@ class ImpactModel(BaseModel):
             queue_size=min(cpu_count() or 1, 4),
         )
         try:
-            for batch in dataloader:
-                n_pad, x_batch, y_batch, *kwargs_batch = batch
+            for batch, n_pad in dataloader:
+                kwargs_batch = [
+                    v
+                    for k, v in batch.items()
+                    if k not in (self.param_input, self.param_output)
+                ]
                 arr = self._fn_log_likelihood(
                     # Although computing the log-likelihood is deterministic, the model
                     # still needs to be seeded in order to trace its graph.
@@ -1240,8 +1242,8 @@ class ImpactModel(BaseModel):
                     self.param_input,
                     site,
                     kwargs_array._fields + kwargs_extra._fields,
-                    x_batch,
-                    y_batch,
+                    batch[self.param_input],
+                    batch[self.param_output],
                     *(*kwargs_batch, *kwargs_extra),
                 )
                 if site not in zarr_arr:

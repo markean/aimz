@@ -14,21 +14,20 @@
 
 """Module for custom dataset for JAX arrays."""
 
-import jax.numpy as jnp
-from jax import Array, tree
+import numpy as np
+from jax import tree
 from jax.typing import ArrayLike
+from torch.utils.data import Dataset
 
 
-class ArrayDataset:
-    """ArrayDataset class for JAX arrays."""
+class ArrayDataset(Dataset):
+    """Custom Dataset class for JAX arrays based on PyTorch's Dataset."""
 
-    def __init__(self, *, to_jax: bool = True, **arrays: ArrayLike) -> None:
+    def __init__(self, *arrays: ArrayLike) -> None:
         """Initialize an ArrayDataset instance.
 
         Args:
-            to_jax (bool): Whether to convert the input arrays to JAX arrays. Defaults
-                to `True`.
-            **arrays (ArrayLike): One or more JAX arrays or compatible array-like
+            *arrays (ArrayLike): One or more JAX arrays or compatible array-like
                 objects.
 
         Raises:
@@ -38,31 +37,31 @@ class ArrayDataset:
         if not arrays:
             msg = "At least one array must be provided."
             raise ValueError(msg)
-        lengths = {len(arr) for arr in arrays.values()}
-        if len(lengths) != 1:
+        length = len(arrays[0])
+        if any(len(arr) != length for arr in arrays):
             msg = "All arrays must have the same length."
             raise ValueError(msg)
-        (self.length,) = lengths
-        if to_jax:
-            self.arrays = tree.map(lambda x: jnp.asarray(x), arrays)
-        else:
-            self.arrays = arrays
+        # Convert inputs to NumPy arrays for efficient CPU-based batching and slicing.
+        # Keeping data as NumPy arrays until batch collation speeds up data loading
+        # and reduces overhead from host-to-device data transfers.
+        self.arrays = tuple(np.asarray(arr) for arr in arrays)
 
     def __len__(self) -> int:
         """Get the number of samples in the dataset.
 
         Returns:
-            The number of samples.
+            The number of samples, equal to the length of the first array.
         """
-        return self.length
+        # Since all arrays have the same length, return the length of the first one
+        return len(self.arrays[0])
 
-    def __getitem__(self, idx: int) -> dict[str, Array]:
+    def __getitem__(self, index: int) -> object:
         """Retrieve the elements at the specified index.
 
         Args:
-            idx: Index of the item to retrieve.
+            index: Index of the item to retrieve.
 
         Returns:
-            A tuple containing the elements from each array at the specified index.
+            A pytree containing the elements at the given index from each array.
         """
-        return {k: v[idx] for k, v in self.arrays.items()}
+        return tree.map(lambda x: x[index], self.arrays)

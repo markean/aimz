@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Removed
+
+- Removed the `torch` dependency (@markean, [#26](https://github.com/markean/aimz/issues/26)).
+
 ## [v0.2.0](https://github.com/markean/aimz/releases/tag/v0.2.0) - 2025-07-10
 
 ### Added
