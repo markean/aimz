@@ -22,7 +22,7 @@ from jax.typing import ArrayLike
 class ArrayDataset:
     """ArrayDataset class for JAX arrays."""
 
-    def __init__(self, *, to_jax: bool = True, **arrays: ArrayLike) -> None:
+    def __init__(self, *, to_jax: bool = True, **arrays: ArrayLike | None) -> None:
         """Initialize an ArrayDataset instance.
 
         Args:
@@ -35,6 +35,7 @@ class ArrayDataset:
             ValueError: If no arrays are provided or if the arrays do not have the same
                 length.
         """
+        arrays = {k: v for k, v in arrays.items() if v is not None}
         if not arrays:
             msg = "At least one array must be provided."
             raise ValueError(msg)

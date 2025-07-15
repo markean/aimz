@@ -56,7 +56,8 @@ class ArrayLoader:
                 Defaults to `False`.
             device (Sharding | None, optional): The device or sharding specification to
                 which the data should be moved. Defaults to `None`, meaning no device
-                transfer is applied.
+                transfer is applied. When used as an input to a model, this will be
+                overridden by the device setting of the model.
         """
         self.dataset = dataset
         self.batch_size = batch_size

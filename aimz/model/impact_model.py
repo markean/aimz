@@ -22,7 +22,7 @@ from pathlib import Path
 from shutil import rmtree
 from sys import modules
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, NamedTuple, Self
+from typing import TYPE_CHECKING, Self
 from warnings import warn
 
 import arviz as az
@@ -63,7 +63,8 @@ from aimz.utils._validation import (
     _validate_group,
     _validate_kernel_body,
 )
-from aimz.utils.data import ArrayDataset, ArrayLoader
+from aimz.utils.data import ArrayLoader
+from aimz.utils.data._input_setup import _setup_inputs
 from aimz.utils.data._sharding import (
     _create_sharded_log_likelihood,
     _create_sharded_sampler,
@@ -124,11 +125,11 @@ class ImpactModel(BaseModel):
         self._fn_vi_update: Callable | None = None
         self._fn_sample_posterior_predictive: Callable | None = None
         self._fn_log_likelihood: Callable | None = None
-        self._num_devices: int = local_device_count()
         self._mesh: Mesh | None
         self._device: NamedSharding | None
-        if self._num_devices > 1:
-            self._mesh = make_mesh((self._num_devices,), ("obs",))
+        num_devices = local_device_count()
+        if num_devices > 1:
+            self._mesh = make_mesh((num_devices,), ("obs",))
             self._device = NamedSharding(self._mesh, PartitionSpec("obs"))
         else:
             self._mesh = None
@@ -136,7 +137,7 @@ class ImpactModel(BaseModel):
         logger.info(
             "Backend: %s, Devices: %d",
             default_backend(),
-            self._num_devices,
+            num_devices,
         )
 
     def __del__(self) -> None:
@@ -353,6 +354,7 @@ class ImpactModel(BaseModel):
         self,
         X: ArrayLike,
         y: ArrayLike,
+        rng_key: ArrayLike | None = None,
         **kwargs: object,
     ) -> tuple[SVIState, Array]:
         """Run a single VI step on the given batch of data.
@@ -360,6 +362,10 @@ class ImpactModel(BaseModel):
         Args:
             X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
             y (ArrayLike): Output data with shape `(n_samples_Y,)`.
+            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
+                Defaults to `None`, then an internal key is used and split as needed.
+                The key is only used for initialization if the internal SVI state is not
+                yet set.
             **kwargs (object): Additional arguments passed to the model. All array-like
                 values are expected to be JAX arrays.
 
@@ -375,7 +381,26 @@ class ImpactModel(BaseModel):
         batch = {self.param_input: X, self.param_output: y, **kwargs}
 
         if self._vi_state is None:
-            self.rng_key, rng_key = random.split(self.rng_key)
+            # Validate the provided parameters against the kernel's signature
+            model_trace = trace(seed(self.kernel, rng_seed=self.rng_key)).get_trace(
+                **signature(self.kernel).bind(**batch).arguments,
+            )
+            # Validate the kernel body for output sample site and naming conflicts
+            _validate_kernel_body(
+                self.kernel,
+                self.param_output,
+                model_trace,
+            )
+            self._return_sites = (
+                *(
+                    k
+                    for k, site in model_trace.items()
+                    if site["type"] == "deterministic"
+                ),
+                self.param_output,
+            )
+            if rng_key is None:
+                self.rng_key, rng_key = random.split(self.rng_key)
             self._vi_state = self.vi.init(rng_key, **batch)
         if self._fn_vi_update is None:
             _, kwargs_extra = _group_kwargs(kwargs)
@@ -477,8 +502,8 @@ class ImpactModel(BaseModel):
 
     def fit(
         self,
-        X: ArrayLike,
-        y: ArrayLike,
+        X: ArrayLike | ArrayLoader,
+        y: ArrayLike | None = None,
         *,
         num_samples: int = 1000,
         rng_key: ArrayLike | None = None,
@@ -496,8 +521,12 @@ class ImpactModel(BaseModel):
         then posterior samples are drawn from the fitted model.
 
         Args:
-            X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
-            y (ArrayLike): Output data with shape `(n_samples_Y,)`.
+            X (ArrayLike | ArrayLoader): Input data, either an array-like of shape
+                `(n_samples, n_features)` or a data loader that holds all array-like
+                objects and handles batching internally; if a data loader is passed,
+                `batch_size` is ignored.
+            y (ArrayLike | None): Output data with shape `(n_samples_Y,)`. Must be
+                `None` if `X` is a data loader. Defaults to `None`.
             num_samples (int | None, optional): The number of posterior samples to draw.
                 Defaults to `1000`.
             rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
@@ -526,57 +555,22 @@ class ImpactModel(BaseModel):
         if rng_key is None:
             self.rng_key, rng_key = random.split(self.rng_key)
 
-        X, y = check_X_y(X, y, force_writeable=True, y_numeric=True)
-
-        # Validate the provided parameters against the kernel's signature
-        args_bound = (
-            signature(self.kernel)
-            .bind(**{self.param_input: X, self.param_output: y, **kwargs})
-            .arguments
-        )
-        model_trace = trace(seed(self.kernel, rng_seed=self.rng_key)).get_trace(
-            **args_bound,
-        )
-        # Validate the kernel body for output sample site and naming conflicts
-        _validate_kernel_body(
-            self.kernel,
-            self.param_output,
-            model_trace,
-        )
-        self._return_sites = (
-            *(k for k, site in model_trace.items() if site["type"] == "deterministic"),
-            self.param_output,
-        )
-
         self.num_samples = num_samples
 
-        kwargs_array, kwargs_extra = _group_kwargs(kwargs)
-
-        if batch_size is None:
-            batch_size = len(X)
-            msg = (
-                f"No `batch_size` specified. Using full dataset size ({batch_size}). "
-                "Specify `batch_size` to prevent memory issues."
-            )
-            warn(msg, category=UserWarning, stacklevel=2)
-        if batch_size % self._num_devices != 0:
-            msg = (
-                f"The `batch_size` ({batch_size}) is not divisible by the number of "
-                f"devices ({self._num_devices}). Use a multiple of {self._num_devices} "
-                "for optimal performance."
-            )
-            warn(msg, category=UserWarning, stacklevel=2)
-
         rng_key, rng_subkey = random.split(rng_key)
-        dataloader = ArrayLoader(
-            ArrayDataset(X=X, y=y, **kwargs_array._asdict()),
+        dataloader, kwargs_extra = _setup_inputs(
+            X=X,
+            y=y,
             rng_key=rng_subkey,
-            batch_size=batch_size or len(X),
+            batch_size=batch_size,
             shuffle=shuffle,
+            device=None,
+            **kwargs,
         )
 
         logger.info("Performing variational inference optimization...")
         losses = []
+        rng_key, rng_subkey = random.split(rng_key)
         for epoch in range(epochs):
             losses_epoch = []
             pbar = tqdm(
@@ -589,6 +583,7 @@ class ImpactModel(BaseModel):
                 self._vi_state, loss = self.train_on_batch(
                     **batch,
                     **kwargs_extra._asdict(),
+                    rng_key=rng_subkey,
                 )
                 loss_batch = device_get(loss)
                 losses_epoch.append(loss_batch)
@@ -688,16 +683,17 @@ class ImpactModel(BaseModel):
         batch_size: int,
         output_dir: Path,
         progress: bool,
-        kwargs_array: NamedTuple,
-        kwargs_extra: NamedTuple,
+        **kwargs: object,
     ) -> az.InferenceData:
-        kwargs_key = kwargs_array._fields + kwargs_extra._fields
+        kwargs_array, kwargs_extra = _group_kwargs(kwargs)
 
-        dataloader = ArrayLoader(
-            ArrayDataset(X=X, **kwargs_array._asdict()),
+        dataloader, _ = _setup_inputs(
+            X=X,
+            y=None,
             rng_key=self.rng_key,
             batch_size=batch_size,
             device=self._device,
+            **kwargs,
         )
 
         pbar = tqdm(
@@ -735,7 +731,7 @@ class ImpactModel(BaseModel):
                     self._return_sites,
                     self.posterior,
                     self.param_input,
-                    kwargs_key,
+                    kwargs_array._fields + kwargs_extra._fields,
                     batch[self.param_input],
                     *(*kwargs_batch, *kwargs_extra),
                 )
@@ -745,7 +741,11 @@ class ImpactModel(BaseModel):
                             name=site,
                             shape=(self.num_samples, 0, *arr.shape[2:]),
                             dtype=arr.dtype,
-                            chunks=(self.num_samples, batch_size, *arr.shape[2:]),
+                            chunks=(
+                                self.num_samples,
+                                dataloader.batch_size,
+                                *arr.shape[2:],
+                            ),
                             dimension_names=(
                                 "draw",
                                 *tuple(f"{site}_dim{j}" for j in range(arr.ndim - 1)),
@@ -904,7 +904,7 @@ class ImpactModel(BaseModel):
 
     def predict(
         self,
-        X: ArrayLike,
+        X: ArrayLike | ArrayLoader,
         *,
         intervention: dict | None = None,
         rng_key: ArrayLike | None = None,
@@ -923,7 +923,10 @@ class ImpactModel(BaseModel):
         and executed concurrently.
 
         Args:
-            X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
+            X (ArrayLike | ArrayLoader): Input data, either an array-like of shape
+                `(n_samples, n_features)` or a data loader that holds all array-like
+                objects and handles batching internally; if a data loader is passed,
+                `batch_size` is ignored.
             intervention (dict | None, optional): A dictionary mapping sample sites to
                 their corresponding intervention values. Interventions enable
                 counterfactual analysis by modifying the specified sample sites during
@@ -967,39 +970,37 @@ class ImpactModel(BaseModel):
         # This makes it incompatible with the current `.predict()` implementation, which
         # uses sharded parallelism. In such cases, fall back to `.predict_on_batch()`
         # and raise a warning.
-        ndim_posterior_sample = 2
-        if any(
-            v.ndim == ndim_posterior_sample and v.shape[1] == len(X)
-            for v in self.posterior.values()
-        ):
-            msg = (
-                "One or more posterior sample shapes are not compatible with "
-                "`.predict()` under sharded parallelism; falling back to "
-                "`.predict_on_batch()`."
-            )
-            warn(msg, category=UserWarning, stacklevel=2)
+        if isinstance(X, ArrayLike):
+            ndim_posterior_sample = 2
+            if any(
+                v.ndim == ndim_posterior_sample and v.shape[1] == len(X)
+                for v in self.posterior.values()
+            ):
+                msg = (
+                    "One or more posterior sample shapes are not compatible with "
+                    "`.predict()` under sharded parallelism; falling back to "
+                    "`.predict_on_batch()`."
+                )
+                warn(msg, category=UserWarning, stacklevel=2)
 
-            return self.predict_on_batch(
-                X,
-                intervention=intervention,
-                rng_key=rng_key,
-                in_sample=in_sample,
-                **kwargs,
+                return self.predict_on_batch(
+                    X,
+                    intervention=intervention,
+                    rng_key=rng_key,
+                    in_sample=in_sample,
+                    **kwargs,
+                )
+            # Validate the provided parameters against the kernel's signature
+            args_bound = (
+                signature(self.kernel).bind(**{self.param_input: X, **kwargs}).arguments
             )
+            if self.param_output in args_bound:
+                sub = self.param_output
+                msg = f"{sub!r} is not allowed in `.predict()`."
+                raise TypeError(msg)
 
         if rng_key is None:
             self.rng_key, rng_key = random.split(self.rng_key)
-
-        X = check_array(X)
-
-        # Validate the provided parameters against the kernel's signature
-        args_bound = (
-            signature(self.kernel).bind(**{self.param_input: X, **kwargs}).arguments
-        )
-        if self.param_output in args_bound:
-            sub = self.param_output
-            msg = f"{sub!r} is not allowed in `.predict()`."
-            raise TypeError(msg)
 
         if intervention is None:
             kernel = self.kernel
@@ -1014,22 +1015,6 @@ class ImpactModel(BaseModel):
                 len(kwargs_array),
                 len(kwargs_extra),
             )
-
-        if batch_size is None:
-            batch_size = len(X)
-            msg = (
-                f"No `batch_size` specified. Using full dataset size ({batch_size}). "
-                "Specify `batch_size` to prevent memory issues, or use "
-                "`.predict_on_batch()` directly."
-            )
-            warn(msg, category=UserWarning, stacklevel=2)
-        if batch_size % self._num_devices != 0:
-            msg = (
-                f"The `batch_size` ({batch_size}) is not divisible by the number of "
-                f"devices ({self._num_devices}). Use a multiple of {self._num_devices} "
-                "for optimal performance."
-            )
-            warn(msg, category=UserWarning, stacklevel=2)
 
         if output_dir is None:
             if not hasattr(self, "temp_dir"):
@@ -1054,8 +1039,7 @@ class ImpactModel(BaseModel):
             batch_size=batch_size,
             output_dir=output_subdir,
             progress=progress,
-            kwargs_array=kwargs_array,
-            kwargs_extra=kwargs_extra,
+            **kwargs,
         )
         out.add_groups(
             {
@@ -1127,8 +1111,8 @@ class ImpactModel(BaseModel):
 
     def log_likelihood(
         self,
-        X: ArrayLike,
-        y: ArrayLike,
+        X: ArrayLike | ArrayLoader,
+        y: ArrayLike | None = None,
         *,
         batch_size: int | None = None,
         output_dir: str | Path | None = None,
@@ -1141,8 +1125,12 @@ class ImpactModel(BaseModel):
         decoupled and executed concurrently.
 
         Args:
-            X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
-            y (ArrayLike): Output data with shape `(n_samples_Y,)`.
+            X (ArrayLike | ArrayLoader): Input data, either an array-like of shape
+                `(n_samples, n_features)` or a data loader that holds all array-like
+                objects and handles batching internally; if a data loader is passed,
+                `batch_size` is ignored.
+            y (ArrayLike | None): Output data with shape `(n_samples_Y,)`. Must be
+                `None` if `X` is a data loader. Defaults to `None`.
             batch_size (int | None, optional): The size of batches for data loading
                 during posterior predictive sampling. Defaults to `None`, which sets the
                 batch size to the total number of samples (`n_samples_X`). This value
@@ -1162,11 +1150,6 @@ class ImpactModel(BaseModel):
         """
         _check_is_fitted(self)
 
-        # Validate the provided parameters against the kernel's signature
-        signature(self.kernel).bind(**{self.param_input: X, **kwargs})
-
-        X, y = check_X_y(X, y, force_writeable=True, y_numeric=True)
-
         kwargs_array, kwargs_extra = _group_kwargs(kwargs)
         if self._fn_log_likelihood is None:
             self._fn_log_likelihood = _create_sharded_log_likelihood(
@@ -1174,21 +1157,6 @@ class ImpactModel(BaseModel):
                 len(kwargs_array),
                 len(kwargs_extra),
             )
-
-        if batch_size is None:
-            batch_size = len(X)
-            msg = (
-                f"No `batch_size` specified. Using full dataset size ({batch_size}). "
-                "Specify `batch_size` to prevent memory issues."
-            )
-            warn(msg, category=UserWarning, stacklevel=2)
-        if batch_size % self._num_devices != 0:
-            msg = (
-                f"The `batch_size` ({batch_size}) is not divisible by the number of "
-                f"devices ({self._num_devices}). Use a multiple of {self._num_devices} "
-                "for optimal performance."
-            )
-            warn(msg, category=UserWarning, stacklevel=2)
 
         if output_dir is None:
             if not hasattr(self, "temp_dir"):
@@ -1204,11 +1172,13 @@ class ImpactModel(BaseModel):
             )
         output_subdir = _create_output_subdir(output_dir)
 
-        dataloader = ArrayLoader(
-            ArrayDataset(X=X, y=y, **kwargs_array._asdict()),
+        dataloader, _ = _setup_inputs(
+            X=X,
+            y=y,
             rng_key=self.rng_key,
             batch_size=batch_size,
             device=self._device,
+            **kwargs,
         )
 
         site = self.param_output
@@ -1250,7 +1220,11 @@ class ImpactModel(BaseModel):
                         name=site,
                         shape=(self.num_samples, 0, *arr.shape[2:]),
                         dtype=arr.dtype,
-                        chunks=(self.num_samples, batch_size, *arr.shape[2:]),
+                        chunks=(
+                            self.num_samples,
+                            dataloader.batch_size,
+                            *arr.shape[2:],
+                        ),
                         dimension_names=(
                             "draw",
                             *tuple(f"{site}_dim{j}" for j in range(arr.ndim - 1)),
