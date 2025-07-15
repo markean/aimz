@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "aimz"
 version = "0.3.0b0"
-description = "Flexible probabilistic impact modeling at scale"
+description = "Scalable probabilistic impact modeling"
 readme = "README.md"
 license = "Apache-2.0"
 authors = [

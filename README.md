@@ -1,4 +1,4 @@
-# aimz: Flexible probabilistic impact modeling at scale
+# aimz: Scalable probabilistic impact modeling
 [![Project Status: Active – The project has reached a stable, usable state and is being actively developed.](https://www.repostatus.org/badges/latest/active.svg)](https://www.repostatus.org/#active)
 ![Run Pytest](https://github.com/markean/aimz/actions/workflows/coverage.yaml/badge.svg)
 [![Build GitHub Pages](https://github.com/markean/aimz/actions/workflows/gh-pages.yaml/badge.svg)](https://markean.github.io/aimz/)

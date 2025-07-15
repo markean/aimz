@@ -74,7 +74,7 @@ class TestKernelSignatureValidation:
             ),
         )
         with pytest.raises(TypeError):
-            im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)), batch_size=10)
+            im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)), batch_size=3)
 
 
 class TestKernelBodyValidation:
@@ -97,7 +97,7 @@ class TestKernelBodyValidation:
             ),
         )
         with pytest.raises(KernelValidationError):
-            im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)))
+            im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)), batch_size=3)
 
     def test_sample_output_site(self) -> None:
         """Raises error if output site is not a sample site."""
@@ -116,7 +116,7 @@ class TestKernelBodyValidation:
             ),
         )
         with pytest.raises(KernelValidationError):
-            im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)))
+            im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)), batch_size=3)
 
     def test_unobserved_output_site(self) -> None:
         """Raises error if output site is not observed."""
@@ -135,7 +135,7 @@ class TestKernelBodyValidation:
             ),
         )
         with pytest.raises(KernelValidationError):
-            im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)))
+            im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)), batch_size=3)
 
     def test_parameter_site_conflict(self) -> None:
         """Raises an error if a parameter name conflicts with a site name."""
@@ -155,7 +155,7 @@ class TestKernelBodyValidation:
             ),
         )
         with pytest.raises(KernelValidationError):
-            im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)))
+            im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)), batch_size=3)
 
 
 def test_fit_unexpected_y_shape() -> None:

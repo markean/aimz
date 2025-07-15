@@ -56,9 +56,7 @@ def test_predict_fall_back(
     """Calling `.predict()` warns and falls back on an incompatible model."""
     X, y = synthetic_data
     im = ImpactModel(latent_variable_model, rng_key=random.key(42), vi=vi)
-    msg = r"The `batch_size` \(\d+\) is not divisible by the number of devices"
-    with pytest.warns(UserWarning, match=msg):
-        im.fit(X=X, y=y, batch_size=len(X))
+    im.fit(X=X, y=y, batch_size=len(X))
     msg = "One or more posterior sample shapes are not compatible"
     with pytest.warns(UserWarning, match=msg):
         im.predict(X=X, batch_size=len(X), progress=False)

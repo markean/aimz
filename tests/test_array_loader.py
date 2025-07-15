@@ -17,13 +17,18 @@
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from conftest import lm
 from jax import random
+from jax.typing import ArrayLike
+from numpyro.infer import SVI
 
+from aimz.model import ImpactModel
 from aimz.utils.data import ArrayDataset, ArrayLoader
 
 
 class TestArrayDataset:
     """Tests class to ensure correct initialization and behavior."""
+
     def test_empty_array(self) -> None:
         """Initializing with no arrays raises a ValueError."""
         with pytest.raises(ValueError, match="At least one array must be provided."):
@@ -50,6 +55,7 @@ class TestArrayDataset:
 
 class TestArrayLoader:
     """Tests class to ensure compatibility and correct handling."""
+
     def test_legacy_prng_key(self) -> None:
         """A legacy uint32 PRNGKey raises a UserWarning."""
         y = jnp.array([1, 2, 3])
@@ -70,3 +76,93 @@ class TestArrayLoader:
             match="Padding 1D arrays is only supported along axis 0.",
         ):
             loader.pad_array(y, n_pad=1, axis=1)
+
+    @pytest.mark.parametrize("vi", [lm], indirect=True)
+    def test_fit_dataloader_y_not_none_error(
+        self,
+        synthetic_data: tuple[ArrayLike, ArrayLike],
+        vi: SVI,
+    ) -> None:
+        """Passing a data loader as `X` and a non-None `y` raises an error."""
+        X, y = synthetic_data
+        im = ImpactModel(lm, rng_key=random.key(42), vi=vi)
+        dataloader = ArrayLoader(ArrayDataset(X=X, y=y), rng_key=random.key(42))
+        with pytest.raises(
+            TypeError,
+            match="must be `None` when `X` is already a data loader",
+        ):
+            im.fit(X=dataloader, y=y)
+        im.fit(X=dataloader)
+
+    @pytest.mark.parametrize("vi", [lm], indirect=True)
+    def test_fit_consistency_with_array_and_dataloader(
+        self,
+        synthetic_data: tuple[ArrayLike, ArrayLike],
+        vi: SVI,
+    ) -> None:
+        """Calling `.fit()` with arrays or a data loader can yield identical results."""
+        X, y = synthetic_data
+
+        # Initialize ImpactModel (passing rng_key here has no effect since we pass one
+        # to `.fit()`).
+        rng_key = random.key(42)
+        rng_key, rng_subkey = random.split(rng_key)
+        rng_key, _ = random.split(rng_subkey)
+        im_without_dataloader = ImpactModel(lm, rng_key=random.key(0), vi=vi)
+        im_without_dataloader.fit(
+            X=X,
+            y=y,
+            rng_key=rng_subkey,
+            batch_size=3,
+            progress=False,
+            shuffle=True,
+        )
+        rng_key, rng_subkey = random.split(rng_key)
+        losses_without_dataloader = im_without_dataloader.vi_result.losses
+        mean_pred_without_dataloader = (
+            im_without_dataloader.predict(X=X, rng_key=rng_subkey, batch_size=3)
+            .posterior_predictive["y"]
+            .mean(["chain", "draw"])
+            .values
+        )
+
+        # Prepare loader and new ImpactModel
+        rng_key = random.key(42)
+        rng_key, rng_subkey = random.split(rng_key)
+        rng_key, rng_loader_key = random.split(rng_subkey)
+        im_with_dataloader = ImpactModel(lm, rng_key=random.key(0), vi=vi)
+        im_with_dataloader.fit(
+            X=ArrayLoader(
+                ArrayDataset(X=X, y=y),
+                rng_key=rng_loader_key,
+                batch_size=3,
+                shuffle=True,
+            ),
+            rng_key=rng_subkey,
+            progress=False,
+        )
+        rng_key, rng_subkey = random.split(rng_key)
+
+        losses_with_dataloader = im_with_dataloader.vi_result.losses
+        mean_pred_with_dataloader = (
+            im_with_dataloader.predict(
+                X=ArrayLoader(
+                    ArrayDataset(X=X),
+                    rng_key=rng_loader_key,
+                    batch_size=3,
+                ),
+                rng_key=rng_subkey,
+            )
+            .posterior_predictive["y"]
+            .mean(["chain", "draw"])
+            .values
+        )
+
+        assert jnp.allclose(losses_without_dataloader, losses_with_dataloader), (
+            "Losses from fitting with raw arrays vs. fitting with a data loader "
+            "can match, if the rng_key is properly set."
+        )
+        assert jnp.allclose(mean_pred_without_dataloader, mean_pred_with_dataloader), (
+            "Posterior predictive samples from fitting with raw arrays vs. "
+            "fitting with a data loader can match, if the rng_key is properly set."
+        )

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `ImpactModel` now supports `ArrayLoader` for both input and output data (@markean, [#24](https://github.com/markean/aimz/issues/24)).
 - Renamed the posterior sample attribute of `ImpactModel` from `.posterior_samples_` to `.posterior`, which is now initialized to `None` (@markean, [#25](https://github.com/markean/aimz/issues/25)).
 - `ArrayLoader` and `ArrayDataset` no longer require the `torch` dependency. `ArrayDataset` now accepts only named arrays, and `ArrayLoader` yields tuples of a dictionary and a padding integer (@markean, [#26](https://github.com/markean/aimz/issues/26)).
 
