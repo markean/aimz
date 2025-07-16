@@ -8,6 +8,9 @@
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![codecov](https://codecov.io/gh/markean/aimz/graph/badge.svg?token=34OH7KQBXE)](https://codecov.io/gh/markean/aimz)
 
+[**Installation**](https://markean.github.io/aimz/installation/#installation) |
+[**Documentation**](https://markean.github.io/aimz/)
+
 
 ## Overview
 **aimz** is a Python library for flexible and scalable probabilistic impact modeling to assess the effects of interventions on outcomes of interest.
