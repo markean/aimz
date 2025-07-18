@@ -28,7 +28,7 @@ from aimz.utils._validation import _is_fitted
 def test_fit_lm(synthetic_data: tuple[ArrayLike, ArrayLike], vi: SVI) -> None:
     """Test the `.fit()` method of `ImpactModel`."""
     X, y = synthetic_data
-    im = ImpactModel(lm, rng_key=random.key(42), vi=vi)
+    im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
     im.fit_on_batch(X=X, y=y)
     assert _is_fitted(im), "Model fitting check failed"
     assert im.vi_result is not None, "VI result should not be `None`"

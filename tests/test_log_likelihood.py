@@ -35,7 +35,7 @@ def test_model_not_fitted() -> None:
     im = ImpactModel(
         kernel,
         rng_key=random.key(42),
-        vi=SVI(
+        inference=SVI(
             kernel,
             guide=AutoNormal(kernel),
             optim=Adam(step_size=1e-3),
@@ -57,7 +57,7 @@ class TestBatchSize:
     ) -> None:
         """Warns if `batch_size` is not explicitly set."""
         X, y = synthetic_data
-        im = ImpactModel(lm, rng_key=random.key(42), vi=vi)
+        im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
         im.fit(X=X, y=y, batch_size=3)
         # NOTE: An additional warning about batch size not being divisible by the number
         # of devices may also be raised.

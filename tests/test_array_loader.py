@@ -85,7 +85,7 @@ class TestArrayLoader:
     ) -> None:
         """Passing a data loader as `X` and a non-None `y` raises an error."""
         X, y = synthetic_data
-        im = ImpactModel(lm, rng_key=random.key(42), vi=vi)
+        im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
         dataloader = ArrayLoader(ArrayDataset(X=X, y=y), rng_key=random.key(42))
         with pytest.raises(
             TypeError,
@@ -108,7 +108,7 @@ class TestArrayLoader:
         rng_key = random.key(42)
         rng_key, rng_subkey = random.split(rng_key)
         rng_key, _ = random.split(rng_subkey)
-        im_without_dataloader = ImpactModel(lm, rng_key=random.key(0), vi=vi)
+        im_without_dataloader = ImpactModel(lm, rng_key=random.key(0), inference=vi)
         im_without_dataloader.fit(
             X=X,
             y=y,
@@ -130,7 +130,7 @@ class TestArrayLoader:
         rng_key = random.key(42)
         rng_key, rng_subkey = random.split(rng_key)
         rng_key, rng_loader_key = random.split(rng_subkey)
-        im_with_dataloader = ImpactModel(lm, rng_key=random.key(0), vi=vi)
+        im_with_dataloader = ImpactModel(lm, rng_key=random.key(0), inference=vi)
         im_with_dataloader.fit(
             X=ArrayLoader(
                 ArrayDataset(X=X, y=y),

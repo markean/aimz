@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aimz"
-version = "0.3.0b0"
+version = "0.3.0"
 description = "Scalable probabilistic impact modeling"
 readme = "README.md"
 license = "Apache-2.0"
@@ -59,6 +59,7 @@ per-file-ignores = { "tests*" = [
 ], "*.ipynb" = [
     "ERA001", # commented-out-code
     "T201",   # print
+    "PD011",  # pandas-use-of-dot-values
     "PD901",  # pandas-df-variable-name
     "D101",   # undocumented-public-class
     "D102",   # undocumented-public-method

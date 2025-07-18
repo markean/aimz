@@ -36,7 +36,7 @@ def test_rng_key_consistency(
     """
     X, y = synthetic_data
     rng_key = random.key(42)
-    im = ImpactModel(lm, rng_key=rng_key, vi=vi)
+    im = ImpactModel(lm, rng_key=rng_key, inference=vi)
     assert jnp.allclose(im.rng_key, rng_key)
     im.train_on_batch(X=X, y=y, rng_key=rng_key)
     assert jnp.allclose(im.rng_key, rng_key)

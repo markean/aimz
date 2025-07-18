@@ -47,7 +47,7 @@ def test_set_posterior_sample(
     rng_key, rng_subkey = random.split(rng_key)
     posterior_sample = posterior(rng_subkey)
 
-    im = ImpactModel(lm, rng_key=rng_key, vi=vi)
+    im = ImpactModel(lm, rng_key=rng_key, inference=vi)
     im.vi_result = vi_result
     # Use the same key for reproducibility
     im.set_posterior_sample(im.sample(num_samples=100, rng_key=rng_subkey))

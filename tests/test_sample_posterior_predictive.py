@@ -38,7 +38,7 @@ class TestKernelParameterValidation:
     ) -> None:
         """An invalid parameter raise an error."""
         X, y = synthetic_data
-        im = ImpactModel(lm, rng_key=random.key(42), vi=vi)
+        im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
         im.fit(X=X, y=y, batch_size=3)
         with pytest.raises(TypeError):
             im.sample_posterior_predictive(X=X, y=y)
@@ -51,7 +51,7 @@ def test_sample_posterior_predictive_lm(
 ) -> None:
     """Test the `.sample_posterior_predictive()` method of `ImpactModel`."""
     X, y = synthetic_data
-    im = ImpactModel(lm, rng_key=random.key(42), vi=vi)
+    im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
     im.fit(X=X, y=y, num_samples=99, batch_size=3)
     samples = im.sample_posterior_predictive(X=X)
 

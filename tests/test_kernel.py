@@ -39,7 +39,7 @@ class TestModelKernel:
             ImpactModel(
                 kernel,
                 rng_key=random.key(42),
-                vi=SVI(
+                inference=SVI(
                     kernel,
                     guide=AutoNormal(kernel),
                     optim=Adam(step_size=1e-3),
@@ -61,7 +61,7 @@ class TestModelKernel:
             ImpactModel(
                 kernel,
                 rng_key=random.key(42),
-                vi=SVI(
+                inference=SVI(
                     kernel,
                     guide=AutoNormal(kernel),
                     optim=Adam(step_size=1e-3),
@@ -79,7 +79,7 @@ class TestModelKernel:
             ImpactModel(
                 kernel,
                 rng_key=random.key(42),
-                vi=SVI(
+                inference=SVI(
                     kernel,
                     guide=AutoNormal(kernel),
                     optim=Adam(step_size=1e-3),
@@ -97,7 +97,7 @@ class TestModelKernel:
             ImpactModel(
                 kernel,
                 rng_key=random.key(42),
-                vi=SVI(
+                inference=SVI(
                     kernel,
                     guide=AutoNormal(kernel),
                     optim=Adam(step_size=1e-3),
@@ -115,7 +115,7 @@ class TestModelKernel:
             ImpactModel(
                 kernel,
                 rng_key=random.key(42),
-                vi=SVI(
+                inference=SVI(
                     kernel,
                     guide=AutoNormal(kernel),
                     optim=Adam(step_size=1e-3),
@@ -133,7 +133,7 @@ class TestModelKernel:
             ImpactModel(
                 kernel,
                 rng_key=random.key(42),
-                vi=SVI(
+                inference=SVI(
                     kernel,
                     guide=AutoNormal(kernel),
                     optim=Adam(step_size=1e-3),

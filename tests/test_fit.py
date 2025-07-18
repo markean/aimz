@@ -47,7 +47,7 @@ class TestKernelSignatureValidation:
             im = ImpactModel(
                 kernel,
                 rng_key=random.PRNGKey(42),
-                vi=SVI(
+                inference=SVI(
                     kernel,
                     guide=AutoNormal(kernel),
                     optim=Adam(step_size=1e-3),
@@ -66,7 +66,7 @@ class TestKernelSignatureValidation:
         im = ImpactModel(
             kernel,
             rng_key=random.key(42),
-            vi=SVI(
+            inference=SVI(
                 kernel,
                 guide=AutoNormal(kernel),
                 optim=Adam(step_size=1e-3),
@@ -89,7 +89,7 @@ class TestKernelBodyValidation:
         im = ImpactModel(
             kernel,
             rng_key=random.key(42),
-            vi=SVI(
+            inference=SVI(
                 kernel,
                 guide=AutoNormal(kernel),
                 optim=Adam(step_size=1e-3),
@@ -108,7 +108,7 @@ class TestKernelBodyValidation:
         im = ImpactModel(
             kernel,
             rng_key=random.key(42),
-            vi=SVI(
+            inference=SVI(
                 kernel,
                 guide=AutoNormal(kernel),
                 optim=Adam(step_size=1e-3),
@@ -127,7 +127,7 @@ class TestKernelBodyValidation:
         im = ImpactModel(
             kernel,
             rng_key=random.key(42),
-            vi=SVI(
+            inference=SVI(
                 kernel,
                 guide=AutoNormal(kernel),
                 optim=Adam(step_size=1e-3),
@@ -147,7 +147,7 @@ class TestKernelBodyValidation:
         im = ImpactModel(
             kernel,
             rng_key=random.key(42),
-            vi=SVI(
+            inference=SVI(
                 kernel,
                 guide=AutoNormal(kernel),
                 optim=Adam(step_size=1e-3),
@@ -167,7 +167,7 @@ def test_fit_unexpected_y_shape() -> None:
     im = ImpactModel(
         kernel,
         rng_key=random.key(42),
-        vi=SVI(
+        inference=SVI(
             kernel,
             guide=AutoNormal(kernel),
             optim=Adam(step_size=1e-3),
@@ -182,6 +182,6 @@ def test_fit_unexpected_y_shape() -> None:
 def test_fit_lm(synthetic_data: tuple[ArrayLike, ArrayLike], vi: SVI) -> None:
     """Test the `.fit()` method of `ImpactModel`."""
     X, y = synthetic_data
-    im = ImpactModel(lm, rng_key=random.key(42), vi=vi)
+    im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
     im.fit(X=X, y=y, batch_size=3)
     assert _is_fitted(im), "Model fitting check failed"

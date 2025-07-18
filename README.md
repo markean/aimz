@@ -71,7 +71,7 @@ def model(X: ArrayLike, y: ArrayLike | None = None) -> None:
 im = ImpactModel(
     model,
     rng_key=random.key(42),
-    vi=SVI(
+    inference=SVI(
         model,
         guide=AutoNormal(model),
         optim=optim.Adam(step_size=1e-3),
@@ -180,7 +180,7 @@ Comparing these two distributions allows us to estimate the causal effect of `Z`
 im = ImpactModel(
     model,
     rng_key=rng_key,
-    vi=SVI(
+    inference=SVI(
         model,
         guide=AutoNormal(model, init_loc_fn=init_to_feasible()),
         optim=optim.Adam(step_size=1e-3),

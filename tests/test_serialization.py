@@ -37,7 +37,7 @@ def test_save_load(
 ) -> None:
     """Test saving and loading an ImpactModel without errors."""
     X, y = synthetic_data
-    im = ImpactModel(lm, rng_key=random.key(42), vi=vi)
+    im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
     im.fit(X=X, y=y, batch_size=3)
 
     p = tmp_path / "model.dill"
