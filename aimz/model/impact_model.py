@@ -83,7 +83,7 @@ class ImpactModel(BaseModel):
         self,
         kernel: Callable,
         rng_key: ArrayLike,
-        vi: "SVI",
+        inference: "SVI",
         *,
         param_input: str = "X",
         param_output: str = "y",
@@ -93,9 +93,9 @@ class ImpactModel(BaseModel):
         Args:
             kernel (Callable): A probabilistic model with Pyro primitives.
             rng_key (ArrayLike): A pseudo-random number generator key.
-            vi (SVI): A variational inference object supported by NumPyro, such as an
-                instance of `numpyro.infer.svi.SVI` or any other object that implements
-                variational inference.
+            inference (SVI): A variational inference object supported by NumPyro, such
+                as an instance of `numpyro.infer.svi.SVI` or any other object that
+                implements variational inference.
             param_input (str, optional): The name of the parameter in the `kernel` for
                 the main input data. Defaults to `"X"`.
             param_output (str, optional): The name of the parameter in the `kernel` for
@@ -114,7 +114,7 @@ class ImpactModel(BaseModel):
             rng_key = random.wrap_key_data(rng_key)
 
         self.rng_key = rng_key
-        self.vi = vi
+        self.inference = inference
         self._vi_state = None
         self.posterior = None
 
@@ -280,7 +280,7 @@ class ImpactModel(BaseModel):
             self.rng_key, rng_key = random.split(self.rng_key)
 
         return _sample_forward(
-            substitute(self.vi.guide, data=self.vi_result.params),
+            substitute(self.inference.guide, data=self.vi_result.params),
             rng_key=rng_key,
             num_samples=num_samples,
             return_sites=return_sites,
@@ -401,11 +401,11 @@ class ImpactModel(BaseModel):
             )
             if rng_key is None:
                 self.rng_key, rng_key = random.split(self.rng_key)
-            self._vi_state = self.vi.init(rng_key, **batch)
+            self._vi_state = self.inference.init(rng_key, **batch)
         if self._fn_vi_update is None:
             _, kwargs_extra = _group_kwargs(kwargs)
             self._fn_vi_update = jit(
-                self.vi.update,
+                self.inference.update,
                 static_argnames=tuple(kwargs_extra._fields),
             )
 
@@ -480,7 +480,7 @@ class ImpactModel(BaseModel):
 
         logger.info("Performing variational inference optimization...")
         rng_key, rng_subkey = random.split(rng_key)
-        self.vi_result = self.vi.run(
+        self.vi_result = self.inference.run(
             rng_subkey,
             num_steps=num_steps,
             progress_bar=progress,
@@ -595,7 +595,7 @@ class ImpactModel(BaseModel):
                 f"Average loss: {float(jnp.mean(losses_epoch)):.4f}",
             )
         self.vi_result = SVIRunResult(
-            params=self.vi.get_params(self._vi_state),
+            params=self.inference.get_params(self._vi_state),
             state=self._vi_state,
             losses=jnp.asarray(losses),
         )

@@ -37,7 +37,7 @@ def test_model_not_fitted() -> None:
     im = ImpactModel(
         kernel,
         rng_key=random.key(42),
-        vi=SVI(
+        inference=SVI(
             kernel,
             guide=AutoNormal(kernel),
             optim=Adam(step_size=1e-3),
@@ -59,7 +59,7 @@ class TestKernelParameterValidation:
     ) -> None:
         """An invalid parameter raise an error."""
         X, y = synthetic_data
-        im = ImpactModel(lm, rng_key=random.key(42), vi=vi)
+        im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
         im.fit(X=X, y=y, batch_size=3)
         with pytest.raises(TypeError):
             im.predict_on_batch(X=X, y=y)
@@ -72,7 +72,7 @@ class TestKernelParameterValidation:
     ) -> None:
         """Extra parameters not present in the kernel raise an error."""
         X, y = synthetic_data
-        im = ImpactModel(lm, rng_key=random.key(42), vi=vi)
+        im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
         im.fit(X=X, y=y, batch_size=3)
         with pytest.raises(TypeError):
             im.predict_on_batch(X=X, y=y, extra=True)
@@ -94,7 +94,7 @@ class TestKernelParameterValidation:
             optim=Adam(step_size=1e-3),
             loss=Trace_ELBO(),
         )
-        im = ImpactModel(kernel, rng_key=random.key(42), vi=vi)
+        im = ImpactModel(kernel, rng_key=random.key(42), inference=vi)
         im.fit(X=X, arg=arg, y=y, batch_size=3)
         with pytest.raises(TypeError):
             im.predict_on_batch(X=X)
@@ -107,6 +107,6 @@ def test_predict_on_batch_lm_with_kwargs_array(
 ) -> None:
     """Test the `.predict_on_batch()` method of `ImpactModel`."""
     X, y = synthetic_data
-    im = ImpactModel(lm_with_kwargs_array, rng_key=random.key(42), vi=vi)
+    im = ImpactModel(lm_with_kwargs_array, rng_key=random.key(42), inference=vi)
     im.fit(X=X, y=y, c=y, batch_size=3)
     im.predict_on_batch(X=X, c=y)

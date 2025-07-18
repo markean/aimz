@@ -38,7 +38,7 @@ class TestKernelParameterValidation:
     ) -> None:
         """An invalid parameter raise an error."""
         X, y = synthetic_data
-        im = ImpactModel(lm, rng_key=random.key(42), vi=vi)
+        im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
         with pytest.raises(TypeError):
             im.sample_prior_predictive(X=X, y=y)
 
@@ -50,7 +50,7 @@ def test_sample_prior_predictive_lm(
 ) -> None:
     """Test the `.sample_prior_predictive()` method of `ImpactModel`."""
     X, _ = synthetic_data
-    im = ImpactModel(lm, rng_key=random.key(42), vi=vi)
+    im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
     samples = im.sample_prior_predictive(X=X, num_samples=99)
 
     assert isinstance(samples, dict)

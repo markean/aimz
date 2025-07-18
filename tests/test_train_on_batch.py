@@ -30,7 +30,7 @@ def test_train_on_batch_lm_with_kwargs_array(
 ) -> None:
     """Test the `.train_on_batch()` method of `ImpactModel`."""
     X, y = synthetic_data
-    im = ImpactModel(lm_with_kwargs_array, rng_key=random.key(42), vi=vi)
+    im = ImpactModel(lm_with_kwargs_array, rng_key=random.key(42), inference=vi)
 
     for i in range(1000):
         _, loss = im.train_on_batch(X=X, y=y, c=y)

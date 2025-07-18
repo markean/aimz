@@ -37,7 +37,7 @@ def test_model_not_fitted() -> None:
     im = ImpactModel(
         kernel,
         rng_key=random.key(42),
-        vi=SVI(
+        inference=SVI(
             kernel,
             guide=AutoNormal(kernel),
             optim=Adam(step_size=1e-3),
@@ -55,7 +55,7 @@ def test_predict_fall_back(
 ) -> None:
     """Calling `.predict()` warns and falls back on an incompatible model."""
     X, y = synthetic_data
-    im = ImpactModel(latent_variable_model, rng_key=random.key(42), vi=vi)
+    im = ImpactModel(latent_variable_model, rng_key=random.key(42), inference=vi)
     im.fit(X=X, y=y, batch_size=len(X))
     msg = "One or more posterior sample shapes are not compatible"
     with pytest.warns(UserWarning, match=msg):
@@ -73,7 +73,7 @@ class TestKernelParameterValidation:
     ) -> None:
         """An invalid parameter raise an error."""
         X, y = synthetic_data
-        im = ImpactModel(lm, rng_key=random.key(42), vi=vi)
+        im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
         im.fit(X=X, y=y, batch_size=3)
         with pytest.raises(TypeError):
             im.predict(X=X, y=y)
@@ -86,7 +86,7 @@ class TestKernelParameterValidation:
     ) -> None:
         """Extra parameters not present in the kernel raise an error."""
         X, y = synthetic_data
-        im = ImpactModel(lm, rng_key=random.key(42), vi=vi)
+        im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
         im.fit(X=X, y=y, batch_size=3)
         with pytest.raises(TypeError):
             im.predict(X=X, extra=True)
@@ -108,7 +108,7 @@ class TestKernelParameterValidation:
             optim=Adam(step_size=1e-3),
             loss=Trace_ELBO(),
         )
-        im = ImpactModel(kernel, rng_key=random.key(42), vi=vi)
+        im = ImpactModel(kernel, rng_key=random.key(42), inference=vi)
         im.fit(X=X, y=y, arg=arg, batch_size=3)
         with pytest.raises(TypeError):
             im.predict(X=X)
@@ -125,7 +125,7 @@ class TestBatchSize:
     ) -> None:
         """Warns if `batch_size` is not explicitly set."""
         X, y = synthetic_data
-        im = ImpactModel(lm, rng_key=random.key(42), vi=vi)
+        im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
         im.fit(X=X, y=y, batch_size=3)
         # NOTE: An additional warning about batch size not being divisible by the number
         # of devices may also be raised.
@@ -140,7 +140,7 @@ def test_predict_after_cleanup(
 ) -> None:
     """Test `.predict()` recreates tempdir after `.cleanup()`."""
     X, y = synthetic_data
-    im = ImpactModel(lm, rng_key=random.key(42), vi=vi)
+    im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
     # NOTE: An additional warning about batch size not being divisible by the number
     # of devices may also be raised.
     with pytest.warns(UserWarning, match=".*"):

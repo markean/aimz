@@ -5,10 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [v0.3.0](https://github.com/markean/aimz/releases/tag/v0.3.0) - 2025-07-18
 
 ### Changed
 
+- `ImpactModel` initialization parameter `vi` has been renamed to `inference` for compatibility with MCMC in future releases (@markean, [#23](https://github.com/markean/aimz/issues/23)).
 - `ImpactModel` now supports `ArrayLoader` for both input and output data (@markean, [#24](https://github.com/markean/aimz/issues/24)).
 - Renamed the posterior sample attribute of `ImpactModel` from `.posterior_samples_` to `.posterior`, which is now initialized to `None` (@markean, [#25](https://github.com/markean/aimz/issues/25)).
 - `ArrayLoader` and `ArrayDataset` no longer require the `torch` dependency. `ArrayDataset` now accepts only named arrays, and `ArrayLoader` yields tuples of a dictionary and a padding integer (@markean, [#26](https://github.com/markean/aimz/issues/26)).
