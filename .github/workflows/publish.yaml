@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to publish'
+        description: 'Version to publish (x.y.z)'
         required: true
       destination:
         description: 'Where to upload (testpypi or pypi)'
