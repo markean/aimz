@@ -18,10 +18,29 @@ import pytest
 from conftest import lm
 from jax import random
 from jax.typing import ArrayLike
-from numpyro.infer import SVI
+from numpyro.infer import SVI, Trace_ELBO
+from numpyro.infer.autoguide import AutoNormal
+from numpyro.optim import Adam
 
 from aimz.model import ImpactModel
 from aimz.utils._validation import _is_fitted
+
+
+def test_fit_on_batch_nan_warning(synthetic_data: tuple[ArrayLike, ArrayLike]) -> None:
+    """Test that `.fit_on_batch()` emits a RuntimeWarning when NaN is in the loss."""
+    X, y = synthetic_data
+    im = ImpactModel(
+        lm,
+        rng_key=random.key(42),
+        inference=SVI(
+            lm,
+            guide=AutoNormal(lm),
+            optim=Adam(step_size=1e3),
+            loss=Trace_ELBO(),
+        ),
+    )
+    with pytest.warns(RuntimeWarning):
+        im.fit_on_batch(X, y)
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)

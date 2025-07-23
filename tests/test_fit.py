@@ -178,6 +178,26 @@ def test_fit_unexpected_y_shape() -> None:
         im.fit(X=jnp.zeros((3, 2)), y=jnp.zeros((3, 1)), batch_size=3)
 
 
+def test_fit_nan_warning(synthetic_data: tuple[ArrayLike, ArrayLike]) -> None:
+    """Test that `.fit()` emits a RuntimeWarning when NaN is in the loss."""
+    X, y = synthetic_data
+    im = ImpactModel(
+        lm,
+        rng_key=random.key(42),
+        inference=SVI(
+            lm,
+            guide=AutoNormal(lm),
+            optim=Adam(step_size=1e3),
+            loss=Trace_ELBO(),
+        ),
+    )
+    with pytest.warns(RuntimeWarning):
+        im.fit(X, y, batch_size=len(X), epochs=3)
+
+    with pytest.warns(RuntimeWarning):
+        im.fit_on_batch(X, y)
+
+
 @pytest.mark.parametrize("vi", [lm], indirect=True)
 def test_fit_lm(synthetic_data: tuple[ArrayLike, ArrayLike], vi: SVI) -> None:
     """Test the `.fit()` method of `ImpactModel`."""
