@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aimz"
-version = "0.4.0.dev0"
+version = "0.3.1"
 description = "Scalable probabilistic impact modeling"
 readme = "README.md"
 license = "Apache-2.0"
@@ -17,7 +17,7 @@ requires-python = ">=3.11"
 dependencies = [
     "arviz>=0.21",
     "dask>=2025.5",
-    "jax>=0.5.3",
+    "jax>=0.6,<0.7",
     "numpyro>=0.18.0",
     "scikit-learn>=1.6.1",
     "tqdm>=4.67",
@@ -34,7 +34,7 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-dev = ["dill>=0.4.0", "pytest>=8.3", "pytest-cov>=6"]
+dev = ["dill>=0.4.0", "pytest>=8.4", "pytest-cov>=6"]
 gpu = ["jax[cuda12]>=0.5.3"]
 
 [project.urls]
