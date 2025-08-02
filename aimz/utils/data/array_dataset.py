@@ -15,7 +15,7 @@
 """Module for custom dataset for JAX arrays."""
 
 import jax.numpy as jnp
-from jax import Array, tree
+from jax import Array
 from jax.typing import ArrayLike
 
 
@@ -45,7 +45,7 @@ class ArrayDataset:
             raise ValueError(msg)
         (self.length,) = lengths
         if to_jax:
-            self.arrays = tree.map(lambda x: jnp.asarray(x), arrays)
+            self.arrays = {k: jnp.asarray(v) for k, v in arrays.items()}
         else:
             self.arrays = arrays
 

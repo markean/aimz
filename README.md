@@ -1,4 +1,5 @@
 # aimz: Scalable probabilistic impact modeling
+
 [![Project Status: Active – The project has reached a stable, usable state and is being actively developed.](https://www.repostatus.org/badges/latest/active.svg)](https://www.repostatus.org/#active)
 ![Run Pytest](https://github.com/markean/aimz/actions/workflows/coverage.yaml/badge.svg)
 [![Build GitHub Pages](https://github.com/markean/aimz/actions/workflows/gh-pages.yaml/badge.svg)](https://markean.github.io/aimz/)
@@ -10,31 +11,33 @@
 [![codecov](https://codecov.io/gh/markean/aimz/graph/badge.svg?token=34OH7KQBXE)](https://codecov.io/gh/markean/aimz)
 [![DOI](https://zenodo.org/badge/1009062911.svg)](https://doi.org/10.5281/zenodo.16101876)
 
-
 [**Installation**](https://markean.github.io/aimz/installation/#installation) |
 [**Documentation**](https://markean.github.io/aimz/)
 
-
 ## Overview
+
 **aimz** is a Python library for flexible and scalable probabilistic impact modeling to assess the effects of interventions on outcomes of interest.
 Designed to work with user-defined models with probabilistic primitives, the library builds on [NumPyro](https://num.pyro.ai/en/stable/), [JAX](https://jax.readthedocs.io/en/latest/), [Xarray](https://xarray.dev/), and [Zarr](https://zarr.readthedocs.io/en/stable/) to enable efficient inference workflows.
 
-
 ## Features
+
 - An intuitive API that combines ease of use from ML frameworks with the flexibility of probabilistic modeling.
 - Scalable computation via parallelism and distributed data processing—no manual orchestration required.
 - Variational inference as the primary inference engine, supporting custom optimization strategies and results.
 - Support for interventional causal inference for modeling counterfactuals and causal relations.
 
-
 ## Usage
+
 ### Workflow
+
 1. Outline the model, considering the data generating process, latent variables, and causal relationships, if any.
 2. Translate the model into a **kernel** (i.e., a function) using NumPyro and JAX.
 3. Integrate the kernel into the provided API to train the model and perform inference.
 
 ### Example 1: Regression Using a scikit-learn-like Workflow
+
 This example demonstrates a simple regression model following a typical ML workflow. The `ImpactModel` class provides `.fit()` and `.fit_on_batch()` for variational inference and posterior sampling, and `.predict()` and `.predict_on_batch()` for posterior predictive sampling. The optional `.cleanup()` removes posterior predictive samples saved as temporary files.
+
 ```python
 import jax.numpy as jnp
 import numpyro.distributions as dist
@@ -91,9 +94,11 @@ idata = im.predict(X_test)
 # Clean up posterior predictive samples saved to disk during `.predict()`
 im.cleanup()
 ```
+
 > The training step can be skipped if pre-trained variational inference results or posterior samples are available. These can be integrated into the `ImpactModel`, allowing `.predict()` to be available subsequently.
 
 ### Example 2: Causal Network with Confounder
+
 This example illustrates a simple causal network. The variable `Z` has a direct causal effect on the outcome `Y`, while both are influenced by a shared confounder, `C`. An additional variable, `X`, is an observed exogenous factor that influences `Z` but has no direct effect on `Y`.
 
 Our objective is to estimate the causal effect of `Z` (or alternatively `X`) on `Y`, while properly accounting for the confounding influence of `C`. We assume the following generative model for the observed data:
@@ -141,7 +146,9 @@ def model(X: ArrayLike, C: ArrayLike, y: ArrayLike | None = None) -> None:
 ```
 
 #### Simulating data under a known structural model
+
 We generate synthetic data consistent with the assumed causal structure:
+
 - `C` is drawn from an exponential distribution.
 - `X` is a count variable from a Poisson distribution.
 - `Z` is generated as a noisy exponential function of `C` and `X`.
@@ -173,7 +180,9 @@ y = random.bernoulli(rng_subkey, p=p).astype(jnp.int32)
 ```
 
 #### Fitting the model and estimating causal effects
+
 We fit the model using stochastic variational inference. Once trained, we perform a counterfactual analysis to isolate the effect of `Z` on `Y`.
+
 - `idata_factual` represents predictions under the factual setting (with observed `Z`).
 - `idata_counterfactual` represents predictions under a counterfactual intervention where `Z` is set to zero.
 Comparing these two distributions allows us to estimate the causal effect of `Z` on `Y`, adjusted for the influence of `C`.
@@ -206,12 +215,13 @@ impact = im.estimate_effect(
     output_intervention=idata_counterfactual,
 )
 ```
+
 > Local latent variable requires `.predict_on_batch()` here. Prefer `.predict()` whenever it is compatible with the model.
 
-
 ## Getting Help
+
 For feature requests, assistance, or any inquiries, contact maintainers or open an issue/pull request.
 
-
 ## Contributing
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
