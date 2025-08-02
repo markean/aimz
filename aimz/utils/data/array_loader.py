@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 from warnings import warn
 
 import jax.numpy as jnp
-from jax import Array, device_put, local_device_count, random, tree
+from jax import Array, device_put, local_device_count, random
 from jax.typing import ArrayLike
 
 from aimz.utils.data.array_dataset import ArrayDataset
@@ -119,7 +119,7 @@ class ArrayLoader:
                     k: self.pad_array(arr[batch_idx], n_pad=n_pad)
                     for k, arr in self.dataset.arrays.items()
                 }
-                batch = tree.map(lambda x: device_put(x, self.device), batch)
+                batch = {k: device_put(v, self.device) for k, v in batch.items()}
             else:
                 n_pad = 0
                 batch = {k: arr[batch_idx] for k, arr in self.dataset.arrays.items()}
