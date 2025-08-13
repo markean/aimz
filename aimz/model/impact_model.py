@@ -891,14 +891,15 @@ class ImpactModel(BaseModel):
             posterior_predictive_sample[dims_reordered],
             group="posterior_predictive" if in_sample else "predictions",
         )
-        out.add_groups(
-            {
-                "posterior": {
-                    k: jnp.expand_dims(v, axis=0) for k, v in self.posterior.items()
+        if self.posterior is not None:
+            out.add_groups(
+                {
+                    "posterior": {
+                        k: jnp.expand_dims(v, axis=0) for k, v in self.posterior.items()
+                    },
                 },
-            },
-        )
-        out["posterior"].attrs.update(make_attrs(library=modules["aimz"]))
+            )
+            out["posterior"].attrs.update(make_attrs(library=modules["aimz"]))
 
         return out
 
@@ -1041,14 +1042,15 @@ class ImpactModel(BaseModel):
             progress=progress,
             **kwargs,
         )
-        out.add_groups(
-            {
-                "posterior": {
-                    k: jnp.expand_dims(v, axis=0) for k, v in self.posterior.items()
+        if self.posterior is not None:
+            out.add_groups(
+                {
+                    "posterior": {
+                        k: jnp.expand_dims(v, axis=0) for k, v in self.posterior.items()
+                    },
                 },
-            },
-        )
-        out["posterior"].attrs.update(make_attrs(library=modules["aimz"]))
+            )
+            out["posterior"].attrs.update(make_attrs(library=modules["aimz"]))
 
         return out
 
