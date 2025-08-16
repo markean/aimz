@@ -60,6 +60,13 @@ class ArrayLoader:
                 overridden by the device setting of the model.
         """
         self.dataset = dataset
+        if (
+            not isinstance(batch_size, int)
+            or isinstance(batch_size, bool)
+            or batch_size <= 0
+        ):
+            msg = f"`batch_size` should be a positive integer, but got {batch_size!r}."
+            raise ValueError(msg)
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.indices = jnp.arange(len(self.dataset))

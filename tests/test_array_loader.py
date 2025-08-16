@@ -66,6 +66,18 @@ class TestArrayLoader:
         ):
             ArrayLoader(dataset, rng_key=random.PRNGKey(42))
 
+    def test_invalid_batch_size(self) -> None:
+        """Invalid `batch_size` raises a ValueError."""
+        with pytest.raises(
+            ValueError,
+            match="`batch_size` should be a positive integer",
+        ):
+            ArrayLoader(
+                dataset=ArrayDataset(X=np.array([[1, 2, 3], [4, 5, 6]])),
+                rng_key=random.key(42),
+                batch_size=0.5,
+            )
+
     def test_array_loader(self) -> None:
         """Padding along unsupported axis in a 1D array raises a ValueError."""
         y = jnp.array([1, 2, 3])
