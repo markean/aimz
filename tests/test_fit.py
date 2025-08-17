@@ -157,6 +157,27 @@ class TestKernelBodyValidation:
         with pytest.raises(KernelValidationError):
             im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)), batch_size=3)
 
+    def test_kernel_with_invalid_site_name(self) -> None:
+        """Kernel with site names incompatible with xarray.DataTree raises an error."""
+
+        def kernel(X: ArrayLike, y: ArrayLike | None = None) -> None:
+            mu = sample("x/y", dist.Normal())
+            sigma = sample("sigma", dist.Exponential(1.0))
+            sample("y", dist.Normal(mu, sigma), obs=y)
+
+        im = ImpactModel(
+            kernel,
+            rng_key=random.key(42),
+            inference=SVI(
+                kernel,
+                guide=AutoNormal(kernel),
+                optim=Adam(step_size=1e-3),
+                loss=Trace_ELBO(),
+            ),
+        )
+        with pytest.raises(KernelValidationError):
+            im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)), batch_size=3)
+
 
 def test_fit_unexpected_y_shape() -> None:
     """Calling `.fit()` with an unexpected shape of `y` raises a warning."""

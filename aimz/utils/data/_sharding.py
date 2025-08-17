@@ -68,13 +68,13 @@ def _create_sharded_sampler(
     def f(
         kernel: "Callable",
         num_samples: int,
-        rng_key: ArrayLike,
+        rng_key: Array,
         return_sites: tuple[str],
-        posterior_samples: dict[str, ArrayLike],
+        posterior_samples: dict[str, Array],
         param_input: str,
         kwargs_key: tuple[str],
         X: ArrayLike,
-        *args: tuple,
+        *args: ArrayLike,
     ) -> dict[str, Array]:
         return _sample_forward(
             model=kernel,
