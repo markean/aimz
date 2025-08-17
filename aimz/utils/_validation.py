@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from collections import OrderedDict
     from collections.abc import Callable
 
-    import arviz as az
+    import xarray as xr
 
     from aimz.model import ImpactModel
 
@@ -50,34 +50,30 @@ def _is_fitted(model: "ImpactModel") -> bool:
     return any(v.endswith("_") and not v.startswith("__") for v in vars(model))
 
 
-def _validate_group(
-    idata_baseline: "az.InferenceData",
-    idata_intervention: "az.InferenceData",
-) -> str:
-    """Validate the groups in `idata_baseline` and `idata_intervention`.
+def _validate_group(dt_baseline: "xr.DataTree", dt_intervention: "xr.DataTree") -> str:
+    """Validate the groups in `dt_baseline` and `dt_intervention`.
 
     Args:
-        idata_baseline (az.InferenceData): Precomputed output for the baseline scenario.
-        idata_intervention (az.InferenceData): Precomputed output for the intervention
-            scenario.
+        dt_baseline (xr.DataTree): Precomputed output for the baseline scenario.
+        dt_intervention (xr.DataTree): Precomputed output for the intervention scenario.
 
     Returns:
         str: The group name ("predictions" or "posterior_predictive").
 
     Raises:
-        ValueError: If the group is not found in `idata_intervention`.
+        ValueError: If the group is not found in `dt_intervention`.
     """
     group = (
         "predictions"
-        if "predictions" in idata_baseline.groups()
+        if "predictions" in dt_baseline.children
         else "posterior_predictive"
     )
 
-    if group not in idata_intervention.groups():
+    if group not in dt_intervention.children:
         sub = group
         msg = (
-            f"Group {sub!r} not found in `idata_intervention`. Available "
-            f"groups: {', '.join(map(repr, idata_intervention.groups()))}"
+            f"Group {sub!r} not found in `dt_intervention`. Available "
+            f"groups: {', '.join(map(repr, dt_intervention.children))}"
         )
         raise ValueError(msg)
 
@@ -147,6 +143,14 @@ def _validate_kernel_body(
         KernelValidationError: If the kernel body does not meet the required
             constraints.
     """
+    invalid_site = [site for site in model_trace if "/" in site]
+    if invalid_site:
+        msg = (
+            f"Invalid site names containing '/': {invalid_site!r}. "
+            "xarray.DataTree does not allow '/' in variable names."
+        )
+        raise KernelValidationError(msg)
+
     if param_output not in model_trace:
         msg = f"Kernel must include a sample site named {param_output!r}."
         raise KernelValidationError(msg)

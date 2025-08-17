@@ -26,12 +26,12 @@ from warnings import warn
 
 import jax.numpy as jnp
 from jax import Array, device_put, local_device_count, random
-from jax.typing import ArrayLike
 
 from aimz.utils.data.array_dataset import ArrayDataset
 
 if TYPE_CHECKING:
     from jax.sharding import Sharding
+    from numpy import ndarray
 
 
 class ArrayLoader:
@@ -40,7 +40,7 @@ class ArrayLoader:
     def __init__(
         self,
         dataset: ArrayDataset,
-        rng_key: ArrayLike,
+        rng_key: Array,
         *,
         batch_size: int = 32,
         shuffle: bool = False,
@@ -50,7 +50,7 @@ class ArrayLoader:
 
         Args:
             dataset (ArrayDataset): The dataset to load.
-            rng_key (ArrayLike): A pseudo-random number generator key.
+            rng_key (Array): A pseudo-random number generator key.
             batch_size (int): The number of samples per batch. Defaults to `32`.
             shuffle (bool, optional): Whether to shuffle the dataset before batching.
                 Defaults to `False`.
@@ -78,11 +78,11 @@ class ArrayLoader:
         self._num_devices = local_device_count()
         self.device = device
 
-    def pad_array(self, x: ArrayLike, n_pad: int, axis: int = 0) -> Array:
+    def pad_array(self, x: "Array | ndarray", n_pad: int, axis: int = 0) -> Array:
         """Pad an array to ensure compatibility with sharding.
 
         Args:
-            x (ArrayLike): The input array to be padded.
+            x (Array | ndarray): The input array to be padded.
             n_pad (int): The number of padding elements to add.
             axis (int): The axis along which to apply the padding. Defaults to `0`.
 

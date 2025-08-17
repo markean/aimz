@@ -9,7 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `ImpactModel` methods `.predict()`, `.predict_on_batch()`, `.log_likelihood()`, and `.estimate_effect()` now return outputs as xarray DataTree instead of ArviZ InferenceData. Dimension names now follow the `dim_N` convention instead of the previous `dimN` style (@markean, [#49](https://github.com/markean/aimz/issues/49)).
+- `.fit()`, `.fit_on_batch()`, and `.train_on_batch()` methods in `ImpactModel` now check for `"/"` in kernel site names to ensure compatibility with xarray DataTree (@markean, [#49](https://github.com/markean/aimz/issues/49)).
+- `.predict()` in `ImpactModel` now checks for available posterior samples before falling back to `.predict_on_batch()`.
 - `ArrayLoader` validates that `batch_size` is a positive integer.
+
+### Removed
+
+- Removed the `arviz` dependency (@markean, [#49](https://github.com/markean/aimz/issues/49)).
 
 ## [v0.3.2](https://github.com/markean/aimz/releases/tag/v0.3.2) - 2025-08-13
 

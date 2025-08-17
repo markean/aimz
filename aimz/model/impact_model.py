@@ -20,16 +20,13 @@ from inspect import signature
 from os import cpu_count
 from pathlib import Path
 from shutil import rmtree
-from sys import modules
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Self
 from warnings import warn
 
-import arviz as az
 import jax.numpy as jnp
 import numpy as np
 import xarray as xr
-from arviz.data.base import make_attrs
 from jax import (
     Array,
     default_backend,
@@ -51,6 +48,7 @@ from zarr import open_group
 
 from aimz.model._core import BaseModel
 from aimz.sampling._forward import _sample_forward
+from aimz.utils._format import _dict_to_datatree, _make_attrs
 from aimz.utils._kwargs import _group_kwargs
 from aimz.utils._output import (
     _create_output_subdir,
@@ -82,7 +80,7 @@ class ImpactModel(BaseModel):
     def __init__(
         self,
         kernel: Callable,
-        rng_key: ArrayLike,
+        rng_key: Array,
         inference: "SVI",
         *,
         param_input: str = "X",
@@ -92,7 +90,7 @@ class ImpactModel(BaseModel):
 
         Args:
             kernel (Callable): A probabilistic model with Pyro primitives.
-            rng_key (ArrayLike): A pseudo-random number generator key.
+            rng_key (Array): A pseudo-random number generator key.
             inference (SVI): A variational inference object supported by NumPyro, such
                 as an instance of `numpyro.infer.svi.SVI` or any other object that
                 implements variational inference.
@@ -116,7 +114,7 @@ class ImpactModel(BaseModel):
         self.rng_key = rng_key
         self.inference = inference
         self._vi_state = None
-        self.posterior = None
+        self.posterior: dict[str, Array] | None = None
 
         self._init_runtime_attrs()
 
@@ -209,7 +207,7 @@ class ImpactModel(BaseModel):
         X: ArrayLike,
         *,
         num_samples: int = 1000,
-        rng_key: ArrayLike | None = None,
+        rng_key: Array | None = None,
         return_sites: tuple[str] | None = None,
         **kwargs: object,
     ) -> dict[str, Array]:
@@ -219,7 +217,7 @@ class ImpactModel(BaseModel):
             X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
             num_samples (int, optional): The number of samples to draw. Defaults to
                 `1000`.
-            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
+            rng_key (Array | None, optional): A pseudo-random number generator key.
                 Defaults to `None`, then an internal key is used and split as needed.
             return_sites (tuple[str] | None, optional): Names of variables (sites) to
                 return. If `None`, samples all latent, observed, and deterministic
@@ -257,7 +255,7 @@ class ImpactModel(BaseModel):
     def sample(
         self,
         num_samples: int = 1000,
-        rng_key: ArrayLike | None = None,
+        rng_key: Array | None = None,
         return_sites: tuple[str] | None = None,
     ) -> dict[str, Array]:
         """Draw posterior samples from a fitted model.
@@ -265,7 +263,7 @@ class ImpactModel(BaseModel):
         Args:
             num_samples (int | None, optional): The number of posterior samples to draw.
                 Defaults to `1000`.
-            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
+            rng_key (Array | None, optional): A pseudo-random number generator key.
                 Defaults to `None`, then an internal key is used and split as needed.
             return_sites (tuple[str] | None, optional): Names of variables (sites) to
                 return. If `None`, samples all latent sites. Defaults to `None`.
@@ -292,7 +290,7 @@ class ImpactModel(BaseModel):
         self,
         X: ArrayLike,
         *,
-        rng_key: ArrayLike | None = None,
+        rng_key: Array | None = None,
         return_sites: tuple[str] | None = None,
         intervention: dict | None = None,
         **kwargs: object,
@@ -301,7 +299,7 @@ class ImpactModel(BaseModel):
 
         Args:
             X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
-            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
+            rng_key (Array | None, optional): A pseudo-random number generator key.
                 Defaults to `None`, then an internal key is used and split as needed.
             return_sites (tuple[str] | None, optional): Names of variables (sites) to
                 return. If `None`, samples all latent, observed, and deterministic
@@ -354,7 +352,7 @@ class ImpactModel(BaseModel):
         self,
         X: ArrayLike,
         y: ArrayLike,
-        rng_key: ArrayLike | None = None,
+        rng_key: Array | None = None,
         **kwargs: object,
     ) -> tuple[SVIState, Array]:
         """Run a single VI step on the given batch of data.
@@ -362,7 +360,7 @@ class ImpactModel(BaseModel):
         Args:
             X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
             y (ArrayLike): Output data with shape `(n_samples_Y,)`.
-            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
+            rng_key (Array | None, optional): A pseudo-random number generator key.
                 Defaults to `None`, then an internal key is used and split as needed.
                 The key is only used for initialization if the internal SVI state is not
                 yet set.
@@ -420,7 +418,7 @@ class ImpactModel(BaseModel):
         *,
         num_steps: int = 10000,
         num_samples: int = 1000,
-        rng_key: ArrayLike | None = None,
+        rng_key: Array | None = None,
         progress: bool = True,
         **kwargs: object,
     ) -> Self:
@@ -437,7 +435,7 @@ class ImpactModel(BaseModel):
                 optimization. Defaults to `10000`.
             num_samples (int | None, optional): The number of posterior samples to draw.
                 Defaults to `1000`.
-            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
+            rng_key (Array | None, optional): A pseudo-random number generator key.
                 Defaults to `None`, then an internal key is used and split as needed.
             progress (bool, optional): Whether to display a progress bar. Defaults to
                 `True`.
@@ -497,6 +495,9 @@ class ImpactModel(BaseModel):
         logger.info("Posterior sampling...")
         rng_key, rng_subkey = random.split(rng_key)
         self.posterior = self.sample(self.num_samples, rng_key=rng_subkey)
+        self._dt_posterior = (
+            _dict_to_datatree(self.posterior) if self.posterior else None
+        )
 
         return self
 
@@ -506,7 +507,7 @@ class ImpactModel(BaseModel):
         y: ArrayLike | None = None,
         *,
         num_samples: int = 1000,
-        rng_key: ArrayLike | None = None,
+        rng_key: Array | None = None,
         progress: bool = True,
         batch_size: int | None = None,
         epochs: int = 1,
@@ -529,7 +530,7 @@ class ImpactModel(BaseModel):
                 `None` if `X` is a data loader. Defaults to `None`.
             num_samples (int | None, optional): The number of posterior samples to draw.
                 Defaults to `1000`.
-            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
+            rng_key (Array | None, optional): A pseudo-random number generator key.
                 Defaults to `None`, then an internal key is used and split as needed.
             progress (bool, optional): Whether to display a progress bar. Defaults to
                 `True`.
@@ -569,10 +570,10 @@ class ImpactModel(BaseModel):
         )
 
         logger.info("Performing variational inference optimization...")
-        losses = []
+        losses: list[float] = []
         rng_key, rng_subkey = random.split(rng_key)
         for epoch in range(epochs):
-            losses_epoch = []
+            losses_epoch: list[float] = []
             pbar = tqdm(
                 dataloader,
                 total=len(dataloader),
@@ -588,11 +589,11 @@ class ImpactModel(BaseModel):
                 loss_batch = device_get(loss)
                 losses_epoch.append(loss_batch)
                 pbar.set_postfix({"loss": f"{float(loss_batch):.4f}"})
-            losses_epoch = jnp.stack(losses_epoch)
-            losses.extend(losses_epoch)
+            losses_epoch_arr = jnp.stack(losses_epoch)
+            losses.extend(losses_epoch_arr)
             tqdm.write(
                 f"Epoch {epoch + 1}/{epochs} - "
-                f"Average loss: {float(jnp.mean(losses_epoch)):.4f}",
+                f"Average loss: {float(jnp.mean(losses_epoch_arr)):.4f}",
             )
         self.vi_result = SVIRunResult(
             params=self.inference.get_params(self._vi_state),
@@ -608,6 +609,9 @@ class ImpactModel(BaseModel):
         logger.info("Posterior sampling...")
         rng_key, rng_subkey = random.split(rng_key)
         self.posterior = self.sample(self.num_samples, rng_key=rng_subkey)
+        self._dt_posterior = (
+            _dict_to_datatree(self.posterior) if self.posterior else None
+        )
 
         return self
 
@@ -622,7 +626,7 @@ class ImpactModel(BaseModel):
 
     def set_posterior_sample(
         self,
-        posterior_sample: dict[str, ArrayLike],
+        posterior_sample: dict[str, Array],
         return_sites: tuple[str] | None = None,
     ) -> Self:
         """Set posterior samples for the model.
@@ -640,8 +644,7 @@ class ImpactModel(BaseModel):
         (https://num.pyro.ai/en/stable/utilities.html#predictive).
 
         Args:
-            posterior_sample (dict[str, ArrayLike]): Posterior samples to set for the
-                model.
+            posterior_sample (dict[str, Array]): Posterior samples to set for the model.
             return_sites (tuple[str] | None, optional): Names of variable (sites) to
                 return in `.predict()`. Defaults to `None` and is set to `param_output`
                 if not specified.
@@ -655,9 +658,7 @@ class ImpactModel(BaseModel):
                 (i.e., have different shapes).
         """
         self.posterior = posterior_sample
-
         self._return_sites = return_sites or (self.param_output,)
-
         batch_ndims = 1
         batch_shapes = {
             sample.shape[:batch_ndims] for sample in self.posterior.values()
@@ -665,10 +666,9 @@ class ImpactModel(BaseModel):
         if len(batch_shapes) > 1:
             msg = f"Inconsistent batch shapes found in posterior_sample: {batch_shapes}"
             raise ValueError(msg)
-
         (self.num_samples,) = batch_shapes.pop()
-
         self._is_fitted = True
+        self._dt_posterior = _dict_to_datatree(self.posterior)
 
         return self
 
@@ -677,14 +677,14 @@ class ImpactModel(BaseModel):
         *,
         fn_sample_posterior_predictive: Callable,
         kernel: Callable,
-        X: ArrayLike,
-        rng_key: ArrayLike,
+        X: ArrayLike | ArrayLoader,
+        rng_key: Array,
         group: str,
-        batch_size: int,
+        batch_size: int | None,
         output_dir: Path,
         progress: bool,
         **kwargs: object,
-    ) -> az.InferenceData:
+    ) -> xr.DataTree:
         kwargs_array, kwargs_extra = _group_kwargs(kwargs)
 
         dataloader, _ = _setup_inputs(
@@ -692,6 +692,7 @@ class ImpactModel(BaseModel):
             y=None,
             rng_key=self.rng_key,
             batch_size=batch_size,
+            shuffle=False,
             device=self._device,
             **kwargs,
         )
@@ -748,7 +749,7 @@ class ImpactModel(BaseModel):
                             ),
                             dimension_names=(
                                 "draw",
-                                *tuple(f"{site}_dim{j}" for j in range(arr.ndim - 1)),
+                                *tuple(f"{site}_dim_{i}" for i in range(arr.ndim - 1)),
                             ),
                         )
                     queues[site].put(arr[:, : -n_pad or None])
@@ -772,19 +773,22 @@ class ImpactModel(BaseModel):
         ds = open_zarr(output_dir, consolidated=False).expand_dims(dim="chain", axis=0)
         ds = ds.assign_coords(
             {k: np.arange(ds.sizes[k]) for k in ds.sizes},
-        ).assign_attrs(make_attrs(library=modules["aimz"]))
+        ).assign_attrs(_make_attrs())
+        out = xr.DataTree(name="root")
+        out["posterior"] = self._dt_posterior
+        out[group] = xr.DataTree(ds)
 
-        return az.convert_to_inference_data(ds, group=group)
+        return out
 
     def predict_on_batch(
         self,
         X: ArrayLike,
         *,
         intervention: dict | None = None,
-        rng_key: ArrayLike | None = None,
+        rng_key: Array | None = None,
         in_sample: bool = True,
         **kwargs: object,
-    ) -> az.InferenceData:
+    ) -> xr.DataTree:
         """Predict the output based on the fitted model.
 
         This method returns predictions for a single batch of input data and is better
@@ -802,7 +806,7 @@ class ImpactModel(BaseModel):
                 their corresponding intervention values. Interventions enable
                 counterfactual analysis by modifying the specified sample sites during
                 prediction (posterior predictive sampling). Defaults to `None`.
-            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
+            rng_key (Array | None, optional): A pseudo-random number generator key.
                 Defaults to `None`, then an internal key is used and split as needed.
             in_sample (bool, optional): Specifies the group where posterior predictive
                 samples are stored in the returned output. If `True`, samples are stored
@@ -814,7 +818,7 @@ class ImpactModel(BaseModel):
                 values are expected to be JAX arrays.
 
         Returns:
-            An object containing posterior predictive samples.
+            Posterior predictive samples. Posterior samples are included if available.
 
         Raises:
             TypeError: If `self.param_output` is passed as an argument.
@@ -841,65 +845,18 @@ class ImpactModel(BaseModel):
             rng_key, rng_subkey = random.split(rng_key)
             kernel = seed(do(self.kernel, data=intervention), rng_seed=rng_subkey)
 
-        posterior_predictive_sample = xr.Dataset(
-            {
-                site: xr.DataArray(
-                    np.expand_dims(arr, axis=0),
-                    coords={
-                        "chain": np.arange(1),
-                        "draw": np.arange(self.num_samples),
-                        **{
-                            f"{site}_dim{i}": np.arange(arr.shape[i + 1])
-                            for i in range(arr.ndim - 1)
-                        },
-                    },
-                    dims=(
-                        # Adding the 'chain' dimension to support MCMC-style data
-                        # structures.
-                        "chain",
-                        "draw",
-                        # arr has shape (draw, dim0, dim1, ...), so arr.ndim includes
-                        # 'draw' and we subtract 1
-                        *[f"{site}_dim{i}" for i in range(arr.ndim - 1)],
-                    ),
-                    name=site,
-                )
-                for site, arr in _sample_forward(
-                    kernel,
-                    rng_key=rng_key,
-                    num_samples=self.num_samples,
-                    return_sites=self._return_sites,
-                    posterior_samples=self.posterior,
-                    model_kwargs=args_bound,
-                ).items()
-            },
-        ).assign_attrs(make_attrs(library=modules["aimz"]))
-
-        # Reorder the dimensions and add the return sites at the end
-        dims_reordered = [
-            "chain",
-            "draw",
-            *sorted(
-                str(x)
-                for x in list(posterior_predictive_sample.dims)
-                if x not in {"chain", "draw"}
+        out = xr.DataTree(name="root")
+        out["posterior"] = self._dt_posterior
+        out["posterior_predictive" if in_sample else "predictions"] = _dict_to_datatree(
+            _sample_forward(
+                kernel,
+                rng_key=rng_key,
+                num_samples=self.num_samples,
+                return_sites=self._return_sites,
+                posterior_samples=self.posterior,
+                model_kwargs=args_bound,
             ),
-            *self._return_sites,
-        ]
-
-        out = az.convert_to_inference_data(
-            posterior_predictive_sample[dims_reordered],
-            group="posterior_predictive" if in_sample else "predictions",
         )
-        if self.posterior is not None:
-            out.add_groups(
-                {
-                    "posterior": {
-                        k: jnp.expand_dims(v, axis=0) for k, v in self.posterior.items()
-                    },
-                },
-            )
-            out["posterior"].attrs.update(make_attrs(library=modules["aimz"]))
 
         return out
 
@@ -908,13 +865,13 @@ class ImpactModel(BaseModel):
         X: ArrayLike | ArrayLoader,
         *,
         intervention: dict | None = None,
-        rng_key: ArrayLike | None = None,
+        rng_key: Array | None = None,
         in_sample: bool = True,
         batch_size: int | None = None,
         output_dir: str | Path | None = None,
         progress: bool = True,
         **kwargs: object,
-    ) -> az.InferenceData:
+    ) -> xr.DataTree:
         """Predict the output based on the fitted model.
 
         This method performs posterior predictive sampling to generate model-based
@@ -932,7 +889,7 @@ class ImpactModel(BaseModel):
                 their corresponding intervention values. Interventions enable
                 counterfactual analysis by modifying the specified sample sites during
                 prediction (posterior predictive sampling). Defaults to `None`.
-            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
+            rng_key (Array | None, optional): A pseudo-random number generator key.
                 Defaults to `None`, then an internal key is used and split as needed.
             in_sample (bool, optional): Specifies the group where posterior predictive
                 samples are stored in the returned output. If `True`, samples are stored
@@ -956,7 +913,7 @@ class ImpactModel(BaseModel):
                 values are expected to be JAX arrays.
 
         Returns:
-            An object containing posterior predictive samples.
+            Posterior predictive samples. Posterior samples are included if available.
 
         Raises:
             TypeError: If `self.param_output` is passed as an argument.
@@ -973,7 +930,7 @@ class ImpactModel(BaseModel):
         # and raise a warning.
         if isinstance(X, ArrayLike):
             ndim_posterior_sample = 2
-            if any(
+            if self.posterior and any(
                 v.ndim == ndim_posterior_sample and v.shape[1] == len(X)
                 for v in self.posterior.values()
             ):
@@ -1031,7 +988,7 @@ class ImpactModel(BaseModel):
             )
         output_subdir = _create_output_subdir(output_dir)
 
-        out = self.__sample_posterior_predictive(
+        return self.__sample_posterior_predictive(
             fn_sample_posterior_predictive=self._fn_sample_posterior_predictive,
             kernel=kernel,
             X=X,
@@ -1042,32 +999,21 @@ class ImpactModel(BaseModel):
             progress=progress,
             **kwargs,
         )
-        if self.posterior is not None:
-            out.add_groups(
-                {
-                    "posterior": {
-                        k: jnp.expand_dims(v, axis=0) for k, v in self.posterior.items()
-                    },
-                },
-            )
-            out["posterior"].attrs.update(make_attrs(library=modules["aimz"]))
-
-        return out
 
     def estimate_effect(
         self,
-        output_baseline: az.InferenceData | None = None,
-        output_intervention: az.InferenceData | None = None,
+        output_baseline: xr.DataTree | None = None,
+        output_intervention: xr.DataTree | None = None,
         args_baseline: dict | None = None,
         args_intervention: dict | None = None,
-    ) -> az.InferenceData:
+    ) -> xr.DataTree:
         """Estimate the effect of an intervention.
 
         Args:
-            output_baseline (az.InferenceData | None, optional): Precomputed output for
-                the baseline scenario.
-            output_intervention (az.InferenceData | None, optional): Precomputed output
-                for the intervention scenario.
+            output_baseline (xr.DataTree | None, optional): Precomputed output for the
+                baseline scenario.
+            output_intervention (xr.DataTree | None, optional): Precomputed output for
+                the intervention scenario.
             args_baseline (dict | None, optional): Input arguments for the baseline
                 scenario. Passed to the `.predict()` method to compute predictions if
                 `output_baseline` is not provided. Ignored if `output_baseline` is
@@ -1087,29 +1033,29 @@ class ImpactModel(BaseModel):
         _check_is_fitted(self)
 
         if output_baseline:
-            idata_baseline = output_baseline
+            dt_baseline = output_baseline
         elif args_baseline:
-            idata_baseline = self.predict(**args_baseline)
+            dt_baseline = self.predict(**args_baseline)
         else:
             msg = "Either `output_baseline` or `args_baseline` must be provided."
             raise ValueError(msg)
 
         if output_intervention:
-            idata_intervention = output_intervention
+            dt_intervention = output_intervention
         elif args_intervention:
-            idata_intervention = self.predict(**args_intervention)
+            dt_intervention = self.predict(**args_intervention)
         else:
             msg = (
                 "Either `output_intervention` or `args_intervention` must be provided."
             )
             raise ValueError(msg)
 
-        group = _validate_group(idata_baseline, idata_intervention)
+        group = _validate_group(dt_baseline, dt_intervention)
 
-        return az.convert_to_inference_data(
-            idata_intervention[group] - idata_baseline[group],
-            group=group,
-        )
+        out = xr.DataTree(name="root")
+        out[group] = dt_intervention[group] - dt_baseline[group]
+
+        return out
 
     def log_likelihood(
         self,
@@ -1120,7 +1066,7 @@ class ImpactModel(BaseModel):
         output_dir: str | Path | None = None,
         progress: bool = True,
         **kwargs: object,
-    ) -> az.InferenceData:
+    ) -> xr.DataTree:
         """Compute the log likelihood of the data under the given model.
 
         Results are written to disk in the Zarr format, with computing and file writing
@@ -1148,7 +1094,7 @@ class ImpactModel(BaseModel):
                 values are expected to be JAX arrays.
 
         Returns:
-            An object containing log-likelihood values.
+            Log-likelihood values. Posterior samples are included if available.
         """
         _check_is_fitted(self)
 
@@ -1179,6 +1125,7 @@ class ImpactModel(BaseModel):
             y=y,
             rng_key=self.rng_key,
             batch_size=batch_size,
+            shuffle=False,
             device=self._device,
             **kwargs,
         )
@@ -1229,7 +1176,7 @@ class ImpactModel(BaseModel):
                         ),
                         dimension_names=(
                             "draw",
-                            *tuple(f"{site}_dim{j}" for j in range(arr.ndim - 1)),
+                            *tuple(f"{site}_dim_{i}" for i in range(arr.ndim - 1)),
                         ),
                     )
                 queues[site].put(arr[:, : -n_pad or None])
@@ -1256,9 +1203,12 @@ class ImpactModel(BaseModel):
         )
         ds = ds.assign_coords(
             {k: np.arange(ds.sizes[k]) for k in ds.sizes},
-        ).assign_attrs(make_attrs(library=modules["aimz"]))
+        ).assign_attrs(_make_attrs())
+        out = xr.DataTree(name="root")
+        out["posterior"] = self._dt_posterior
+        out["log_likelihood"] = xr.DataTree(ds)
 
-        return az.convert_to_inference_data(ds, group="log_likelihood")
+        return out
 
     def cleanup(self) -> None:
         """Clean up the temporary directory created for storing outputs.

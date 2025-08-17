@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aimz"
-version = "0.3.2"
+version = "0.4.0.dev0"
 description = "Scalable probabilistic impact modeling"
 readme = "README.md"
 license = "Apache-2.0"
@@ -15,7 +15,6 @@ authors = [
 maintainers = [{ name = "Eunseop Kim", email = "markean@pm.me" }]
 requires-python = ">=3.11"
 dependencies = [
-    "arviz>=0.21",
     "dask>=2025.5",
     "jax>=0.7",
     "numpyro>=0.19.0",

@@ -17,6 +17,7 @@
 from typing import TYPE_CHECKING, NamedTuple
 from warnings import warn
 
+from jax import Array
 from jax.typing import ArrayLike
 from sklearn.utils.validation import check_array, check_X_y
 
@@ -31,7 +32,7 @@ def _setup_inputs(
     *,
     X: ArrayLike | ArrayLoader,
     y: ArrayLike | None,
-    rng_key: ArrayLike,
+    rng_key: Array,
     batch_size: int | None,
     shuffle: bool = False,
     device: "Sharding | None" = None,
@@ -46,7 +47,7 @@ def _setup_inputs(
             `rng_key`, `batch_size` and `shuffle` are ignored.
         y (ArrayLike | None): Output data with shape `(n_samples_Y,)`. Must be
             `None` if `X` is a data loader.
-        rng_key (ArrayLike): A pseudo-random number generator key.
+        rng_key (Array): A pseudo-random number generator key.
         batch_size (int): The size of batches for data loading.
         shuffle (bool, optional): Whether to shuffle the dataset before batching.
             Defaults to `False`.

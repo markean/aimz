@@ -28,9 +28,9 @@ if TYPE_CHECKING:
 def _sample_forward(
     model: "Callable",
     num_samples: int,
-    rng_key: ArrayLike,
+    rng_key: Array,
     return_sites: tuple[str] | None,
-    posterior_samples: dict[str, ArrayLike] | None,
+    posterior_samples: dict[str, Array] | None,
     model_kwargs: dict[str, ArrayLike] | None,
 ) -> dict[str, Array]:
     """Generates forward samples from a model conditioned on parameter draws.
@@ -41,9 +41,9 @@ def _sample_forward(
     Args:
         model (Callable): A probabilistic model with Pyro primitives.
         num_samples (int): The number of samples to draw.
-        rng_key (ArrayLike): A pseudo-random number generator key.
+        rng_key (Array): A pseudo-random number generator key.
         return_sites (tuple[str] | None): Names of variables (sites) to return.
-        posterior_samples (dict[str, ArrayLike]| None): Dictionary of parameter samples
+        posterior_samples (dict[str, Array]| None): Dictionary of parameter samples
             where each array has shape (num_samples, ...).
         model_kwargs (dict[str, ArrayLike] | None): Additional arguments passed to the
             model.
@@ -54,7 +54,7 @@ def _sample_forward(
     """
 
     def _trace_one_sample(
-        sample_input: tuple[ArrayLike, dict[str, ArrayLike]],
+        sample_input: tuple[Array, dict[str, Array]],
     ) -> dict[str, Array]:
         rng_key, posterior_sample = sample_input
 
