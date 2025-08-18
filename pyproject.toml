@@ -34,7 +34,7 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = ["dill>=0.4.0", "pytest>=8.4", "pytest-cov>=6"]
-gpu = ["jax[cuda12]>=0.5.3"]
+gpu = ["jax[cuda12]>=0.7"]
 
 [project.urls]
 source = "https://github.com/markean/aimz"

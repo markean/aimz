@@ -21,7 +21,7 @@ from os import cpu_count
 from pathlib import Path
 from shutil import rmtree
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Self
+from typing import Self
 from warnings import warn
 
 import jax.numpy as jnp
@@ -40,6 +40,7 @@ from jax import (
 from jax.sharding import Mesh, NamedSharding, PartitionSpec
 from jax.typing import ArrayLike
 from numpyro.handlers import do, seed, substitute, trace
+from numpyro.infer import MCMC, SVI
 from numpyro.infer.svi import SVIRunResult, SVIState
 from sklearn.utils.validation import check_array, check_X_y
 from tqdm.auto import tqdm
@@ -68,9 +69,6 @@ from aimz.utils.data._sharding import (
     _create_sharded_sampler,
 )
 
-if TYPE_CHECKING:
-    from numpyro.infer import SVI
-
 logger = logging.getLogger(__name__)
 
 
@@ -81,7 +79,7 @@ class ImpactModel(BaseModel):
         self,
         kernel: Callable,
         rng_key: Array,
-        inference: "SVI",
+        inference: SVI | MCMC,
         *,
         param_input: str = "X",
         param_output: str = "y",
@@ -91,9 +89,8 @@ class ImpactModel(BaseModel):
         Args:
             kernel (Callable): A probabilistic model with Pyro primitives.
             rng_key (Array): A pseudo-random number generator key.
-            inference (SVI): A variational inference object supported by NumPyro, such
-                as an instance of `numpyro.infer.svi.SVI` or any other object that
-                implements variational inference.
+            inference (SVI | MCMC): An inference method supported by NumPyro, such
+                as an instance of `numpyro.infer.svi.SVI` or `numpyro.infer.mcmc.MCMC`.
             param_input (str, optional): The name of the parameter in the `kernel` for
                 the main input data. Defaults to `"X"`.
             param_output (str, optional): The name of the parameter in the `kernel` for
@@ -105,17 +102,20 @@ class ImpactModel(BaseModel):
             with `jax.random.PRNGKey()`.
         """
         super().__init__(kernel, param_input, param_output)
-
         if rng_key.dtype == jnp.uint32:
             msg = "Legacy `uint32` PRNGKey detected; converting to a typed key array."
             warn(msg, category=UserWarning, stacklevel=2)
             rng_key = random.wrap_key_data(rng_key)
-
         self.rng_key = rng_key
+        if not isinstance(inference, (SVI, MCMC)):
+            msg = (
+                f"Unsupported inference object: `{type(inference).__name__}`. "
+                "Expected `SVI` or `MCMC` from `numpyro.infer`."
+            )
+            raise TypeError(msg)
         self.inference = inference
         self._vi_state = None
         self.posterior: dict[str, Array] | None = None
-
         self._init_runtime_attrs()
 
     def _init_runtime_attrs(self) -> None:
@@ -226,7 +226,7 @@ class ImpactModel(BaseModel):
                 values are expected to be JAX arrays.
 
         Returns:
-            The prior predictive samples.
+            Prior predictive samples.
 
         Raises:
             TypeError: If `self.param_output` is passed as an argument.
@@ -257,25 +257,44 @@ class ImpactModel(BaseModel):
         num_samples: int = 1000,
         rng_key: Array | None = None,
         return_sites: tuple[str] | None = None,
+        **kwargs: object,
     ) -> dict[str, Array]:
         """Draw posterior samples from a fitted model.
 
         Args:
-            num_samples (int | None, optional): The number of posterior samples to draw.
+            num_samples (int, optional): The number of posterior samples to draw.
                 Defaults to `1000`.
             rng_key (Array | None, optional): A pseudo-random number generator key.
                 Defaults to `None`, then an internal key is used and split as needed.
+                Has no effect if the inference method is MCMC, where the
+                `post_warmup_state` property will be used to continue sampling.
             return_sites (tuple[str] | None, optional): Names of variables (sites) to
-                return. If `None`, samples all latent sites. Defaults to `None`.
+                return. If `None`, samples all latent sites. Defaults to `None`. Has no
+                effect if the inference method is MCMC.
+            **kwargs (object): Additional arguments passed to the model. All array-like
+                values are expected to be JAX arrays. Only relevant when the inference
+                method is MCMC.
 
         Returns:
-            The posterior samples.
+            Posterior samples.
 
         """
         _check_is_fitted(self)
 
         if rng_key is None:
             self.rng_key, rng_key = random.split(self.rng_key)
+
+        if isinstance(self.inference, MCMC):
+            # Validate the provided parameters against the kernel's signature
+            args_bound = signature(self.kernel).bind(**kwargs).arguments
+            if self.param_output not in args_bound:
+                msg = f"{self.param_output!r} must be provided in `.sample()`."
+                raise TypeError(msg)
+            self.inference.post_warmup_state = self.inference.last_state
+            self.inference.num_samples = num_samples
+            self.inference.run(self.inference.post_warmup_state.rng_key, **args_bound)
+
+            return device_get(self.inference.get_samples())
 
         return _sample_forward(
             substitute(self.inference.guide, data=self.vi_result.params),
@@ -312,7 +331,7 @@ class ImpactModel(BaseModel):
                 values are expected to be JAX arrays.
 
         Returns:
-            The posterior predictive samples.
+            Posterior predictive samples.
 
         Raises:
             TypeError: If `self.param_output` is passed as an argument.
@@ -424,21 +443,28 @@ class ImpactModel(BaseModel):
     ) -> Self:
         """Fit the impact model to the provided batch of data.
 
-        This method runs variational inference by invoking the `run()` method of the
-        `SVI` instance from NumPyro to estimate the posterior distribution, and then
-        draws samples from it.
+        This method behaves differently depending on the inference method specified at
+        initialization of the ImpactModel instance:
+
+        - **SVI:** Runs variational inference on the provided batch by invoking the
+        `run()` method of the `SVI` instance from NumPyro to estimate the posterior
+        distribution, then draws samples from it.
+
+        - **MCMC:** Runs posterior sampling by invoking the `run()` method of the `MCMC`
+            instance from NumPyro.
 
         Args:
             X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
             y (ArrayLike): Output data with shape `(n_samples_Y,)`.
             num_steps (int, optional): Number of steps for variational inference
-                optimization. Defaults to `10000`.
+                optimization. Defaults to `10000`. Has no effect if the inference method
+                is MCMC.
             num_samples (int | None, optional): The number of posterior samples to draw.
-                Defaults to `1000`.
+                Defaults to `1000`. Has no effect if the inference method is MCMC.
             rng_key (Array | None, optional): A pseudo-random number generator key.
                 Defaults to `None`, then an internal key is used and split as needed.
             progress (bool, optional): Whether to display a progress bar. Defaults to
-                `True`.
+                `True`. Has no effect if the inference method is MCMC.
             **kwargs (object): Additional arguments passed to the model. All array-like
                 values are expected to be JAX arrays.
 
@@ -474,27 +500,36 @@ class ImpactModel(BaseModel):
             self.param_output,
         )
 
-        self.num_samples = num_samples
-
-        logger.info("Performing variational inference optimization...")
         rng_key, rng_subkey = random.split(rng_key)
-        self.vi_result = self.inference.run(
-            rng_subkey,
-            num_steps=num_steps,
-            progress_bar=progress,
-            init_state=self._vi_state,
-            **args_bound,
-        )
-        self._vi_state = self.vi_result.state
-        if np.any(np.isnan(self.vi_result.losses)):
-            msg = "Loss contains NaN or Inf, indicating numerical instability."
-            warn(msg, category=RuntimeWarning, stacklevel=2)
+        if isinstance(self.inference, SVI):
+            self.num_samples = num_samples
+            logger.info("Performing variational inference optimization...")
+            self.vi_result = self.inference.run(
+                rng_subkey,
+                num_steps=num_steps,
+                progress_bar=progress,
+                init_state=self._vi_state,
+                **args_bound,
+            )
+            self._vi_state = self.vi_result.state
+            if np.any(np.isnan(self.vi_result.losses)):
+                warn(
+                    "Loss contains NaN or Inf, indicating numerical instability.",
+                    category=RuntimeWarning,
+                    stacklevel=2,
+                )
+            logger.info("Posterior sampling...")
+            rng_key, rng_subkey = random.split(rng_key)
+            self.posterior = self.sample(self.num_samples, rng_key=rng_subkey)
+        elif isinstance(self.inference, MCMC):
+            logger.info("Posterior sampling...")
+            self.inference.run(rng_subkey, **args_bound)
+            self.posterior = device_get(self.inference.get_samples())
+            self.num_samples = (
+                next(iter(self.posterior.values())).shape[0] if self.posterior else 0
+            )
 
         self._is_fitted = True
-
-        logger.info("Posterior sampling...")
-        rng_key, rng_subkey = random.split(rng_key)
-        self.posterior = self.sample(self.num_samples, rng_key=rng_subkey)
         self._dt_posterior = (
             _dict_to_datatree(self.posterior) if self.posterior else None
         )
@@ -547,12 +582,22 @@ class ImpactModel(BaseModel):
         Returns:
             The fitted model instance, enabling method chaining.
 
+        Raises:
+            TypeError: If the inference method is MCMC.
+
         Note:
             This method continues training from the existing SVI state if available.
             To start training from scratch, create a new model instance. It does not
             check whether the model or guide is written to support subsampling semantics
             (e.g., using NumPyro's `subsample` or similar constructs).
         """
+        if isinstance(self.inference, MCMC):
+            msg = (
+                "`.fit()` is not supported for MCMC inference. Use `.fit_on_batch()` "
+                "instead."
+            )
+            raise TypeError(msg)
+
         if rng_key is None:
             self.rng_key, rng_key = random.split(self.rng_key)
 
@@ -632,16 +677,17 @@ class ImpactModel(BaseModel):
         """Set posterior samples for the model.
 
         This method sets externally obtained posterior samples on the model instance,
-        enabling downstream analysis without requiring a call to `.fit()`.
+        enabling downstream analysis without requiring a call to `.fit()` or
+        `.fit_on_batch()`.
 
-        It is primarily intended for workflows where inference is performed manually—
-        for example, using NumPyro's `SVI` with the `Predictive` API—and the resulting
-        posterior samples are injected into the model for further use.
+        It is primarily intended for workflows where posterior sampling is performed
+        manually—for example, using NumPyro's `SVI` (or `MCMC`) with the `Predictive`
+        API—and the resulting posterior samples are injected into the model for further
+        use.
 
         Internally, `batch_ndims` is set to `1` by default to correctly handle the batch
         dimensions of the posterior samples. For more information, refer to the
-        [NumPyro Predictive documentation]
-        (https://num.pyro.ai/en/stable/utilities.html#predictive).
+        [NumPyro documentation](https://num.pyro.ai/en/stable/utilities.html#predictive).
 
         Args:
             posterior_sample (dict[str, Array]): Posterior samples to set for the model.
@@ -654,19 +700,18 @@ class ImpactModel(BaseModel):
                 method chaining.
 
         Raises:
-            ValueError: If the batch shapes in `posterior_sample` are inconsistent
-                (i.e., have different shapes).
+            ValueError: If the batch shapes in `posterior_sample` are inconsistent.
         """
-        self.posterior = posterior_sample
-        self._return_sites = return_sites or (self.param_output,)
         batch_ndims = 1
         batch_shapes = {
-            sample.shape[:batch_ndims] for sample in self.posterior.values()
+            sample.shape[:batch_ndims] for sample in posterior_sample.values()
         }
         if len(batch_shapes) > 1:
             msg = f"Inconsistent batch shapes found in posterior_sample: {batch_shapes}"
             raise ValueError(msg)
         (self.num_samples,) = batch_shapes.pop()
+        self.posterior = posterior_sample
+        self._return_sites = return_sites or (self.param_output,)
         self._is_fitted = True
         self._dt_posterior = _dict_to_datatree(self.posterior)
 
