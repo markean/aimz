@@ -36,11 +36,11 @@ def test_set_posterior_sample(
     synthetic_data: tuple[ArrayLike, ArrayLike],
     vi: "SVI",
 ) -> None:
-    """Test the `.set_posterior_sample()` method of `ImpactModel`."""
+    """Test the `.set_posterior_sample()` method of ImpactModel."""
     X, y = synthetic_data
 
     rng_key = random.key(42)
-    rng_key, rng_subkey = random.split(key=rng_key)
+    rng_key, rng_subkey = random.split(rng_key)
     vi_result = vi.run(rng_subkey, num_steps=1000, X=X, y=y)
 
     posterior = Predictive(vi.guide, params=vi_result.params, num_samples=100)
@@ -61,3 +61,14 @@ def test_set_posterior_sample(
     for key in posterior_sample:
         # Without the `rng_key` argument, we get different posterior samples
         assert not jnp.allclose(posterior_sample[key], im.posterior[key])
+
+
+@pytest.mark.parametrize("vi", [lm], indirect=True)
+def test_inconsistent_batch_shapes(vi: "SVI") -> None:
+    """Setting a posterior sample with inconsistent batch shapes raises ValueError."""
+    im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
+    with pytest.raises(
+        ValueError,
+        match="Inconsistent batch shapes found in posterior_sample",
+    ):
+        im.set_posterior_sample({"a": jnp.ones((100, 10)), "b": jnp.ones((200,))})

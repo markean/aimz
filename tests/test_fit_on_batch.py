@@ -18,7 +18,7 @@ import pytest
 from conftest import lm
 from jax import random
 from jax.typing import ArrayLike
-from numpyro.infer import SVI, Trace_ELBO
+from numpyro.infer import MCMC, SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
 from numpyro.optim import Adam
 
@@ -44,8 +44,8 @@ def test_fit_on_batch_nan_warning(synthetic_data: tuple[ArrayLike, ArrayLike]) -
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
-def test_fit_lm(synthetic_data: tuple[ArrayLike, ArrayLike], vi: SVI) -> None:
-    """Test the `.fit()` method of `ImpactModel`."""
+def test_fit_svi(synthetic_data: tuple[ArrayLike, ArrayLike], vi: SVI) -> None:
+    """Test the `.fit()` method of ImpactModel using SVI."""
     X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
     im.fit_on_batch(X=X, y=y)
@@ -59,3 +59,12 @@ def test_fit_lm(synthetic_data: tuple[ArrayLike, ArrayLike], vi: SVI) -> None:
     assert last_loss < first_loss, (
         f"Loss did not decrease after training: first={first_loss}, last={last_loss}"
     )
+
+
+@pytest.mark.parametrize("mcmc", [lm], indirect=True)
+def test_fit_mcmc(synthetic_data: tuple[ArrayLike, ArrayLike], mcmc: MCMC) -> None:
+    """Test the `.fit()` method of ImpactModel using MCMC."""
+    X, y = synthetic_data
+    im = ImpactModel(lm, rng_key=random.key(42), inference=mcmc)
+    im.fit_on_batch(X=X, y=y)
+    assert _is_fitted(im), "Model fitting check failed"

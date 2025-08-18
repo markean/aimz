@@ -24,3 +24,16 @@
 ```sh
 conda install conda-forge::aimz
 ```
+
+## Install from GitHub
+
+```sh
+# Latest commit from the main branch (CPU version)
+pip install aimz@git+https://github.com/markean/aimz.git
+
+# Specific release tag (replace <release_tag> with the desired tag)
+pip install aimz@git+https://github.com/markean/aimz.git@<release_tag>
+
+# GPU-enabled version from the main branch
+pip install aimz[gpu]@git+https://github.com/markean/aimz.git
+```

@@ -21,7 +21,7 @@ import pytest
 from jax import Array, random
 from jax.typing import ArrayLike
 from numpyro import sample
-from numpyro.infer import SVI, Trace_ELBO
+from numpyro.infer import MCMC, NUTS, SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
 
 numpyro.set_host_device_count(3)
@@ -48,6 +48,27 @@ def synthetic_data() -> tuple[Array, Array]:
 
 
 @pytest.fixture(scope="module")
+def mcmc(request: pytest.FixtureRequest) -> MCMC:
+    """Fixture for creating an MCMC object.
+
+    Args:
+        request (pytest.FixtureRequest): The pytest request object to access the
+            parameter.
+
+    Returns:
+        An MCMC object configured with the provided model.
+    """
+    model = request.param
+
+    return MCMC(
+        NUTS(model),
+        num_warmup=100,
+        num_samples=100,
+        num_chains=1,
+    )
+
+
+@pytest.fixture(scope="module")
 def vi(request: pytest.FixtureRequest) -> SVI:
     """Fixture for creating a variational inference object.
 
@@ -56,7 +77,7 @@ def vi(request: pytest.FixtureRequest) -> SVI:
             parameter.
 
     Returns:
-        SVI: A variational inference object configured with the provided model.
+        A variational inference object configured with the provided model.
     """
     model = request.param
 
