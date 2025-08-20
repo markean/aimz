@@ -93,6 +93,7 @@ nav:
     - Installation: installation.md
   - Examples:
     - WIP: wip.md
+    - Model Persistence: model_persistence.md
   - API Reference:
     - Model:
       - ImpactModel: impact_model.md
