@@ -51,13 +51,12 @@ class ArrayLoader:
         Args:
             dataset (ArrayDataset): The dataset to load.
             rng_key (Array): A pseudo-random number generator key.
-            batch_size (int): The number of samples per batch. Defaults to `32`.
+            batch_size (int): The number of samples per batch.
             shuffle (bool, optional): Whether to shuffle the dataset before batching.
-                Defaults to `False`.
             device (Sharding | None, optional): The device or sharding specification to
-                which the data should be moved. Defaults to `None`, meaning no device
-                transfer is applied. When used as an input to a model, this will be
-                overridden by the device setting of the model.
+                which the data should be moved. By default, no device transfer is
+                applied. When used as an input to a model, this will be overridden by
+                the device setting of the model.
         """
         self.dataset = dataset
         if (
@@ -84,7 +83,7 @@ class ArrayLoader:
         Args:
             x (Array | ndarray): The input array to be padded.
             n_pad (int): The number of padding elements to add.
-            axis (int): The axis along which to apply the padding. Defaults to `0`.
+            axis (int): The axis along which to apply the padding.
 
         Returns:
             The padded array with padding applied along the specified axis.
