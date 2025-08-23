@@ -43,9 +43,9 @@ class BaseModel(ABC):
         Args:
             kernel (Callable): A probabilistic model with Pyro primitives.
             param_input (str, optional): Name of the parameter in the `kernel` for the
-                main input data. Defaults to `"X"`.
+                main input data.
             param_output (str, optional): Name of the parameter in the `kernel` for the
-                output data. Defaults to `"y"`.
+                output data.
         """
         self.kernel = kernel
         self.param_input = param_input
