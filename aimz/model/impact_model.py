@@ -762,23 +762,25 @@ class ImpactModel(BaseModel):
                     for k, v in batch.items()
                     if k not in (self.param_input, self.param_output)
                 ]
-                dict_arr = fn_sample_posterior_predictive(
-                    kernel,
-                    self.num_samples,
-                    subkey,
-                    return_sites,
-                    self.posterior,
-                    self.param_input,
-                    kwargs_array._fields + kwargs_extra._fields,
-                    batch[self.param_input],
-                    *(*kwargs_batch, *kwargs_extra),
+                dict_arr = device_get(
+                    fn_sample_posterior_predictive(
+                        kernel,
+                        self.num_samples,
+                        subkey,
+                        return_sites,
+                        self.posterior,
+                        self.param_input,
+                        kwargs_array._fields + kwargs_extra._fields,
+                        batch[self.param_input],
+                        *(*kwargs_batch, *kwargs_extra),
+                    ),
                 )
                 for site, arr in dict_arr.items():
                     if site not in zarr_arr:
                         zarr_arr[site] = zarr_group.create_array(
                             name=site,
                             shape=(self.num_samples, 0, *arr.shape[2:]),
-                            dtype=arr.dtype,
+                            dtype="float32" if arr.dtype == "bfloat16" else arr.dtype,
                             chunks=(
                                 self.num_samples,
                                 dataloader.batch_size,
@@ -1194,23 +1196,25 @@ class ImpactModel(BaseModel):
                     for k, v in batch.items()
                     if k not in (self.param_input, self.param_output)
                 ]
-                arr = self._fn_log_likelihood(
-                    # Although computing the log-likelihood is deterministic, the model
-                    # still needs to be seeded in order to trace its graph.
-                    seed(self.kernel, rng_seed=self.rng_key),
-                    self.posterior,
-                    self.param_input,
-                    site,
-                    kwargs_array._fields + kwargs_extra._fields,
-                    batch[self.param_input],
-                    batch[self.param_output],
-                    *(*kwargs_batch, *kwargs_extra),
+                arr = device_get(
+                    self._fn_log_likelihood(
+                        # Although computing the log-likelihood is deterministic, the
+                        # model still needs to be seeded in order to trace its graph.
+                        seed(self.kernel, rng_seed=self.rng_key),
+                        self.posterior,
+                        self.param_input,
+                        site,
+                        kwargs_array._fields + kwargs_extra._fields,
+                        batch[self.param_input],
+                        batch[self.param_output],
+                        *(*kwargs_batch, *kwargs_extra),
+                    ),
                 )
                 if site not in zarr_arr:
                     zarr_arr[site] = zarr_group.create_array(
                         name=site,
                         shape=(self.num_samples, 0, *arr.shape[2:]),
-                        dtype=arr.dtype,
+                        dtype="float32" if arr.dtype == "bfloat16" else arr.dtype,
                         chunks=(
                             self.num_samples,
                             dataloader.batch_size,
