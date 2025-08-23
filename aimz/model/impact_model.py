@@ -321,8 +321,8 @@ class ImpactModel(BaseModel):
             rng_key (Array | None, optional): A pseudo-random number generator key.
                 Defaults to `None`, then an internal key is used and split as needed.
             return_sites (tuple[str] | None, optional): Names of variables (sites) to
-                return. If `None`, samples all latent, observed, and deterministic
-                sites. Defaults to `None`.
+                return. If `None`, samples `self.param_output` and deterministic sites.
+                Defaults to `None`.
             intervention (dict | None, optional): A dictionary mapping sample sites to
                 their corresponding intervention values. Interventions enable
                 counterfactual analysis by modifying the specified sample sites during
@@ -725,6 +725,7 @@ class ImpactModel(BaseModel):
         X: ArrayLike | ArrayLoader,
         rng_key: Array,
         group: str,
+        return_sites: tuple[str],
         batch_size: int | None,
         output_dir: Path,
         progress: bool,
@@ -743,7 +744,7 @@ class ImpactModel(BaseModel):
         )
 
         pbar = tqdm(
-            desc=(f"Posterior predictive sampling [{', '.join(self._return_sites)}]"),
+            desc=(f"Posterior predictive sampling [{', '.join(return_sites)}]"),
             total=len(dataloader),
             disable=not progress,
         )
@@ -758,7 +759,7 @@ class ImpactModel(BaseModel):
         zarr_group = open_group(output_dir, mode="w")
         zarr_arr = {}
         threads, queues, error_queue = _start_writer_threads(
-            self._return_sites,
+            return_sites,
             group_path=output_dir,
             writer=_writer,
             queue_size=min(cpu_count() or 1, 4),
@@ -774,7 +775,7 @@ class ImpactModel(BaseModel):
                     kernel,
                     self.num_samples,
                     subkey,
-                    self._return_sites,
+                    return_sites,
                     self.posterior,
                     self.param_input,
                     kwargs_array._fields + kwargs_extra._fields,
@@ -832,6 +833,7 @@ class ImpactModel(BaseModel):
         intervention: dict | None = None,
         rng_key: Array | None = None,
         in_sample: bool = True,
+        return_sites: tuple[str] | None = None,
         **kwargs: object,
     ) -> xr.DataTree:
         """Predict the output based on the fitted model.
@@ -859,6 +861,9 @@ class ImpactModel(BaseModel):
                 based on data used during model fitting. If `False`, samples are stored
                 in the `predictions` group, indicating they were generated based on
                 out-of-sample data.
+            return_sites (tuple[str] | None, optional): Names of variables (sites) to
+                return. If `None`, samples `self.param_output` and deterministic sites.
+                Defaults to `None`.
             **kwargs (object): Additional arguments passed to the model. All array-like
                 values are expected to be JAX arrays.
 
@@ -897,7 +902,7 @@ class ImpactModel(BaseModel):
                 kernel,
                 rng_key=rng_key,
                 num_samples=self.num_samples,
-                return_sites=self._return_sites,
+                return_sites=return_sites or self._return_sites,
                 posterior_samples=self.posterior,
                 model_kwargs=args_bound,
             ),
@@ -912,6 +917,7 @@ class ImpactModel(BaseModel):
         intervention: dict | None = None,
         rng_key: Array | None = None,
         in_sample: bool = True,
+        return_sites: tuple[str] | None = None,
         batch_size: int | None = None,
         output_dir: str | Path | None = None,
         progress: bool = True,
@@ -942,6 +948,8 @@ class ImpactModel(BaseModel):
                 based on data used during model fitting. If `False`, samples are stored
                 in the `predictions` group, indicating they were generated based on
                 out-of-sample data.
+            return_sites (tuple[str] | None, optional): Names of variables (sites) to
+                return. If `None`, samples `self.param_output` and deterministic sites.
             batch_size (int | None, optional): The size of batches for data loading
                 during posterior predictive sampling. Defaults to `None`, which sets the
                 batch size to the total number of samples (`n_samples_X`). This value
@@ -991,6 +999,7 @@ class ImpactModel(BaseModel):
                     intervention=intervention,
                     rng_key=rng_key,
                     in_sample=in_sample,
+                    return_sites=return_sites or self._return_sites,
                     **kwargs,
                 )
             # Validate the provided parameters against the kernel's signature
@@ -1039,6 +1048,7 @@ class ImpactModel(BaseModel):
             X=X,
             rng_key=rng_key,
             group="posterior_predictive" if in_sample else "predictions",
+            return_sites=return_sites or self._return_sites,
             batch_size=batch_size,
             output_dir=output_subdir,
             progress=progress,

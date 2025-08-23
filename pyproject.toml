@@ -40,6 +40,9 @@ gpu = ["jax[cuda12]>=0.7"]
 source = "https://github.com/markean/aimz"
 documentation = "https://markean.github.io/aimz/"
 
+[tool.uv]
+native-tls = true
+
 [tool.ruff]
 line-length = 88
 indent-width = 4
