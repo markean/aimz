@@ -89,17 +89,17 @@ class ImpactModel(BaseModel):
         Args:
             kernel (Callable): A probabilistic model with Pyro primitives.
             rng_key (Array): A pseudo-random number generator key.
-            inference (SVI | MCMC): An inference method supported by NumPyro, such
-                as an instance of `numpyro.infer.svi.SVI` or `numpyro.infer.mcmc.MCMC`.
-            param_input (str, optional): The name of the parameter in the `kernel` for
+            inference (SVI | MCMC): An inference method supported by NumPyro, such as an
+                instance of ``numpyro.infer.svi.SVI`` or ``numpyro.infer.mcmc.MCMC``.
+            param_input (str, optional): The name of the parameter in the ``kernel`` for
                 the main input data.
-            param_output (str, optional): The name of the parameter in the `kernel` for
-                the output data.
+            param_output (str, optional): The name of the parameter in the ``kernel``
+                for the output data.
 
         Warning:
-            The `rng_key` parameter should be provided as a **typed key array**
-            created with `jax.random.key()`, rather than a legacy `uint32` key created
-            with `jax.random.PRNGKey()`.
+            The ``rng_key`` parameter should be provided as a **typed key array**
+            created with ``jax.random.key()``, rather than a legacy ``uint32`` key
+            created with ``jax.random.PRNGKey()``.
         """
         super().__init__(kernel, param_input, param_output)
         if rng_key.dtype == jnp.uint32:
@@ -174,6 +174,10 @@ class ImpactModel(BaseModel):
     def vi_result(self) -> SVIRunResult:
         """Get the current variational inference result.
 
+        :setter: This sets ``SVIRunResult`` and marks the model as fitted. It does not
+            perform posterior sampling — use :meth:`.sample() <ImpactModel.sample>`
+            separately to obtain samples.
+
         Returns:
             The stored result from variational inference.
         """
@@ -182,10 +186,6 @@ class ImpactModel(BaseModel):
     @vi_result.setter
     def vi_result(self, vi_result: SVIRunResult) -> None:
         """Set the variational inference result manually.
-
-        This sets the result from a variational inference run and marks the model as
-        fitted. It does not perform posterior sampling — use `.sample()` separately to
-        obtain samples.
 
         Args:
             vi_result (SVIRunResult): The result from a prior variational inference run.
@@ -214,12 +214,12 @@ class ImpactModel(BaseModel):
         """Draw samples from the prior predictive distribution.
 
         Args:
-            X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
+            X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
             num_samples (int, optional): The number of samples to draw.
             rng_key (Array | None, optional): A pseudo-random number generator key. By
                 default, an internal key is used and split as needed.
             return_sites (tuple[str] | None, optional): Names of variables (sites) to
-                return. If `None`, samples all latent, observed, and deterministic
+                return. If ``None``, samples all latent, observed, and deterministic
                 sites.
             **kwargs (object): Additional arguments passed to the model. All array-like
                 values are expected to be JAX arrays.
@@ -228,7 +228,7 @@ class ImpactModel(BaseModel):
             Prior predictive samples.
 
         Raises:
-            TypeError: If `self.param_output` is passed as an argument.
+            TypeError: If ``self.param_output`` is passed as an argument.
         """
         if rng_key is None:
             self.rng_key, rng_key = random.split(self.rng_key)
@@ -264,10 +264,10 @@ class ImpactModel(BaseModel):
             num_samples (int, optional): The number of posterior samples to draw.
             rng_key (Array | None, optional): A pseudo-random number generator key. By
                 default, an internal key is used and split as needed. Has no effect if
-                the inference method is MCMC, where the `post_warmup_state` property
+                the inference method is MCMC, where the ``post_warmup_state`` property
                 will be used to continue sampling.
             return_sites (tuple[str] | None, optional): Names of variables (sites) to
-                return. If `None`, samples all latent sites. Has no effect if the
+                return. If ``None``, samples all latent sites. Has no effect if the
                 inference method is MCMC.
             **kwargs (object): Additional arguments passed to the model. All array-like
                 values are expected to be JAX arrays. Only relevant when the inference
@@ -315,11 +315,12 @@ class ImpactModel(BaseModel):
         """Draw samples from the posterior predictive distribution.
 
         Args:
-            X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
+            X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
             rng_key (Array | None, optional): A pseudo-random number generator key. By
                 default, an internal key is used and split as needed.
             return_sites (tuple[str] | None, optional): Names of variables (sites) to
-                return. If `None`, samples `self.param_output` and deterministic sites.
+                return. If ``None``, samples ``self.param_output`` and deterministic
+                sites.
             intervention (dict | None, optional): A dictionary mapping sample sites to
                 their corresponding intervention values. Interventions enable
                 counterfactual analysis by modifying the specified sample sites during
@@ -331,7 +332,7 @@ class ImpactModel(BaseModel):
             Posterior predictive samples.
 
         Raises:
-            TypeError: If `self.param_output` is passed as an argument.
+            TypeError: If ``self.param_output`` is passed as an argument.
         """
         _check_is_fitted(self)
 
@@ -374,8 +375,8 @@ class ImpactModel(BaseModel):
         """Run a single VI step on the given batch of data.
 
         Args:
-            X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
-            y (ArrayLike): Output data with shape `(n_samples_Y,)`.
+            X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
+            y (ArrayLike): Output data with shape ``(n_samples_Y,)``.
             rng_key (Array | None, optional): A pseudo-random number generator key. By
                 default, an internal key is used and split as needed. The key is only
                 used for initialization if the internal SVI state is not yet set.
@@ -383,8 +384,9 @@ class ImpactModel(BaseModel):
                 values are expected to be JAX arrays.
 
         Returns:
-            (SVIState): Updated SVI state after the training step.
-            (ArrayLike): Loss value as a scalar array.
+            - Updated SVI state after the training step.
+
+            - Loss value as a scalar array.
 
         Note:
             This method updates the internal SVI state on every call, so it is not
@@ -442,16 +444,18 @@ class ImpactModel(BaseModel):
         This method behaves differently depending on the inference method specified at
         initialization of the ImpactModel instance:
 
-        - **SVI:** Runs variational inference on the provided batch by invoking the
-        `run()` method of the `SVI` instance from NumPyro to estimate the posterior
-        distribution, then draws samples from it.
+        - SVI
+            Runs variational inference on the provided batch by invoking the ``.run()``
+            method of the ``SVI`` instance from NumPyro to estimate the posterior
+            distribution, then draws samples from it.
 
-        - **MCMC:** Runs posterior sampling by invoking the `run()` method of the `MCMC`
+        - MCMC
+            Runs posterior sampling by invoking the ``.run()`` method of the ``MCMC``
             instance from NumPyro.
 
         Args:
-            X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
-            y (ArrayLike): Output data with shape `(n_samples_Y,)`.
+            X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
+            y (ArrayLike): Output data with shape ``(n_samples_Y,)``.
             num_steps (int, optional): Number of steps for variational inference
                 optimization. Has no effect if the inference method is MCMC.
             num_samples (int | None, optional): The number of posterior samples to draw.
@@ -553,18 +557,18 @@ class ImpactModel(BaseModel):
 
         Args:
             X (ArrayLike | ArrayLoader): Input data, either an array-like of shape
-                `(n_samples, n_features)` or a data loader that holds all array-like
+                ``(n_samples, n_features)`` or a data loader that holds all array-like
                 objects and handles batching internally; if a data loader is passed,
-                `batch_size` is ignored.
-            y (ArrayLike | None): Output data with shape `(n_samples_Y,)`. Must be
-                `None` if `X` is a data loader.
+                ``batch_size`` is ignored.
+            y (ArrayLike | None): Output data with shape ``(n_samples_Y,)``. Must be
+                ``None`` if ``X`` is a data loader.
             num_samples (int | None, optional): The number of posterior samples to draw.
             rng_key (Array | None, optional): A pseudo-random number generator key. By
                 default, an internal key is used and split as needed.
             progress (bool, optional): Whether to display a progress bar.
             batch_size (int | None, optional): The number of data points processed at
-                each step of variational inference. If `None` (default), the entire
-                dataset is used as a single batch in each epoch.
+                each step of variational inference. If ``None``, the entire dataset is
+                used as a single batch in each epoch.
             epochs (int, optional): The number of epochs for variational inference
                 optimization.
             shuffle (bool, optional): Whether to shuffle the data at each epoch.
@@ -581,7 +585,7 @@ class ImpactModel(BaseModel):
             This method continues training from the existing SVI state if available.
             To start training from scratch, create a new model instance. It does not
             check whether the model or guide is written to support subsampling semantics
-            (e.g., using NumPyro's `subsample` or similar constructs).
+            (e.g., using NumPyro's ``subsample`` or similar constructs).
         """
         if isinstance(self.inference, MCMC):
             msg = (
@@ -669,29 +673,31 @@ class ImpactModel(BaseModel):
         """Set posterior samples for the model.
 
         This method sets externally obtained posterior samples on the model instance,
-        enabling downstream analysis without requiring a call to `.fit()` or
-        `.fit_on_batch()`.
+        enabling downstream analysis without requiring a call to
+        :meth:`.fit() <ImpactModel.fit>` or
+        :meth:`.fit_on_batch() <ImpactModel.fit_on_batch>`.
 
         It is primarily intended for workflows where posterior sampling is performed
-        manually—for example, using NumPyro's `SVI` (or `MCMC`) with the `Predictive`
-        API—and the resulting posterior samples are injected into the model for further
-        use.
+        manually—for example, using NumPyro's ``SVI`` (or ``MCMC``) with the
+        ``Predictive`` API—and the resulting posterior samples are injected into the
+        model for further use.
 
-        Internally, `batch_ndims` is set to `1` by default to correctly handle the batch
-        dimensions of the posterior samples. For more information, refer to the
-        [NumPyro documentation](https://num.pyro.ai/en/stable/utilities.html#predictive).
+        Internally, ``batch_ndims`` is set to ``1`` by default to correctly handle the
+        batch dimensions of the posterior samples. For more information, refer to the
+        `NumPyro documentation <https://num.pyro.ai/en/stable/utilities.html#predictive>`__.
 
         Args:
             posterior_sample (dict[str, Array]): Posterior samples to set for the model.
             return_sites (tuple[str] | None, optional): Names of variable (sites) to
-                return in `.predict()`. By default, it is set to `self.param_output`.
+                return in :meth:`.predict() <ImpactModel.predict>`. By default, it is
+                set to ``self.param_output``.
 
         Returns:
             The model instance, treated as fitted with posterior samples set, enabling
-                method chaining.
+            method chaining.
 
         Raises:
-            ValueError: If the batch shapes in `posterior_sample` are inconsistent.
+            ValueError: If the batch shapes in ``posterior_sample`` are inconsistent.
         """
         batch_ndims = 1
         batch_shapes = {
@@ -833,15 +839,18 @@ class ImpactModel(BaseModel):
 
         This method returns predictions for a single batch of input data and is better
         suited for:
-            1) Models incompatible with `.predict()` due to their posterior sample
-                shapes.
+
+            1) Models incompatible with :meth:`.predict() <ImpactModel.predict>` due to
+            their posterior sample shapes.
+
             2) Scenarios where writing results to to files (e.g., disk, cloud storage)
-                is not desired.
+            is not desired.
+
             3) Smaller datasets, as this method may be slower due to limited
-                parallelism.
+            parallelism.
 
         Args:
-            X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
+            X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
             intervention (dict | None, optional): A dictionary mapping sample sites to
                 their corresponding intervention values. Interventions enable
                 counterfactual analysis by modifying the specified sample sites during
@@ -849,13 +858,14 @@ class ImpactModel(BaseModel):
             rng_key (Array | None, optional): A pseudo-random number generator key. By
                 default, an internal key is used and split as needed.
             in_sample (bool, optional): Specifies the group where posterior predictive
-                samples are stored in the returned output. If `True`, samples are stored
-                in the `posterior_predictive` group, indicating they were generated
-                based on data used during model fitting. If `False`, samples are stored
-                in the `predictions` group, indicating they were generated based on
-                out-of-sample data.
+                samples are stored in the returned output. If ``True``, samples are
+                stored in the ``posterior_predictive`` group, indicating they were
+                generated based on data used during model fitting. If ``False``, samples
+                are stored in the ``predictions`` group, indicating they were generated
+                based on out-of-sample data.
             return_sites (tuple[str] | None, optional): Names of variables (sites) to
-                return. If `None`, samples `self.param_output` and deterministic sites.
+                return. If ``None``, samples ``self.param_output`` and deterministic
+                sites.
             **kwargs (object): Additional arguments passed to the model. All array-like
                 values are expected to be JAX arrays.
 
@@ -863,7 +873,7 @@ class ImpactModel(BaseModel):
             Posterior predictive samples. Posterior samples are included if available.
 
         Raises:
-            TypeError: If `self.param_output` is passed as an argument.
+            TypeError: If ``self.param_output`` is passed as an argument.
         """
         _check_is_fitted(self)
 
@@ -925,9 +935,9 @@ class ImpactModel(BaseModel):
 
         Args:
             X (ArrayLike | ArrayLoader): Input data, either an array-like of shape
-                `(n_samples, n_features)` or a data loader that holds all array-like
+                ``(n_samples, n_features)`` or a data loader that holds all array-like
                 objects and handles batching internally; if a data loader is passed,
-                `batch_size` is ignored.
+                ``batch_size`` is ignored.
             intervention (dict | None, optional): A dictionary mapping sample sites to
                 their corresponding intervention values. Interventions enable
                 counterfactual analysis by modifying the specified sample sites during
@@ -935,21 +945,22 @@ class ImpactModel(BaseModel):
             rng_key (Array | None, optional): A pseudo-random number generator key. By
                 default, an internal key is used and split as needed.
             in_sample (bool, optional): Specifies the group where posterior predictive
-                samples are stored in the returned output. If `True`, samples are stored
-                in the `posterior_predictive` group, indicating they were generated
-                based on data used during model fitting. If `False`, samples are stored
-                in the `predictions` group, indicating they were generated based on
-                out-of-sample data.
+                samples are stored in the returned output. If ``True``, samples are
+                stored in the ``posterior_predictive`` group, indicating they were
+                generated based on data used during model fitting. If ``False``, samples
+                are stored in the ``predictions`` group, indicating they were generated
+                based on out-of-sample data.
             return_sites (tuple[str] | None, optional): Names of variables (sites) to
-                return. If `None`, samples `self.param_output` and deterministic sites.
+                return. If ``None``, samples ``self.param_output`` and deterministic
+                sites.
             batch_size (int | None, optional): The size of batches for data loading
                 during posterior predictive sampling. By default, it is set to the
-                total number of samples (`n_samples_X`). This value also determines the
-                chunk size for storing the posterior predictive samples.
+                total number of samples (``n_samples_X``). This value also determines
+                the chunk size for storing the posterior predictive samples.
             output_dir (str | Path | None, optional): The directory where the outputs
                 will be saved. If the specified directory does not exist, it will be
-                created automatically. If `None`, a default temporary directory will be
-                created. A timestamped subdirectory will be generated within this
+                created automatically. If ``None``, a default temporary directory will
+                be created. A timestamped subdirectory will be generated within this
                 directory to store the outputs. Outputs are saved in the Zarr format.
             progress (bool, optional): Whether to display a progress bar.
             **kwargs (object): Additional arguments passed to the model. All array-like
@@ -959,7 +970,11 @@ class ImpactModel(BaseModel):
             Posterior predictive samples. Posterior samples are included if available.
 
         Raises:
-            TypeError: If `self.param_output` is passed as an argument.
+            TypeError: If ``self.param_output`` is passed as an argument.
+
+        See Also:
+            :meth:`.cleanup() <ImpactModel.cleanup>` to remove the temporary directory
+            if created.
         """
         _check_is_fitted(self)
 
@@ -1060,20 +1075,26 @@ class ImpactModel(BaseModel):
             output_intervention (xr.DataTree | None, optional): Precomputed output for
                 the intervention scenario.
             args_baseline (dict | None, optional): Input arguments for the baseline
-                scenario. Passed to the `.predict()` method to compute predictions if
-                `output_baseline` is not provided. Ignored if `output_baseline` is
-                already given.
+                scenario. Passed to the :meth:`.predict() <ImpactModel.predict>` to
+                compute predictions if ``output_baseline`` is not provided. Ignored if
+                ``output_baseline`` is already given.
             args_intervention (dict | None, optional): Input arguments for the
-                intervention scenario. Passed to the `.predict()` method to compute
-                predictions if `output_intervention` is not provided. Ignored if
-                `output_intervention` is already given.
+                intervention scenario. Passed to the
+                :meth:`.predict() <ImpactModel.predict>` to compute predictions if
+                ``output_intervention`` is not provided. Ignored if
+                ``output_intervention`` is already given.
 
         Returns:
             The estimated impact of an intervention.
 
         Raises:
-            ValueError: If neither `output_baseline` nor `args_baseline` is provided, or
-                if neither `output_intervention` nor `args_intervention` is provided.
+            ValueError: If neither ``output_baseline`` nor ``args_baseline`` is
+                provided, or if neither ``output_intervention`` nor
+                ``args_intervention`` is provided.
+
+        See Also:
+            :meth:`.cleanup() <ImpactModel.cleanup>` to remove the temporary directory
+            if created.
         """
         _check_is_fitted(self)
 
@@ -1119,19 +1140,19 @@ class ImpactModel(BaseModel):
 
         Args:
             X (ArrayLike | ArrayLoader): Input data, either an array-like of shape
-                `(n_samples, n_features)` or a data loader that holds all array-like
+                ``(n_samples, n_features)`` or a data loader that holds all array-like
                 objects and handles batching internally; if a data loader is passed,
-                `batch_size` is ignored.
-            y (ArrayLike | None): Output data with shape `(n_samples_Y,)`. Must be
-                `None` if `X` is a data loader.
+                ``batch_size`` is ignored.
+            y (ArrayLike | None): Output data with shape ``(n_samples_Y,)``. Must be
+                ``None`` if ``X`` is a data loader.
             batch_size (int | None, optional): The size of batches for data loading
                 during posterior predictive sampling. By default, it is set to the total
-                number of samples (`n_samples_X`). This value also determines the chunk
-                size for storing the log-likelihood values.
+                number of samples (``n_samples_X``). This value also determines the
+                chunk size for storing the log-likelihood values.
             output_dir (str | Path | None, optional): The directory where the outputs
                 will be saved. If the specified directory does not exist, it will be
-                created automatically. If `None`, a default temporary directory will be
-                created. A timestamped subdirectory will be generated within this
+                created automatically. If ``None``, a default temporary directory will
+                be created. A timestamped subdirectory will be generated within this
                 directory to store the outputs. Outputs are saved in the Zarr format.
             progress (bool, optional): Whether to display a progress bar.
             **kwargs (object): Additional arguments passed to the model. All array-like
@@ -1139,6 +1160,10 @@ class ImpactModel(BaseModel):
 
         Returns:
             Log-likelihood values. Posterior samples are included if available.
+
+        See Also:
+            :meth:`.cleanup() <ImpactModel.cleanup>` to remove the temporary directory
+            if created.
         """
         _check_is_fitted(self)
 

@@ -28,7 +28,7 @@ def _group_kwargs(kwargs: dict) -> tuple[NamedTuple, NamedTuple]:
             array-like or non-array-like.
 
     Returns:
-        tuple[KwargsArray, KwargsExtra]: A tuple containing two NamedTuples:
+        tuple[KwargsArray, KwargsExtra]: A tuple containing two ``NamedTuple`` objects:
             - kwargs_array (KwargsArray): Contains the array-like arguments.
             - kwargs_extra (KwargsExtra): Contains the non-array-like arguments.
     """

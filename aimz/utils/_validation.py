@@ -36,8 +36,8 @@ def _check_is_fitted(model: "ImpactModel", msg: str | None = None) -> None:
     """
     if msg is None:
         msg = (
-            "This %(name)s instance is not fitted yet. Call `.fit()` with appropriate "
-            "arguments before using the model."
+            "This %(name)s instance is not fitted yet. Call ``.fit()`` with "
+            "appropriate arguments before using the model."
         )
     if not _is_fitted(model):
         raise NotFittedError(msg % {"name": type(model).__name__})
@@ -51,17 +51,17 @@ def _is_fitted(model: "ImpactModel") -> bool:
 
 
 def _validate_group(dt_baseline: "xr.DataTree", dt_intervention: "xr.DataTree") -> str:
-    """Validate the groups in `dt_baseline` and `dt_intervention`.
+    """Validate the groups in ``dt_baseline`` and ``dt_intervention``.
 
     Args:
         dt_baseline (xr.DataTree): Precomputed output for the baseline scenario.
         dt_intervention (xr.DataTree): Precomputed output for the intervention scenario.
 
     Returns:
-        str: The group name ("predictions" or "posterior_predictive").
+        str: The group name (``predictions`` or ``posterior_predictive``).
 
     Raises:
-        ValueError: If the group is not found in `dt_intervention`.
+        ValueError: If the group is not found in ``dt_intervention``.
     """
     group = (
         "predictions"
@@ -89,8 +89,9 @@ def _validate_kernel_signature(
 
     Args:
         kernel (Callable): The kernel function to validate.
-        param_input (str): Name of the parameter in `kernel` corresponding to the input.
-        param_output (str): Name of the parameter in `kernel` corresponding to the
+        param_input (str): Name of the parameter in ``kernel`` corresponding to the
+            input.
+        param_output (str): Name of the parameter in ``kernel`` corresponding to the
             output.
 
     Raises:
@@ -135,7 +136,7 @@ def _validate_kernel_body(
 
     Args:
         kernel (Callable): The kernel function to validate.
-        param_output (str): Name of the parameter in `kernel` corresponding to the
+        param_output (str): Name of the parameter in ``kernel`` corresponding to the
             output.
         model_trace (OrderedDict[str, dict]): The model trace containing the sites.
 

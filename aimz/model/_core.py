@@ -42,10 +42,10 @@ class BaseModel(ABC):
 
         Args:
             kernel (Callable): A probabilistic model with Pyro primitives.
-            param_input (str, optional): Name of the parameter in the `kernel` for the
+            param_input (str, optional): Name of the parameter in the ``kernel`` for the
                 main input data.
-            param_output (str, optional): Name of the parameter in the `kernel` for the
-                output data.
+            param_output (str, optional): Name of the parameter in the ``kernel`` for
+                the output data.
         """
         self.kernel = kernel
         self.param_input = param_input
@@ -59,17 +59,17 @@ class BaseModel(ABC):
         y: ArrayLike,
         **kwargs: object,
     ) -> Self:
-        """Fit the model to the input data `X` and output data `y`.
+        """Fit the model to the input data ``X`` and output data ``y``.
 
         Args:
-            X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
-            y (ArrayLike): Output data with shape `(n_samples_Y,)`.
-            **kwargs (object): Additional arguments passed to the model, except for `X`
-                and `y`. All array-like objects in `**kwargs` are expected to be JAX
-                arrays.
+            X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
+            y (ArrayLike): Output data with shape ``(n_samples_Y,)``.
+            **kwargs (object): Additional arguments passed to the model, except for
+                ``X`` and ``y``. All array-like objects in ``**kwargs`` are expected to
+                be JAX arrays.
 
         Returns:
-            BaseModel: The fitted model instance, enabling method chaining.
+            The fitted model instance, enabling method chaining.
         """
         return self
 
@@ -78,8 +78,8 @@ class BaseModel(ABC):
         """Predict the output based on the fitted model.
 
         Args:
-            X (ArrayLike): Input data with shape `(n_samples_X, n_features)`.
-            **kwargs (object): Additional arguments passed to the model, except for `X`
-                and `y`. All array-like objects in `**kwargs` are expected to be JAX
-                arrays.
+            X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
+            **kwargs (object): Additional arguments passed to the model, except for
+                ``X`` and ``y``. All array-like objects in ``**kwargs`` are expected to
+                be JAX arrays.
         """

@@ -59,9 +59,9 @@ def _writer(site: str, queue: Queue, group_path: Path, error_queue: Queue) -> No
 
     This function runs in a loop, retrieving posterior predictive samples as arrays from
     the queue and appending them to the appropriate dataset in the given Zarr group
-    along the sample (second) axis. It exits when a `None` sentinel value is received.
+    along the sample (second) axis. It exits when a ``None`` sentinel value is received.
     If an error occurs while writing to the Zarr array, it is logged and the error
-    details are put into the `error_queue`.
+    details are put into the ``error_queue``.
 
     Args:
         site (str): The name of the sample site.

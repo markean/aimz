@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aimz"
-version = "0.4.1.dev0"
+version = "0.5.0.dev0"
 description = "Scalable probabilistic impact modeling"
 readme = "README.md"
 license = "Apache-2.0"
@@ -52,7 +52,10 @@ target-version = "py311"
 select = ["ALL"]
 ignore = []
 pep8-naming = { ignore-names = ["X"] }
-per-file-ignores = { "tests*" = [
+per-file-ignores = { "docs*" = [
+    "INP001", # implicit-namespace-package
+    "A001",   # builtin-variable-shadowing
+], "tests*" = [
     "INP001", # implicit-namespace-package
     "ARG001", # unused-function-argument
     "S101",   # assert
