@@ -22,7 +22,8 @@ from pathlib import Path
 
 import aimz
 
-sys.path.insert(0, str(Path(__file__).parents[2] / "aimz"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "aimz"))
+
 # Configuration file for the Sphinx documentation builder.
 #
 # For the full list of built-in configuration values, see the documentation:
