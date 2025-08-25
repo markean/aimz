@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added a `return_sites` parameter to the `.predict()` and `.predict_on_batch()` methods in `ImpactModel`, allowing users to specify which sites to include in the output (@markean, [#55](https://github.com/markean/aimz/issues/55)).
 
+### Changed
+
+- Switched documentation build system from MkDocs to Sphinx and ReadTheDocs ([https://aimz.readthedocs.io](https://aimz.readthedocs.io)).
+
 ### Fixed
 
 - Fixed incompatibility with Zarr when models output arrays in `bfloat16` by automatically promoting them to `float32` before saving (@markean, [#57](https://github.com/markean/aimz/issues/57)).
