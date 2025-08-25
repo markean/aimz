@@ -2,7 +2,6 @@
 
 [![Project Status: Active – The project has reached a stable, usable state and is being actively developed.](https://www.repostatus.org/badges/latest/active.svg)](https://www.repostatus.org/#active)
 ![Run Pytest](https://github.com/markean/aimz/actions/workflows/coverage.yaml/badge.svg)
-[![Build GitHub Pages](https://github.com/markean/aimz/actions/workflows/gh-pages.yaml/badge.svg)](https://markean.github.io/aimz/)
 [![PyPI](https://img.shields.io/pypi/v/aimz)](https://pypi.org/project/aimz/)
 [![Conda](https://img.shields.io/conda/vn/conda-forge/aimz.svg)](https://anaconda.org/conda-forge/aimz)
 [![Python](https://img.shields.io/pypi/pyversions/aimz.svg)](https://pypi.org/project/aimz/)
@@ -12,7 +11,7 @@
 [![DOI](https://zenodo.org/badge/1009062911.svg)](https://doi.org/10.5281/zenodo.16101876)
 
 [**Installation**](https://markean.github.io/aimz/installation/#installation) |
-[**Documentation**](https://aimz.readthedocs.io/en/stable/)
+[**Documentation**](https://aimz.readthedocs.io/)
 
 ## Overview
 
