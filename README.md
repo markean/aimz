@@ -10,7 +10,7 @@
 [![codecov](https://codecov.io/gh/markean/aimz/graph/badge.svg?token=34OH7KQBXE)](https://codecov.io/gh/markean/aimz)
 [![DOI](https://zenodo.org/badge/1009062911.svg)](https://doi.org/10.5281/zenodo.16101876)
 
-[**Installation**](https://markean.github.io/aimz/installation/#installation) |
+[**Installation**](https://aimz.readthedocs.io/en/latest/getting_started/installation.html) |
 [**Documentation**](https://aimz.readthedocs.io/)
 
 ## Overview
