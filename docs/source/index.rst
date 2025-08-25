@@ -1,9 +1,10 @@
-aimz
-****
+aimz: Scalable probabilistic impact modeling
+********************************************
 
 **Version**: |version|
 
 **Useful links**:
+`Home <https://aimz.readthedocs.io/en/stable/>`__ |
 `Code Repository <https://github.com/markean/aimz>`__ |
 `Issues <https://github.com/markean/aimz/issues>`__ |
 `Releases <https://github.com/markean/aimz/releases>`__
