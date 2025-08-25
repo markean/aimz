@@ -16,8 +16,9 @@
   pip install -U "aimz[gpu]"
   ```
 
-!!! warning
-    GPU support is not available on Windows due to dependence on JAX. For GPU acceleration, use Linux or WSL2 with a compatible NVIDIA GPU and CUDA drivers.
+```{warning}
+GPU support is not available on Windows due to dependence on JAX. For GPU acceleration, use Linux or WSL2 with a compatible NVIDIA GPU and CUDA drivers.
+```
 
 ## Install with conda
 

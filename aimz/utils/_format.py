@@ -26,21 +26,19 @@ def _make_attrs() -> dict[str, str]:
     """Generate metadata attributes for the aimz library.
 
     Returns:
-        dict[str, str]: Attributes including creation timestamp, library name, and
-            library version (if available).
+        dict[str, str]: Attributes including creation timestamp and library version.
     """
-    attrs = {"created_at": datetime.datetime.now(datetime.UTC).isoformat()}
-    attrs["inference_library"] = "aimz"
-    attrs["inference_library_version"] = metadata.version("aimz")
-
-    return attrs
+    return {
+        "created_at": datetime.datetime.now(datetime.UTC).isoformat(),
+        "aimz_version": metadata.version("aimz"),
+    }
 
 
 def _dict_to_datatree(data: dict[str, Array]) -> xr.DataTree:
-    """Convert a dictionary of arrays to an `xarray.DataTree`.
+    """Convert a dictionary of arrays to an xarray DataTree.
 
     Each key in the dictionary becomes a variable in the Dataset, and its associated
-    array is wrapped as an `xarray.DataArray` with a 'chain' and 'draw' dimension to
+    array is wrapped as an xarray DataArray with a `chain` and `draw` dimension to
     support MCMC-style outputs. Additional dimensions are automatically named using the
     pattern `<variable>_dim_<N>`.
 
@@ -50,11 +48,9 @@ def _dict_to_datatree(data: dict[str, Array]) -> xr.DataTree:
         represents samples or draws.
 
     Returns:
-        All variables with added 'chain' and 'draw' dimensions, along with coordinates
+        All variables with added `chain` and `draw` dimensions, along with coordinates
             for each array dimension.
     """
-    num_samples = next(iter(data.values())).shape[0]
-
     return xr.DataTree(
         xr.Dataset(
             {
@@ -62,7 +58,7 @@ def _dict_to_datatree(data: dict[str, Array]) -> xr.DataTree:
                     np.expand_dims(arr, axis=0),
                     coords={
                         "chain": np.arange(1),
-                        "draw": np.arange(num_samples),
+                        "draw": np.arange(arr.shape[0]),
                         **{
                             f"{site}_dim_{i}": np.arange(arr.shape[i + 1])
                             for i in range(arr.ndim - 1)

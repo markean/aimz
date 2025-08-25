@@ -14,7 +14,7 @@
 
 """Module for custom data loader with padding logic for JAX arrays.
 
-This module defines a custom `ArrayLoader` that processes batches of data and applies
+This module defines a custom ArrayLoader that processes batches of data and applies
 padding to ensure the batch size is compatible with sharding across multiple XLA
 devices.
 """

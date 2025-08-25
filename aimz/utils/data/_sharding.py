@@ -55,8 +55,8 @@ def _create_sharded_sampler(
             - kernel (Callable): A probabilistic model with Pyro primitives.
             - posterior_samples (dict): A dictionary of posterior samples.
             - batch_shape (tuple[int]): The shape of the batch dimension, specifically
-                `(num_samples,)`.
-            - param_input (str): The name of the parameter in the `kernel` for the
+                ``(num_samples,)``.
+            - param_input (str): The name of the parameter in the ``kernel`` for the
                 input data.
             - kwargs_key (tuple[str]): A tuple of keyword argument names.
             - X (Array): Input data.
@@ -154,9 +154,9 @@ def _create_sharded_log_likelihood(
             - kernel (Callable): A probabilistic model with Pyro primitives optimized
                 with variational inference.
             - posterior_samples (dict): A dictionary of posterior samples.
-            - param_input (str): The name of the parameter in the `kernel` for the input
-                data.
-            - param_output (str): The name of the parameter in the `kernel` for the
+            - param_input (str): The name of the parameter in the ``kernel`` for the
+                input data.
+            - param_output (str): The name of the parameter in the ``kernel`` for the
                 output data.
             - kwargs_key (tuple[str]): A tuple of keyword argument names.
             - X (Array): Input data.

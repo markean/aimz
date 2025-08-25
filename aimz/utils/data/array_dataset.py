@@ -26,8 +26,7 @@ class ArrayDataset:
         """Initialize an ArrayDataset instance.
 
         Args:
-            to_jax (bool): Whether to convert the input arrays to JAX arrays. Defaults
-                to `True`.
+            to_jax (bool): Whether to convert the input arrays to JAX arrays.
             **arrays (ArrayLike): One or more JAX arrays or compatible array-like
                 objects.
 
