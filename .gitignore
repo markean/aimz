@@ -132,5 +132,7 @@ tmp/
 # Keep .gitkeep files
 !.gitkeep
 
-# mkdocs documentation
-/site
+# Serialized data files
+*.pkl
+*.joblib
+*.dill

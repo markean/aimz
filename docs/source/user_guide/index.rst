@@ -5,3 +5,4 @@ User Guide
    :maxdepth: 1
 
    model_persistence
+   mcmc
