@@ -17,6 +17,11 @@
 from inspect import Parameter, getfullargspec, signature
 from typing import TYPE_CHECKING
 
+import jax.numpy as jnp
+from jax import Array
+from jax.typing import ArrayLike
+from sklearn.utils.validation import check_array, check_X_y
+
 from aimz._exceptions import KernelValidationError, NotFittedError
 
 if TYPE_CHECKING:
@@ -178,3 +183,34 @@ def _validate_kernel_body(
             "Rename parameters or revise the model to avoid shadowing."
         )
         raise KernelValidationError(msg)
+
+
+def _validate_X_y_to_jax(
+    X: ArrayLike,
+    y: ArrayLike | None = None,
+) -> tuple[Array, Array] | Array:
+    """Validate and convert data arrays to JAX arrays.
+
+    Arrays are checked, converted, and placed on the same device as their originals
+    when available.
+
+    Args:
+        X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
+        y (ArrayLike): Output data with shape ``(n_samples_Y,)``.
+
+    Returns:
+        Validated JAX arrays, returning ``X`` if only X is provided, or a tuple
+        ``(X, y)`` otherwise.
+    """
+    if y is None:
+        device_x = X.device if isinstance(X, Array) and X.committed else None
+
+        return jnp.asarray(check_array(X), device=device_x)
+
+    device_x, device_y = (
+        arr.device if isinstance(arr, Array) and arr.committed else None
+        for arr in (X, y)
+    )
+    X, y = check_X_y(X, y, force_writeable=True, y_numeric=True)
+
+    return jnp.asarray(X, device=device_x), jnp.asarray(y, device=device_y)

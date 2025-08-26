@@ -24,9 +24,9 @@ Inference
 .. autosummary::
    :toctree: generated/
 
-   ImpactModel.fit
-   ImpactModel.fit_on_batch
    ImpactModel.train_on_batch
+   ImpactModel.fit_on_batch
+   ImpactModel.fit
    ImpactModel.set_posterior_sample
    ImpactModel.is_fitted
    ImpactModel.predict_on_batch

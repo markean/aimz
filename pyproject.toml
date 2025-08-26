@@ -61,7 +61,7 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = []
-pep8-naming = { ignore-names = ["X"] }
+pep8-naming = { ignore-names = ["*X*"] }
 per-file-ignores = { "docs*" = [
     "INP001", # implicit-namespace-package
     "A001",   # builtin-variable-shadowing
