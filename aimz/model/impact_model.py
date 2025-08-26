@@ -42,7 +42,6 @@ from jax.typing import ArrayLike
 from numpyro.handlers import do, seed, substitute, trace
 from numpyro.infer import MCMC, SVI
 from numpyro.infer.svi import SVIRunResult, SVIState
-from sklearn.utils.validation import check_array, check_X_y
 from tqdm.auto import tqdm
 from xarray import open_zarr
 from zarr import open_group
@@ -61,6 +60,7 @@ from aimz.utils._validation import (
     _check_is_fitted,
     _validate_group,
     _validate_kernel_body,
+    _validate_X_y_to_jax,
 )
 from aimz.utils.data import ArrayLoader
 from aimz.utils.data._input_setup import _setup_inputs
@@ -90,7 +90,8 @@ class ImpactModel(BaseModel):
             kernel (Callable): A probabilistic model with Pyro primitives.
             rng_key (Array): A pseudo-random number generator key.
             inference (SVI | MCMC): An inference method supported by NumPyro, such as an
-                instance of ``numpyro.infer.svi.SVI`` or ``numpyro.infer.mcmc.MCMC``.
+                instance of :external:py:class:`numpyro.infer.svi.SVI` or
+                :external:py:class:`numpyro.infer.mcmc.MCMC`.
             param_input (str, optional): The name of the parameter in the ``kernel`` for
                 the main input data.
             param_output (str, optional): The name of the parameter in the ``kernel``
@@ -98,8 +99,8 @@ class ImpactModel(BaseModel):
 
         Warning:
             The ``rng_key`` parameter should be provided as a **typed key array**
-            created with ``jax.random.key()``, rather than a legacy ``uint32`` key
-            created with ``jax.random.PRNGKey()``.
+            created with :external:py:func:`jax.random.key`, rather than a legacy
+            ``uint32`` key created with :external:py:func:`jax.random.PRNGKey`.
         """
         super().__init__(kernel, param_input, param_output)
         if rng_key.dtype == jnp.uint32:
@@ -174,9 +175,9 @@ class ImpactModel(BaseModel):
     def vi_result(self) -> SVIRunResult:
         """Get the current variational inference result.
 
-        :setter: This sets ``SVIRunResult`` and marks the model as fitted. It does not
-            perform posterior sampling — use :meth:`.sample() <ImpactModel.sample>`
-            separately to obtain samples.
+        :setter: This sets :external:py:data:`numpyro.infer.svi.SVIRunResult` and marks
+            the model as fitted. It does not perform posterior sampling — use
+            :py:meth:`~aimz.model.ImpactModel.sample` separately to obtain samples.
 
         Returns:
             The stored result from variational inference.
@@ -339,7 +340,7 @@ class ImpactModel(BaseModel):
         if rng_key is None:
             self.rng_key, rng_key = random.split(self.rng_key)
 
-        X = jnp.asarray(check_array(X))
+        X = _validate_X_y_to_jax(X)
 
         # Validate the provided parameters against the kernel's signature
         args_bound = (
@@ -445,13 +446,15 @@ class ImpactModel(BaseModel):
         initialization of the ImpactModel instance:
 
         - SVI
-            Runs variational inference on the provided batch by invoking the ``.run()``
-            method of the ``SVI`` instance from NumPyro to estimate the posterior
-            distribution, then draws samples from it.
+            Runs variational inference on the provided batch by invoking the
+            :external:py:meth:`~numpyro.infer.svi.SVI.run` method of the
+            :external:py:class:`~numpyro.infer.svi.SVI` instance from NumPyro to
+            estimate the posterior distribution, then draws samples from it.
 
         - MCMC
-            Runs posterior sampling by invoking the ``.run()`` method of the ``MCMC``
-            instance from NumPyro.
+            Runs posterior sampling by invoking the
+            :external:py:meth:`~numpyro.infer.mcmc.MCMC.run` method of the
+            :external:py:class:`~numpyro.infer.mcmc.MCMC` instance from NumPyro.
 
         Args:
             X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
@@ -477,7 +480,7 @@ class ImpactModel(BaseModel):
         if rng_key is None:
             self.rng_key, rng_key = random.split(self.rng_key)
 
-        X, y = map(jnp.asarray, check_X_y(X, y, force_writeable=True, y_numeric=True))
+        X, y = _validate_X_y_to_jax(X, y)
 
         # Validate the provided parameters against the kernel's signature
         args_bound = (
@@ -585,7 +588,8 @@ class ImpactModel(BaseModel):
             This method continues training from the existing SVI state if available.
             To start training from scratch, create a new model instance. It does not
             check whether the model or guide is written to support subsampling semantics
-            (e.g., using NumPyro's ``subsample`` or similar constructs).
+            (e.g., using NumPyro's :external:py:func:`~numpyro.primitives.subsample` or
+            similar constructs).
         """
         if isinstance(self.inference, MCMC):
             msg = (
@@ -674,13 +678,15 @@ class ImpactModel(BaseModel):
 
         This method sets externally obtained posterior samples on the model instance,
         enabling downstream analysis without requiring a call to
-        :meth:`.fit() <ImpactModel.fit>` or
-        :meth:`.fit_on_batch() <ImpactModel.fit_on_batch>`.
+        :py:meth:`~aimz.model.ImpactModel.fit` or
+        :py:meth:`~aimz.model.ImpactModel.fit_on_batch`.
 
         It is primarily intended for workflows where posterior sampling is performed
-        manually—for example, using NumPyro's ``SVI`` (or ``MCMC``) with the
-        ``Predictive`` API—and the resulting posterior samples are injected into the
-        model for further use.
+        manually—for example, using NumPyro's
+        :external:py:class:`~numpyro.infer.svi.SVI` (or
+        :external:py:class:`~numpyro.infer.mcmc.MCMC`) with the
+        :external:py:class:`~numpyro.infer.util.Predictive` API—and the resulting
+        posterior samples are injected into the model for further use.
 
         Internally, ``batch_ndims`` is set to ``1`` by default to correctly handle the
         batch dimensions of the posterior samples. For more information, refer to the
@@ -689,7 +695,7 @@ class ImpactModel(BaseModel):
         Args:
             posterior_sample (dict[str, Array]): Posterior samples to set for the model.
             return_sites (tuple[str] | None, optional): Names of variable (sites) to
-                return in :meth:`.predict() <ImpactModel.predict>`. By default, it is
+                return in :py:meth:`~aimz.model.ImpactModel.predict`. By default, it is
                 set to ``self.param_output``.
 
         Returns:
@@ -840,8 +846,8 @@ class ImpactModel(BaseModel):
         This method returns predictions for a single batch of input data and is better
         suited for:
 
-            1) Models incompatible with :meth:`.predict() <ImpactModel.predict>` due to
-            their posterior sample shapes.
+            1) Models incompatible with :py:meth:`~aimz.model.ImpactModel.predict` due
+            to their posterior sample shapes.
 
             2) Scenarios where writing results to to files (e.g., disk, cloud storage)
             is not desired.
@@ -880,7 +886,7 @@ class ImpactModel(BaseModel):
         if rng_key is None:
             self.rng_key, rng_key = random.split(self.rng_key)
 
-        X = jnp.asarray(check_array(X))
+        X = _validate_X_y_to_jax(X)
 
         # Validate the provided parameters against the kernel's signature
         args_bound = (
@@ -973,7 +979,7 @@ class ImpactModel(BaseModel):
             TypeError: If ``self.param_output`` is passed as an argument.
 
         See Also:
-            :meth:`.cleanup() <ImpactModel.cleanup>` to remove the temporary directory
+            :py:meth:`~aimz.model.ImpactModel.cleanup` to remove the temporary directory
             if created.
         """
         _check_is_fitted(self)
@@ -1075,12 +1081,12 @@ class ImpactModel(BaseModel):
             output_intervention (xr.DataTree | None, optional): Precomputed output for
                 the intervention scenario.
             args_baseline (dict | None, optional): Input arguments for the baseline
-                scenario. Passed to the :meth:`.predict() <ImpactModel.predict>` to
+                scenario. Passed to the :py:meth:`~aimz.model.ImpactModel.predict` to
                 compute predictions if ``output_baseline`` is not provided. Ignored if
                 ``output_baseline`` is already given.
             args_intervention (dict | None, optional): Input arguments for the
                 intervention scenario. Passed to the
-                :meth:`.predict() <ImpactModel.predict>` to compute predictions if
+                :py:meth:`~aimz.model.ImpactModel.predict` to compute predictions if
                 ``output_intervention`` is not provided. Ignored if
                 ``output_intervention`` is already given.
 
@@ -1093,7 +1099,7 @@ class ImpactModel(BaseModel):
                 ``args_intervention`` is provided.
 
         See Also:
-            :meth:`.cleanup() <ImpactModel.cleanup>` to remove the temporary directory
+            :py:meth:`~aimz.model.ImpactModel.cleanup` to remove the temporary directory
             if created.
         """
         _check_is_fitted(self)
@@ -1162,7 +1168,7 @@ class ImpactModel(BaseModel):
             Log-likelihood values. Posterior samples are included if available.
 
         See Also:
-            :meth:`.cleanup() <ImpactModel.cleanup>` to remove the temporary directory
+            :py:meth:`~aimz.model.ImpactModel.cleanup` to remove the temporary directory
             if created.
         """
         _check_is_fitted(self)

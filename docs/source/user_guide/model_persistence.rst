@@ -74,8 +74,8 @@ Save a trained :py:class:`~aimz.model.ImpactModel` (and optionally its input dat
 Deserialization
 ---------------
 
-Load a previously saved :py:class:`~aimz.model.ImpactModel` (and optionally its input data) from disk in a fresh new session or different runtime environment. 
-To use the loaded model correctly, the same dependencies, imports, and any constants or variables that the ``model`` relied on when it was saved must be available. 
+Load a previously saved :py:class:`~aimz.model.ImpactModel` (and optionally its input data) from disk in a fresh new session or different runtime environment.
+To use the loaded model correctly, the same dependencies, imports, and any constants or variables that the ``model`` relied on when it was saved must be available.
 Any JAX array—whether part of the :py:class:`~aimz.model.ImpactModel` or the input data—will be placed on the default device.
 
 .. jupyter-execute::
