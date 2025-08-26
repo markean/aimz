@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed incompatibility with Zarr when models output arrays in `bfloat16` by automatically promoting them to `float32` before saving (@markean, [#57](https://github.com/markean/aimz/issues/57)).
 
+- Enhanced data array validation to preserve device placement for JAX arrays (@markean, [#53](https://github.com/markean/aimz/issues/53)).
+
 ## [v0.4.0](https://github.com/markean/aimz/releases/tag/v0.4.0) - 2025-08-18
 
 ### Added
