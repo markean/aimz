@@ -49,7 +49,6 @@ extensions = [
     "sphinx.ext.napoleon",
     "myst_parser",
     "jupyter_sphinx",
-    "nbsphinx",
     "sphinx_copybutton",
     "sphinx_design",
 ]

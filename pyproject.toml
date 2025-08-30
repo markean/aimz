@@ -36,13 +36,12 @@ classifiers = [
 dev = ["dill>=0.4.0", "pytest>=8.4", "pytest-cov>=6"]
 gpu = ["jax[cuda12]>=0.7"]
 docs = [
-    "sphinx==8.1.3",
-    "myst-parser==4.0.1",
-    "jupyter-sphinx==0.5.3",
-    "nbsphinx==0.9.7",
-    "sphinx-copybutton==0.5.2",
-    "sphinx-design==0.6.1",
-    "pydata-sphinx-theme==0.16.1",
+    "sphinx>=8.2",
+    "myst-parser>=4.0",
+    "jupyter-sphinx>=0.5",
+    "sphinx-copybutton>=0.5",
+    "sphinx-design>=0.6",
+    "pydata-sphinx-theme>=0.16",
     "dill>=0.4.0",
 ]
 

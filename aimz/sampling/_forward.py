@@ -44,13 +44,13 @@ def _sample_forward(
         rng_key (Array): A pseudo-random number generator key.
         return_sites (tuple[str] | None): Names of variables (sites) to return.
         posterior_samples (dict[str, Array]| None): Dictionary of parameter samples
-            where each array has shape (num_samples, ...).
+            where each array has shape ``(num_samples, ...)``.
         model_kwargs (dict[str, ArrayLike] | None): Additional arguments passed to the
             model.
 
     Returns:
-        dict[str, Array]: A dictionary mapping each return site to an array of
-            traced values with shape (num_samples, ...).
+        dict[str, Array]: A dictionary mapping each return site to an array of traced
+            values with shape ``(num_samples, ...)``.
     """
 
     def _trace_one_sample(
@@ -70,7 +70,7 @@ def _sample_forward(
             masked_model,
             substitute_fn=_exclude_deterministic,
         )
-        model_trace = trace(seed(substituted_model, rng_key)).get_trace(
+        model_trace = trace(seed(substituted_model, rng_seed=rng_key)).get_trace(
             **(model_kwargs or {}),
         )
 
@@ -86,6 +86,6 @@ def _sample_forward(
 
         return {k: v["value"] for k, v in model_trace.items() if k in sites}
 
-    rng_keys = random.split(rng_key, num_samples).reshape((num_samples,))
+    rng_keys = random.split(rng_key, num=num_samples).reshape((num_samples,))
 
     return lax.map(_trace_one_sample, xs=(rng_keys, posterior_samples or {}))

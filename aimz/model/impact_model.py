@@ -234,13 +234,16 @@ class ImpactModel(BaseModel):
         if rng_key is None:
             self.rng_key, rng_key = random.split(self.rng_key)
 
+        X = _validate_X_y_to_jax(X)
+
         # Validate the provided parameters against the kernel's signature
         args_bound = (
             signature(self.kernel).bind(**{self.param_input: X, **kwargs}).arguments
         )
         if self.param_output in args_bound:
-            sub = self.param_output
-            msg = f"{sub!r} is not allowed in `.sample_prior_predictive()`."
+            msg = (
+                f"{self.param_output!r} is not allowed in `.sample_prior_predictive()`."
+            )
             raise TypeError(msg)
 
         return _sample_forward(
@@ -347,8 +350,10 @@ class ImpactModel(BaseModel):
             signature(self.kernel).bind(**{self.param_input: X, **kwargs}).arguments
         )
         if self.param_output in args_bound:
-            sub = self.param_output
-            msg = f"{sub!r} is not allowed in `.sample_prior_predictive()`."
+            msg = (
+                f"{self.param_output!r} is not allowed in "
+                "`.sample_posterior_predictive()`."
+            )
             raise TypeError(msg)
 
         if intervention is None:
