@@ -21,8 +21,8 @@ from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
 from numpyro.optim import Adam
 
+from aimz import ImpactModel
 from aimz._exceptions import KernelValidationError
-from aimz.model import ImpactModel
 
 
 @pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")

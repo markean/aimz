@@ -40,12 +40,12 @@ def _create_sharded_sampler(
     n_kwargs_array: int,
     n_kwargs_extra: int,
 ) -> "Callable":
-    """Create a sharded posterior predictive sampling function.
+    """Create a sharded predictive sampling function.
 
     Args:
         mesh (Mesh): The JAX mesh object defining the device mesh for sharding.
-        n_kwargs_array (int): The number of arguments in the keyword arguments that
-            are array-like (sharded).
+        n_kwargs_array (int): The number of arguments in the keyword arguments that are
+            array-like (sharded).
         n_kwargs_extra (int): The number of extra keyword arguments that are not
             array-like (not sharded).
 
@@ -53,7 +53,7 @@ def _create_sharded_sampler(
         Callable: A sharded function that takes the following arguments:
             - rng_key (Array): A pseudo-random number generator key.
             - kernel (Callable): A probabilistic model with Pyro primitives.
-            - posterior_samples (dict): A dictionary of posterior samples.
+            - samples (dict): A dictionary of samples to condition on.
             - batch_shape (tuple[int]): The shape of the batch dimension, specifically
                 ``(num_samples,)``.
             - param_input (str): The name of the parameter in the ``kernel`` for the
@@ -68,12 +68,12 @@ def _create_sharded_sampler(
     def f(
         kernel: "Callable",
         num_samples: int,
-        rng_key: Array,
+        rng_key: ArrayLike,
         return_sites: tuple[str],
-        posterior_samples: dict[str, Array],
+        samples: dict[str, Array],
         param_input: str,
         kwargs_key: tuple[str],
-        X: ArrayLike,
+        X: Array,
         *args: ArrayLike,
     ) -> dict[str, Array]:
         return _sample_forward(
@@ -81,7 +81,7 @@ def _create_sharded_sampler(
             num_samples=num_samples,
             rng_key=rng_key,
             return_sites=return_sites,
-            posterior_samples=posterior_samples,
+            samples=samples,
             model_kwargs={
                 param_input: X,
                 **dict(zip(kwargs_key, args, strict=True)),
@@ -172,8 +172,8 @@ def _create_sharded_log_likelihood(
         param_input: str,
         param_output: str,
         kwargs_key: tuple[str],
-        X: ArrayLike,
-        y: ArrayLike,
+        X: Array,
+        y: Array,
         *args: tuple,
     ) -> Array:
         return log_lik(

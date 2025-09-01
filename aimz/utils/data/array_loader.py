@@ -26,6 +26,7 @@ from warnings import warn
 
 import jax.numpy as jnp
 from jax import Array, device_put, local_device_count, random
+from jax.typing import ArrayLike
 
 from aimz.utils.data.array_dataset import ArrayDataset
 
@@ -40,7 +41,7 @@ class ArrayLoader:
     def __init__(
         self,
         dataset: ArrayDataset,
-        rng_key: Array,
+        rng_key: ArrayLike,
         *,
         batch_size: int = 32,
         shuffle: bool = False,
@@ -50,7 +51,7 @@ class ArrayLoader:
 
         Args:
             dataset (ArrayDataset): The dataset to load.
-            rng_key (Array): A pseudo-random number generator key.
+            rng_key (ArrayLike): A pseudo-random number generator key.
             batch_size (int): The number of samples per batch.
             shuffle (bool, optional): Whether to shuffle the dataset before batching.
             device (Sharding | None, optional): The device or sharding specification to
@@ -69,7 +70,7 @@ class ArrayLoader:
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.indices = jnp.arange(len(self.dataset))
-        if rng_key.dtype == jnp.uint32:
+        if isinstance(rng_key, Array) and rng_key.dtype == jnp.uint32:
             msg = "Legacy `uint32` PRNGKey detected; converting to a typed key array."
             warn(msg, category=UserWarning, stacklevel=2)
             rng_key = random.wrap_key_data(rng_key)

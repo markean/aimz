@@ -24,8 +24,8 @@ from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
 from numpyro.optim import Adam
 
+from aimz import ImpactModel
 from aimz._exceptions import NotFittedError
-from aimz.model import ImpactModel
 
 
 def test_model_not_fitted() -> None:
@@ -158,3 +158,8 @@ def test_predict_after_cleanup(
     temp_dir_after = im.temp_dir.name
 
     assert temp_dir_before != temp_dir_after
+
+    # `.sample_posterior_predictive()` is an alias for `.predict()`
+    im.cleanup()
+    with pytest.warns(UserWarning, match=msg):
+        im.sample_posterior_predictive(X=X, batch_size=len(X) // 2, progress=False)

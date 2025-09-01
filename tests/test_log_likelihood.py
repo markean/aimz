@@ -22,8 +22,8 @@ from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
 from numpyro.optim import Adam
 
+from aimz import ImpactModel
 from aimz._exceptions import NotFittedError
-from aimz.model import ImpactModel
 
 
 def test_model_not_fitted() -> None:

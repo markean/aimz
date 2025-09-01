@@ -24,7 +24,7 @@ from jax.typing import ArrayLike
 from numpyro.infer import Predictive
 from numpyro.infer.svi import SVIRunResult
 
-from aimz.model import ImpactModel
+from aimz import ImpactModel
 from aimz.utils._validation import _is_fitted
 
 if TYPE_CHECKING:
@@ -50,14 +50,16 @@ def test_set_posterior_sample(
     im = ImpactModel(lm, rng_key=rng_key, inference=vi)
     im.vi_result = vi_result
     # Use the same key for reproducibility
-    im.set_posterior_sample(im.sample(num_samples=100, rng_key=rng_subkey))
+    posterior_samples = im.sample(num_samples=100, rng_key=rng_subkey).posterior
+    im.set_posterior_sample({k: v.values for k, v in posterior_samples.items()})
     assert _is_fitted(im), "Model fitting check failed"
     assert isinstance(im.vi_result, SVIRunResult)
     assert posterior_sample.keys() == im.posterior.keys()
     for key in posterior_sample:
         assert jnp.allclose(posterior_sample[key], im.posterior[key])
 
-    im.set_posterior_sample(im.sample(num_samples=100))
+    posterior_samples = im.sample(num_samples=100).posterior
+    im.set_posterior_sample({k: v.values for k, v in posterior_samples.items()})
     for key in posterior_sample:
         # Without the `rng_key` argument, we get different posterior samples
         assert not jnp.allclose(posterior_sample[key], im.posterior[key])

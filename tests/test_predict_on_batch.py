@@ -24,8 +24,8 @@ from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
 from numpyro.optim import Adam
 
+from aimz import ImpactModel
 from aimz._exceptions import NotFittedError
-from aimz.model import ImpactModel
 
 
 def test_model_not_fitted() -> None:
@@ -105,8 +105,10 @@ def test_predict_on_batch_lm_with_kwargs_array(
     synthetic_data: tuple[ArrayLike, ArrayLike],
     vi: SVI,
 ) -> None:
-    """Test the `.predict_on_batch()` method of `ImpactModel`."""
+    """Test the `.predict_on_batch()` method of ImpactModel."""
     X, y = synthetic_data
     im = ImpactModel(lm_with_kwargs_array, rng_key=random.key(42), inference=vi)
     im.fit(X=X, y=y, c=y, batch_size=3)
     im.predict_on_batch(X=X, c=y)
+    # `.sample_posterior_predictive_on_batch()` is an alias for `.predict_on_batch()`
+    im.sample_posterior_predictive_on_batch(X=X, c=y)

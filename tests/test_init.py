@@ -18,7 +18,7 @@ import pytest
 from conftest import lm
 from jax import random
 
-from aimz.model import ImpactModel
+from aimz import ImpactModel
 
 
 def test_unsupported_inference_method() -> None:

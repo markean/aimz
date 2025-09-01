@@ -23,7 +23,7 @@ from conftest import lm
 from jax import random
 from jax.typing import ArrayLike
 
-from aimz.model import ImpactModel
+from aimz import ImpactModel
 
 if TYPE_CHECKING:
     from numpyro.infer import SVI

@@ -12,16 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for the `.sample_posterior_predictive()` method."""
+"""Tests for the `.sample_prior_predictive_on_batch()` method."""
 
 from typing import TYPE_CHECKING
 
 import pytest
+import xarray as xr
 from conftest import lm
 from jax import random
 from jax.typing import ArrayLike
 
-from aimz.model import ImpactModel
+from aimz import ImpactModel
 
 if TYPE_CHECKING:
     from numpyro.infer import SVI
@@ -39,21 +40,19 @@ class TestKernelParameterValidation:
         """An invalid parameter raise an error."""
         X, y = synthetic_data
         im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
-        im.fit(X=X, y=y, batch_size=3)
         with pytest.raises(TypeError):
-            im.sample_posterior_predictive(X=X, y=y)
+            im.sample_prior_predictive_on_batch(X=X, y=y)
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
-def test_sample_posterior_predictive_lm(
+def test_sample_prior_predictive_on_batch_lm(
     synthetic_data: tuple[ArrayLike, ArrayLike],
     vi: "SVI",
 ) -> None:
-    """Test the `.sample_posterior_predictive()` method of `ImpactModel`."""
-    X, y = synthetic_data
+    """Test the `.sample_prior_predictive_on_batch()` method of ImpactModel."""
+    X, _ = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
-    im.fit(X=X, y=y, num_samples=99, batch_size=3)
-    samples = im.sample_posterior_predictive(X=X)
+    samples = im.sample_prior_predictive_on_batch(X=X, num_samples=99)
 
-    assert isinstance(samples, dict)
-    assert samples["y"].shape == (99, len(X))
+    assert isinstance(samples, xr.DataTree)
+    assert samples.prior_predictive["y"].values.shape == (1, 99, len(X))

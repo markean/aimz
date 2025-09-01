@@ -17,8 +17,6 @@
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Self
 
-from jax.typing import ArrayLike
-
 from aimz.utils._validation import _validate_kernel_signature
 
 if TYPE_CHECKING:
@@ -53,33 +51,10 @@ class BaseModel(ABC):
         _validate_kernel_signature(self.kernel, self.param_input, self.param_output)
 
     @abstractmethod
-    def fit(
-        self,
-        X: ArrayLike,
-        y: ArrayLike,
-        **kwargs: object,
-    ) -> Self:
-        """Fit the model to the input data ``X`` and output data ``y``.
-
-        Args:
-            X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
-            y (ArrayLike): Output data with shape ``(n_samples_Y,)``.
-            **kwargs (object): Additional arguments passed to the model, except for
-                ``X`` and ``y``. All array-like objects in ``**kwargs`` are expected to
-                be JAX arrays.
-
-        Returns:
-            The fitted model instance, enabling method chaining.
-        """
+    def fit(self, X, y, **kwargs) -> Self:  # noqa: ANN001 ANN003
+        """Fit the model to the input data ``X`` and output data ``y``."""
         return self
 
     @abstractmethod
-    def predict(self, X: ArrayLike, **kwargs: object) -> object:
-        """Predict the output based on the fitted model.
-
-        Args:
-            X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
-            **kwargs (object): Additional arguments passed to the model, except for
-                ``X`` and ``y``. All array-like objects in ``**kwargs`` are expected to
-                be JAX arrays.
-        """
+    def predict(self, X, **kwargs) -> object:  # noqa: ANN001 ANN003
+        """Predict the output based on the fitted model."""

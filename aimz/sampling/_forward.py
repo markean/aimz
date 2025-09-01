@@ -28,10 +28,10 @@ if TYPE_CHECKING:
 def _sample_forward(
     model: "Callable",
     num_samples: int,
-    rng_key: Array,
+    rng_key: ArrayLike,
     return_sites: tuple[str] | None,
-    posterior_samples: dict[str, Array] | None,
-    model_kwargs: dict[str, ArrayLike] | None,
+    samples: dict[str, Array] | None,
+    model_kwargs: dict[str, Array] | None,
 ) -> dict[str, Array]:
     """Generates forward samples from a model conditioned on parameter draws.
 
@@ -41,11 +41,11 @@ def _sample_forward(
     Args:
         model (Callable): A probabilistic model with Pyro primitives.
         num_samples (int): The number of samples to draw.
-        rng_key (Array): A pseudo-random number generator key.
+        rng_key (ArrayLike): A pseudo-random number generator key.
         return_sites (tuple[str] | None): Names of variables (sites) to return.
-        posterior_samples (dict[str, Array]| None): Dictionary of parameter samples
+        samples (dict[str, Array]| None): A dictionary of samples to condition on,
             where each array has shape ``(num_samples, ...)``.
-        model_kwargs (dict[str, ArrayLike] | None): Additional arguments passed to the
+        model_kwargs (dict[str, Array] | None): Additional arguments passed to the
             model.
 
     Returns:
@@ -56,14 +56,10 @@ def _sample_forward(
     def _trace_one_sample(
         sample_input: tuple[Array, dict[str, Array]],
     ) -> dict[str, Array]:
-        rng_key, posterior_sample = sample_input
+        rng_key, sample = sample_input
 
         def _exclude_deterministic(msg: "OrderedDict[str, Any]") -> Array | None:
-            return (
-                posterior_sample.get(msg["name"])
-                if msg["type"] != "deterministic"
-                else None
-            )
+            return sample.get(msg["name"]) if msg["type"] != "deterministic" else None
 
         masked_model = mask(model, mask=False)
         substituted_model = substitute(
@@ -78,7 +74,7 @@ def _sample_forward(
             sites = {
                 k
                 for k, site in model_trace.items()
-                if (site["type"] == "sample" and k not in posterior_sample)
+                if (site["type"] == "sample" and k not in sample)
                 or (site["type"] == "deterministic")
             }
         else:
@@ -88,4 +84,4 @@ def _sample_forward(
 
     rng_keys = random.split(rng_key, num=num_samples).reshape((num_samples,))
 
-    return lax.map(_trace_one_sample, xs=(rng_keys, posterior_samples or {}))
+    return lax.map(_trace_one_sample, xs=(rng_keys, samples or {}))

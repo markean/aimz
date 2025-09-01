@@ -38,18 +38,18 @@ def _dict_to_datatree(data: dict[str, Array]) -> xr.DataTree:
     """Convert a dictionary of arrays to an xarray DataTree.
 
     Each key in the dictionary becomes a variable in the Dataset, and its associated
-    array is wrapped as an xarray DataArray with a `chain` and `draw` dimension to
+    array is wrapped as an xarray DataArray with a ``chain`` and ``draw`` dimension to
     support MCMC-style outputs. Additional dimensions are automatically named using the
-    pattern `<variable>_dim_<N>`.
+    pattern ``<variable>_dim_<N>``.
 
     Args:
         data (dict[str, Array]): Dictionary mapping variable names to arrays. Each array
-        should have shape `(num_samples, dim_0, dim_1, ...)` where the first dimension
+        should have shape ``(num_samples, dim_0, dim_1, ...)`` where the first dimension
         represents samples or draws.
 
     Returns:
-        All variables with added `chain` and `draw` dimensions, along with coordinates
-            for each array dimension.
+        All variables with added ``chain`` and ``draw`` dimensions, along with
+            coordinates for each array dimension.
     """
     return xr.DataTree(
         xr.Dataset(

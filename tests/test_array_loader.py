@@ -22,7 +22,7 @@ from jax import random
 from jax.typing import ArrayLike
 from numpyro.infer import SVI
 
-from aimz.model import ImpactModel
+from aimz import ImpactModel
 from aimz.utils.data import ArrayDataset, ArrayLoader
 
 

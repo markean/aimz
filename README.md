@@ -48,7 +48,7 @@ from numpyro.infer.autoguide import AutoNormal
 from sklearn.datasets import fetch_california_housing
 from sklearn.model_selection import train_test_split
 
-from aimz.model import ImpactModel
+from aimz import ImpactModel
 
 # Load California Housing dataset
 housing = fetch_california_housing()
@@ -111,7 +111,7 @@ from numpyro import optim, plate, sample
 from numpyro.infer import SVI, Trace_ELBO, init_to_feasible
 from numpyro.infer.autoguide import AutoNormal
 
-from aimz.model import ImpactModel
+from aimz import ImpactModel
 
 
 # NumPyro model: Z and y are influenced by C and X, with Z mediating part of y

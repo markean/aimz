@@ -20,7 +20,7 @@ from jax import random
 from jax.typing import ArrayLike
 from numpyro.infer import MCMC
 
-from aimz.model import ImpactModel
+from aimz import ImpactModel
 
 
 @pytest.mark.parametrize("mcmc", [lm], indirect=True)
@@ -41,19 +41,24 @@ def test_sample_with_mcmc(
     synthetic_data: tuple[ArrayLike, ArrayLike],
     mcmc: MCMC,
 ) -> None:
-    """Test the `.sample()` method of `ImpactModel` with MCMC."""
+    """Test the `.sample()` method of ImpactModel with MCMC."""
     X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), inference=mcmc)
     im.fit_on_batch(X=X, y=y)
 
-    # rng_key is ignored for MCMC; sampling uses the post_warmup_state
     num_samples = 7
-    posterior = im.sample(num_samples=num_samples, rng_key=random.key(42), X=X, y=y)
+    # rng_key is ignored for MCMC; sampling uses the post_warmup_state
+    posterior_samples = im.sample(
+        num_samples=num_samples,
+        rng_key=random.key(42),
+        X=X,
+        y=y,
+    ).posterior
 
     # Check shapes for all sampled sites
-    for site, values in posterior.items():
-        assert values.shape[0] == num_samples, (
-            f"Incorrect number of samples for site {site}"
+    for var in posterior_samples.data_vars:
+        assert posterior_samples[var].values.shape[1] == num_samples, (
+            f"Incorrect number of samples for site {var}"
         )
 
     assert im.inference.num_samples == num_samples
