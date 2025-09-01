@@ -54,6 +54,7 @@ extensions = [
 ]
 templates_path = ["_templates"]
 exclude_patterns = ["**.dill", "**.ipynb_checkpoints"]
+autodoc_typehints = "description"
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
     "jax": ("https://docs.jax.dev/en/latest/", None),

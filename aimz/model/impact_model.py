@@ -21,7 +21,7 @@ from os import cpu_count
 from pathlib import Path
 from shutil import rmtree
 from tempfile import TemporaryDirectory
-from typing import Self
+from typing import Self, cast
 from warnings import warn
 
 import jax.numpy as jnp
@@ -78,7 +78,7 @@ class ImpactModel(BaseModel):
     def __init__(
         self,
         kernel: Callable,
-        rng_key: Array,
+        rng_key: ArrayLike,
         inference: SVI | MCMC,
         *,
         param_input: str = "X",
@@ -88,7 +88,7 @@ class ImpactModel(BaseModel):
 
         Args:
             kernel (Callable): A probabilistic model with Pyro primitives.
-            rng_key (Array): A pseudo-random number generator key.
+            rng_key (ArrayLike): A pseudo-random number generator key.
             inference (SVI | MCMC): An inference method supported by NumPyro, such as an
                 instance of :external:py:class:`numpyro.infer.svi.SVI` or
                 :external:py:class:`numpyro.infer.mcmc.MCMC`.
@@ -103,11 +103,11 @@ class ImpactModel(BaseModel):
             ``uint32`` key created with :external:py:func:`jax.random.PRNGKey`.
         """
         super().__init__(kernel, param_input, param_output)
-        if rng_key.dtype == jnp.uint32:
+        if isinstance(rng_key, Array) and rng_key.dtype == jnp.uint32:
             msg = "Legacy `uint32` PRNGKey detected; converting to a typed key array."
             warn(msg, category=UserWarning, stacklevel=2)
             rng_key = random.wrap_key_data(rng_key)
-        self.rng_key = rng_key
+        self._rng_key = rng_key
         if not isinstance(inference, (SVI, MCMC)):
             msg = (
                 f"Unsupported inference object: `{type(inference).__name__}`. "
@@ -116,12 +116,13 @@ class ImpactModel(BaseModel):
             raise TypeError(msg)
         self.inference = inference
         self._vi_state = None
-        self.posterior: dict[str, Array] | None = None
+        self._posterior: dict[str, Array] | None = None
         self._init_runtime_attrs()
 
     def _init_runtime_attrs(self) -> None:
         """Initialize runtime attributes."""
         self._fn_vi_update: Callable | None = None
+        self._fn_sample_prior_predictive: Callable | None = None
         self._fn_sample_posterior_predictive: Callable | None = None
         self._fn_log_likelihood: Callable | None = None
         self._mesh: Mesh | None
@@ -172,15 +173,17 @@ class ImpactModel(BaseModel):
         self._init_runtime_attrs()
 
     @property
+    def rng_key(self) -> ArrayLike:
+        """Pseudo-random number generator key."""
+        return self._rng_key
+
+    @property
     def vi_result(self) -> SVIRunResult:
-        """Get the current variational inference result.
+        """Variational inference result.
 
         :setter: This sets :external:py:data:`numpyro.infer.svi.SVIRunResult` and marks
             the model as fitted. It does not perform posterior sampling — use
-            :py:meth:`~aimz.model.ImpactModel.sample` separately to obtain samples.
-
-        Returns:
-            The stored result from variational inference.
+            :py:meth:`~aimz.ImpactModel.sample` separately to obtain samples.
         """
         return self._vi_result
 
@@ -203,22 +206,27 @@ class ImpactModel(BaseModel):
 
         self._vi_result = vi_result
 
-    def sample_prior_predictive(
+    @property
+    def posterior(self) -> dict[str, Array] | None:
+        """Posterior samples by variable name."""
+        return self._posterior
+
+    def sample_prior_predictive_on_batch(
         self,
         X: ArrayLike,
         *,
         num_samples: int = 1000,
-        rng_key: Array | None = None,
+        rng_key: ArrayLike | None = None,
         return_sites: tuple[str] | None = None,
         **kwargs: object,
-    ) -> dict[str, Array]:
+    ) -> xr.DataTree:
         """Draw samples from the prior predictive distribution.
 
         Args:
             X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
             num_samples (int, optional): The number of samples to draw.
-            rng_key (Array | None, optional): A pseudo-random number generator key. By
-                default, an internal key is used and split as needed.
+            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
+                By default, an internal key is used and split as needed.
             return_sites (tuple[str] | None, optional): Names of variables (sites) to
                 return. If ``None``, samples all latent, observed, and deterministic
                 sites.
@@ -231,45 +239,200 @@ class ImpactModel(BaseModel):
         Raises:
             TypeError: If ``self.param_output`` is passed as an argument.
         """
-        if rng_key is None:
-            self.rng_key, rng_key = random.split(self.rng_key)
-
-        X = _validate_X_y_to_jax(X)
+        X = cast("Array", _validate_X_y_to_jax(X))
 
         # Validate the provided parameters against the kernel's signature
         args_bound = (
             signature(self.kernel).bind(**{self.param_input: X, **kwargs}).arguments
         )
         if self.param_output in args_bound:
-            msg = (
-                f"{self.param_output!r} is not allowed in `.sample_prior_predictive()`."
-            )
+            msg = f"Specifying {self.param_output!r} is not allowed."
             raise TypeError(msg)
 
-        return _sample_forward(
-            self.kernel,
-            rng_key=rng_key,
-            num_samples=num_samples,
-            return_sites=return_sites,
-            posterior_samples=None,
-            model_kwargs=args_bound,
+        if rng_key is None:
+            self._rng_key, rng_key = random.split(self._rng_key)
+
+        prior_predictive_samples = device_get(
+            _sample_forward(
+                self.kernel,
+                rng_key=rng_key,
+                num_samples=num_samples,
+                return_sites=return_sites,
+                samples=None,
+                model_kwargs=args_bound,
+            ),
         )
+        out = xr.DataTree(name="root")
+        out["prior_predictive"] = _dict_to_datatree(prior_predictive_samples)
+
+        return out
+
+    def sample_prior_predictive(
+        self,
+        X: ArrayLike,
+        *,
+        num_samples: int = 1000,
+        rng_key: ArrayLike | None = None,
+        return_sites: tuple[str] | None = None,
+        batch_size: int | None = None,
+        output_dir: str | Path | None = None,
+        progress: bool = True,
+        **kwargs: object,
+    ) -> xr.DataTree:
+        """Draw samples from the prior predictive distribution.
+
+        Results are written to disk in the Zarr format, with computing and file writing
+        decoupled and executed concurrently.
+
+        Args:
+            X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
+            num_samples (int, optional): The number of samples to draw.
+            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
+                By default, an internal key is used and split as needed.
+            return_sites (tuple[str] | None, optional): Names of variables (sites) to
+                return. If ``None``, samples ``self.param_output`` and deterministic
+                sites.
+            batch_size (int | None, optional): The size of batches for data loading
+                during prior predictive sampling. By default, it is set to the total
+                number of samples (``n_samples_X``). This value also determines the
+                chunk size for storing the prior predictive samples.
+            output_dir (str | Path | None, optional): The directory where the outputs
+                will be saved. If the specified directory does not exist, it will be
+                created automatically. If ``None``, a default temporary directory will
+                be created. A timestamped subdirectory will be generated within this
+                directory to store the outputs. Outputs are saved in the Zarr format.
+            progress (bool, optional): Whether to display a progress bar.
+            **kwargs (object): Additional arguments passed to the model. All array-like
+                values are expected to be JAX arrays.
+
+        Returns:
+            Prior predictive samples.
+
+        Raises:
+            TypeError: If ``self.param_output`` is passed as an argument.
+
+        See Also:
+            :py:meth:`~aimz.ImpactModel.cleanup` to remove the temporary directory if
+            created.
+        """
+        # Validate the provided parameters against the kernel's signature
+        args_bound = (
+            signature(self.kernel).bind(**{self.param_input: X, **kwargs}).arguments
+        )
+        if self.param_output in args_bound:
+            msg = f"Specifying {self.param_output!r} is not allowed."
+            raise TypeError(msg)
+
+        # Prior sampling
+        dataloader, _ = _setup_inputs(
+            X=X,
+            y=None,
+            rng_key=self.rng_key,
+            batch_size=self._device.num_devices if self._device is not None else 1,
+            shuffle=False,
+            device=self._device,
+            **kwargs,
+        )
+        batch, _ = next(iter(dataloader))
+        model_trace = trace(seed(self.kernel, rng_seed=self.rng_key)).get_trace(**batch)
+        return_sites = return_sites or tuple(
+            k
+            for k, site in model_trace.items()
+            if site["type"] == "deterministic" or k == self.param_output
+        )
+        if rng_key is None:
+            self._rng_key, rng_key = random.split(self._rng_key)
+        rng_key, rng_subkey = random.split(rng_key)
+        prior_samples = _sample_forward(
+            self.kernel,
+            rng_key=rng_subkey,
+            num_samples=num_samples,
+            return_sites=None,
+            samples=None,
+            model_kwargs=batch,
+        )
+        prior_samples = {
+            k: v for k, v in prior_samples.items() if k not in return_sites
+        }
+
+        kwargs_array, kwargs_extra = _group_kwargs(kwargs)
+        if self._fn_sample_prior_predictive is None:
+            self._fn_sample_prior_predictive = _create_sharded_sampler(
+                self._mesh,
+                len(kwargs_array),
+                len(kwargs_extra),
+            )
+
+        if output_dir is None:
+            if not hasattr(self, "temp_dir"):
+                self.temp_dir = TemporaryDirectory()
+                logger.info(
+                    "Temporary directory created at: %s",
+                    self.temp_dir.name,
+                )
+            output_dir = self.temp_dir.name
+            logger.info(
+                "No output directory provided. Using the model's temporary directory "
+                "for storing output.",
+            )
+        output_subdir = _create_output_subdir(output_dir)
+
+        dataloader, _ = _setup_inputs(
+            X=X,
+            y=None,
+            rng_key=self.rng_key,
+            batch_size=batch_size,
+            shuffle=False,
+            device=self._device,
+            **kwargs,
+        )
+
+        pbar = tqdm(
+            desc=(f"Prior predictive sampling [{', '.join(return_sites)}]"),
+            total=len(dataloader),
+            disable=not progress,
+        )
+
+        self._sample_and_write(
+            num_samples,
+            rng_key=rng_key,
+            return_sites=return_sites,
+            output_dir=output_subdir,
+            kernel=self.kernel,
+            sampler=self._fn_sample_prior_predictive,
+            samples=prior_samples,
+            dataloader=dataloader,
+            pbar=pbar,
+            **kwargs,
+        )
+
+        ds = open_zarr(output_subdir, consolidated=False).expand_dims(
+            dim="chain",
+            axis=0,
+        )
+        ds = ds.assign_coords(
+            {k: np.arange(ds.sizes[k]) for k in ds.sizes},
+        ).assign_attrs(_make_attrs())
+        out = xr.DataTree(name="root")
+        out["prior_predictive"] = xr.DataTree(ds)
+
+        return out
 
     def sample(
         self,
         num_samples: int = 1000,
-        rng_key: Array | None = None,
+        rng_key: ArrayLike | None = None,
         return_sites: tuple[str] | None = None,
         **kwargs: object,
-    ) -> dict[str, Array]:
+    ) -> xr.DataTree:
         """Draw posterior samples from a fitted model.
 
         Args:
             num_samples (int, optional): The number of posterior samples to draw.
-            rng_key (Array | None, optional): A pseudo-random number generator key. By
-                default, an internal key is used and split as needed. Has no effect if
-                the inference method is MCMC, where the ``post_warmup_state`` property
-                will be used to continue sampling.
+            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
+                By default, an internal key is used and split as needed. Has no effect
+                if the inference method is MCMC, where the ``post_warmup_state``
+                property will be used to continue sampling.
             return_sites (tuple[str] | None, optional): Names of variables (sites) to
                 return. If ``None``, samples all latent sites. Has no effect if the
                 inference method is MCMC.
@@ -280,11 +443,14 @@ class ImpactModel(BaseModel):
         Returns:
             Posterior samples.
 
+        Raises:
+            TypeError: If ``self.param_output`` is not passed as an argument if the
+                inference method is MCMC.
         """
         _check_is_fitted(self)
 
         if rng_key is None:
-            self.rng_key, rng_key = random.split(self.rng_key)
+            self._rng_key, rng_key = random.split(self._rng_key)
 
         if isinstance(self.inference, MCMC):
             # Validate the provided parameters against the kernel's signature
@@ -295,87 +461,151 @@ class ImpactModel(BaseModel):
             self.inference.post_warmup_state = self.inference.last_state
             self.inference.num_samples = num_samples
             self.inference.run(self.inference.post_warmup_state.rng_key, **args_bound)
+            posterior_samples = device_get(self.inference.get_samples())
+        else:
+            posterior_samples = _sample_forward(
+                substitute(self.inference.guide, data=self.vi_result.params),
+                rng_key=rng_key,
+                num_samples=num_samples,
+                return_sites=return_sites,
+                samples=None,
+                model_kwargs=None,
+            )
 
-            return device_get(self.inference.get_samples())
+        out = xr.DataTree(name="root")
+        out["posterior"] = _dict_to_datatree(posterior_samples)
 
-        return _sample_forward(
-            substitute(self.inference.guide, data=self.vi_result.params),
-            rng_key=rng_key,
-            num_samples=num_samples,
-            return_sites=return_sites,
-            posterior_samples=None,
-            model_kwargs=None,
-        )
+        return out
 
-    def sample_posterior_predictive(
+    def sample_posterior_predictive_on_batch(
         self,
         X: ArrayLike,
         *,
-        rng_key: Array | None = None,
-        return_sites: tuple[str] | None = None,
         intervention: dict | None = None,
+        rng_key: ArrayLike | None = None,
+        in_sample: bool = True,
+        return_sites: tuple[str] | None = None,
         **kwargs: object,
-    ) -> dict[str, Array]:
+    ) -> xr.DataTree:
         """Draw samples from the posterior predictive distribution.
+
+        This method is a convenience alias for
+        :py:meth:`~aimz.ImpactModel.predict_on_batch`.
 
         Args:
             X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
-            rng_key (Array | None, optional): A pseudo-random number generator key. By
-                default, an internal key is used and split as needed.
-            return_sites (tuple[str] | None, optional): Names of variables (sites) to
-                return. If ``None``, samples ``self.param_output`` and deterministic
-                sites.
             intervention (dict | None, optional): A dictionary mapping sample sites to
                 their corresponding intervention values. Interventions enable
                 counterfactual analysis by modifying the specified sample sites during
                 prediction (posterior predictive sampling).
+            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
+                By default, an internal key is used and split as needed.
+            in_sample (bool, optional): Specifies the group where posterior predictive
+                samples are stored in the returned output. If ``True``, samples are
+                stored in the ``posterior_predictive`` group, indicating they were
+                generated based on data used during model fitting. If ``False``, samples
+                are stored in the ``predictions`` group, indicating they were generated
+                based on out-of-sample data.
+            return_sites (tuple[str] | None, optional): Names of variables (sites) to
+                return. If ``None``, samples ``self.param_output`` and deterministic
+                sites.
             **kwargs (object): Additional arguments passed to the model. All array-like
                 values are expected to be JAX arrays.
 
         Returns:
-            Posterior predictive samples.
+            Posterior predictive samples. Posterior samples are included if available.
 
         Raises:
             TypeError: If ``self.param_output`` is passed as an argument.
+
+        See Also:
+            :py:meth:`~aimz.ImpactModel.predict_on_batch`.
         """
-        _check_is_fitted(self)
-
-        if rng_key is None:
-            self.rng_key, rng_key = random.split(self.rng_key)
-
-        X = _validate_X_y_to_jax(X)
-
-        # Validate the provided parameters against the kernel's signature
-        args_bound = (
-            signature(self.kernel).bind(**{self.param_input: X, **kwargs}).arguments
-        )
-        if self.param_output in args_bound:
-            msg = (
-                f"{self.param_output!r} is not allowed in "
-                "`.sample_posterior_predictive()`."
-            )
-            raise TypeError(msg)
-
-        if intervention is None:
-            kernel = self.kernel
-        else:
-            rng_key, rng_subkey = random.split(rng_key)
-            kernel = seed(do(self.kernel, data=intervention), rng_seed=rng_subkey)
-
-        return _sample_forward(
-            kernel,
+        return self.predict_on_batch(
+            X,
+            intervention=intervention,
             rng_key=rng_key,
-            num_samples=self.num_samples,
-            return_sites=return_sites or self._return_sites,
-            posterior_samples=self.posterior,
-            model_kwargs=args_bound,
+            in_sample=in_sample,
+            return_sites=return_sites,
+            **kwargs,
+        )
+
+    def sample_posterior_predictive(
+        self,
+        X: ArrayLike | ArrayLoader,
+        *,
+        intervention: dict | None = None,
+        rng_key: ArrayLike | None = None,
+        in_sample: bool = True,
+        return_sites: tuple[str] | None = None,
+        batch_size: int | None = None,
+        output_dir: str | Path | None = None,
+        progress: bool = True,
+        **kwargs: object,
+    ) -> xr.DataTree:
+        """Draw samples from the posterior predictive distribution.
+
+        This method is a convenience alias for :py:meth:`~aimz.ImpactModel.predict`.
+
+        Args:
+            X (ArrayLike | ArrayLoader): Input data, either an array-like of shape
+                ``(n_samples, n_features)`` or a data loader that holds all array-like
+                objects and handles batching internally; if a data loader is passed,
+                ``batch_size`` is ignored.
+            intervention (dict | None, optional): A dictionary mapping sample sites to
+                their corresponding intervention values. Interventions enable
+                counterfactual analysis by modifying the specified sample sites during
+                prediction (posterior predictive sampling).
+            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
+                By default, an internal key is used and split as needed.
+            in_sample (bool, optional): Specifies the group where posterior predictive
+                samples are stored in the returned output. If ``True``, samples are
+                stored in the ``posterior_predictive`` group, indicating they were
+                generated based on data used during model fitting. If ``False``, samples
+                are stored in the ``predictions`` group, indicating they were generated
+                based on out-of-sample data.
+            return_sites (tuple[str] | None, optional): Names of variables (sites) to
+                return. If ``None``, samples ``self.param_output`` and deterministic
+                sites.
+            batch_size (int | None, optional): The size of batches for data loading
+                during posterior predictive sampling. By default, it is set to the
+                total number of samples (``n_samples_X``). This value also determines
+                the chunk size for storing the posterior predictive samples.
+            output_dir (str | Path | None, optional): The directory where the outputs
+                will be saved. If the specified directory does not exist, it will be
+                created automatically. If ``None``, a default temporary directory will
+                be created. A timestamped subdirectory will be generated within this
+                directory to store the outputs. Outputs are saved in the Zarr format.
+            progress (bool, optional): Whether to display a progress bar.
+            **kwargs (object): Additional arguments passed to the model. All array-like
+                values are expected to be JAX arrays.
+
+        Returns:
+            Posterior predictive samples. Posterior samples are included if available.
+
+        Raises:
+            TypeError: If ``self.param_output`` is passed as an argument.
+
+        See Also:
+            :py:meth:`~aimz.ImpactModel.predict()`.
+        """
+        return self.predict(
+            X,
+            intervention=intervention,
+            rng_key=rng_key,
+            in_sample=in_sample,
+            return_sites=return_sites,
+            batch_size=batch_size,
+            output_dir=output_dir,
+            progress=progress,
+            **kwargs,
         )
 
     def train_on_batch(
         self,
         X: ArrayLike,
         y: ArrayLike,
-        rng_key: Array | None = None,
+        rng_key: ArrayLike | None = None,
         **kwargs: object,
     ) -> tuple[SVIState, Array]:
         """Run a single VI step on the given batch of data.
@@ -383,8 +613,8 @@ class ImpactModel(BaseModel):
         Args:
             X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
             y (ArrayLike): Output data with shape ``(n_samples_Y,)``.
-            rng_key (Array | None, optional): A pseudo-random number generator key. By
-                default, an internal key is used and split as needed. The key is only
+            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
+                By default, an internal key is used and split as needed. The key is only
                 used for initialization if the internal SVI state is not yet set.
             **kwargs (object): Additional arguments passed to the model. All array-like
                 values are expected to be JAX arrays.
@@ -421,7 +651,7 @@ class ImpactModel(BaseModel):
                 self.param_output,
             )
             if rng_key is None:
-                self.rng_key, rng_key = random.split(self.rng_key)
+                self._rng_key, rng_key = random.split(self._rng_key)
             self._vi_state = self.inference.init(rng_key, **batch)
         if self._fn_vi_update is None:
             _, kwargs_extra = _group_kwargs(kwargs)
@@ -441,7 +671,7 @@ class ImpactModel(BaseModel):
         *,
         num_steps: int = 10000,
         num_samples: int = 1000,
-        rng_key: Array | None = None,
+        rng_key: ArrayLike | None = None,
         progress: bool = True,
         **kwargs: object,
     ) -> Self:
@@ -468,8 +698,8 @@ class ImpactModel(BaseModel):
                 optimization. Has no effect if the inference method is MCMC.
             num_samples (int | None, optional): The number of posterior samples to draw.
                 Has no effect if the inference method is MCMC.
-            rng_key (Array | None, optional): A pseudo-random number generator key. By
-                default, an internal key is used and split as needed.
+            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
+                By default, an internal key is used and split as needed.
             progress (bool, optional): Whether to display a progress bar. Has no effect
                 if the inference method is MCMC.
             **kwargs (object): Additional arguments passed to the model. All array-like
@@ -482,9 +712,6 @@ class ImpactModel(BaseModel):
             This method continues training from the existing SVI state if available. To
             start training from scratch, create a new model instance.
         """
-        if rng_key is None:
-            self.rng_key, rng_key = random.split(self.rng_key)
-
         X, y = _validate_X_y_to_jax(X, y)
 
         # Validate the provided parameters against the kernel's signature
@@ -507,9 +734,11 @@ class ImpactModel(BaseModel):
             self.param_output,
         )
 
+        if rng_key is None:
+            self._rng_key, rng_key = random.split(self._rng_key)
         rng_key, rng_subkey = random.split(rng_key)
         if isinstance(self.inference, SVI):
-            self.num_samples = num_samples
+            self._num_samples = num_samples
             logger.info("Performing variational inference optimization...")
             self.vi_result = self.inference.run(
                 rng_subkey,
@@ -527,18 +756,25 @@ class ImpactModel(BaseModel):
                 )
             logger.info("Posterior sampling...")
             rng_key, rng_subkey = random.split(rng_key)
-            self.posterior = self.sample(self.num_samples, rng_key=rng_subkey)
+            self._posterior = _sample_forward(
+                substitute(self.inference.guide, data=self.vi_result.params),
+                rng_key=rng_subkey,
+                num_samples=self._num_samples,
+                return_sites=None,
+                samples=None,
+                model_kwargs=None,
+            )
         elif isinstance(self.inference, MCMC):
             logger.info("Posterior sampling...")
             self.inference.run(rng_subkey, **args_bound)
-            self.posterior = device_get(self.inference.get_samples())
-            self.num_samples = (
-                next(iter(self.posterior.values())).shape[0] if self.posterior else 0
+            self._posterior = device_get(self.inference.get_samples())
+            self._num_samples = (
+                next(iter(self._posterior.values())).shape[0] if self._posterior else 0
             )
 
         self._is_fitted = True
         self._dt_posterior = (
-            _dict_to_datatree(self.posterior) if self.posterior else None
+            _dict_to_datatree(self._posterior) if self._posterior else None
         )
 
         return self
@@ -549,7 +785,7 @@ class ImpactModel(BaseModel):
         y: ArrayLike | None = None,
         *,
         num_samples: int = 1000,
-        rng_key: Array | None = None,
+        rng_key: ArrayLike | None = None,
         progress: bool = True,
         batch_size: int | None = None,
         epochs: int = 1,
@@ -571,8 +807,8 @@ class ImpactModel(BaseModel):
             y (ArrayLike | None): Output data with shape ``(n_samples_Y,)``. Must be
                 ``None`` if ``X`` is a data loader.
             num_samples (int | None, optional): The number of posterior samples to draw.
-            rng_key (Array | None, optional): A pseudo-random number generator key. By
-                default, an internal key is used and split as needed.
+            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
+                By default, an internal key is used and split as needed.
             progress (bool, optional): Whether to display a progress bar.
             batch_size (int | None, optional): The number of data points processed at
                 each step of variational inference. If ``None``, the entire dataset is
@@ -603,10 +839,10 @@ class ImpactModel(BaseModel):
             )
             raise TypeError(msg)
 
-        if rng_key is None:
-            self.rng_key, rng_key = random.split(self.rng_key)
+        self._num_samples = num_samples
 
-        self.num_samples = num_samples
+        if rng_key is None:
+            self._rng_key, rng_key = random.split(self._rng_key)
 
         rng_key, rng_subkey = random.split(rng_key)
         dataloader, kwargs_extra = _setup_inputs(
@@ -658,9 +894,16 @@ class ImpactModel(BaseModel):
 
         logger.info("Posterior sampling...")
         rng_key, rng_subkey = random.split(rng_key)
-        self.posterior = self.sample(self.num_samples, rng_key=rng_subkey)
+        self._posterior = _sample_forward(
+            substitute(self.inference.guide, data=self.vi_result.params),
+            rng_key=rng_subkey,
+            num_samples=self._num_samples,
+            return_sites=None,
+            samples=None,
+            model_kwargs=None,
+        )
         self._dt_posterior = (
-            _dict_to_datatree(self.posterior) if self.posterior else None
+            _dict_to_datatree(self._posterior) if self._posterior else None
         )
 
         return self
@@ -683,8 +926,7 @@ class ImpactModel(BaseModel):
 
         This method sets externally obtained posterior samples on the model instance,
         enabling downstream analysis without requiring a call to
-        :py:meth:`~aimz.model.ImpactModel.fit` or
-        :py:meth:`~aimz.model.ImpactModel.fit_on_batch`.
+        :py:meth:`~aimz.ImpactModel.fit` or :py:meth:`~aimz.ImpactModel.fit_on_batch`.
 
         It is primarily intended for workflows where posterior sampling is performed
         manually—for example, using NumPyro's
@@ -700,8 +942,8 @@ class ImpactModel(BaseModel):
         Args:
             posterior_sample (dict[str, Array]): Posterior samples to set for the model.
             return_sites (tuple[str] | None, optional): Names of variable (sites) to
-                return in :py:meth:`~aimz.model.ImpactModel.predict`. By default, it is
-                set to ``self.param_output``.
+                return in :py:meth:`~aimz.ImpactModel.predict`. By default, it is set to
+                ``self.param_output``.
 
         Returns:
             The model instance, treated as fitted with posterior samples set, enabling
@@ -717,131 +959,20 @@ class ImpactModel(BaseModel):
         if len(batch_shapes) > 1:
             msg = f"Inconsistent batch shapes found in posterior_sample: {batch_shapes}"
             raise ValueError(msg)
-        (self.num_samples,) = batch_shapes.pop()
-        self.posterior = posterior_sample
+        (self._num_samples,) = batch_shapes.pop()
+        self._posterior = posterior_sample
         self._return_sites = return_sites or (self.param_output,)
         self._is_fitted = True
-        self._dt_posterior = _dict_to_datatree(self.posterior)
+        self._dt_posterior = _dict_to_datatree(self._posterior)
 
         return self
-
-    def __sample_posterior_predictive(
-        self,
-        *,
-        fn_sample_posterior_predictive: Callable,
-        kernel: Callable,
-        X: ArrayLike | ArrayLoader,
-        rng_key: Array,
-        group: str,
-        return_sites: tuple[str],
-        batch_size: int | None,
-        output_dir: Path,
-        progress: bool,
-        **kwargs: object,
-    ) -> xr.DataTree:
-        kwargs_array, kwargs_extra = _group_kwargs(kwargs)
-
-        dataloader, _ = _setup_inputs(
-            X=X,
-            y=None,
-            rng_key=self.rng_key,
-            batch_size=batch_size,
-            shuffle=False,
-            device=self._device,
-            **kwargs,
-        )
-
-        pbar = tqdm(
-            desc=(f"Posterior predictive sampling [{', '.join(return_sites)}]"),
-            total=len(dataloader),
-            disable=not progress,
-        )
-
-        rng_key, *subkeys = random.split(rng_key, num=len(dataloader) + 1)
-        if self._device and self._mesh:
-            subkeys = device_put(
-                subkeys,
-                NamedSharding(self._mesh, PartitionSpec()),
-            )
-
-        zarr_group = open_group(output_dir, mode="w")
-        zarr_arr = {}
-        threads, queues, error_queue = _start_writer_threads(
-            return_sites,
-            group_path=output_dir,
-            writer=_writer,
-            queue_size=min(cpu_count() or 1, 4),
-        )
-        try:
-            for (batch, n_pad), subkey in zip(dataloader, subkeys, strict=True):
-                kwargs_batch = [
-                    v
-                    for k, v in batch.items()
-                    if k not in (self.param_input, self.param_output)
-                ]
-                dict_arr = device_get(
-                    fn_sample_posterior_predictive(
-                        kernel,
-                        self.num_samples,
-                        subkey,
-                        return_sites,
-                        self.posterior,
-                        self.param_input,
-                        kwargs_array._fields + kwargs_extra._fields,
-                        batch[self.param_input],
-                        *(*kwargs_batch, *kwargs_extra),
-                    ),
-                )
-                for site, arr in dict_arr.items():
-                    if site not in zarr_arr:
-                        zarr_arr[site] = zarr_group.create_array(
-                            name=site,
-                            shape=(self.num_samples, 0, *arr.shape[2:]),
-                            dtype="float32" if arr.dtype == "bfloat16" else arr.dtype,
-                            chunks=(
-                                self.num_samples,
-                                dataloader.batch_size,
-                                *arr.shape[2:],
-                            ),
-                            dimension_names=(
-                                "draw",
-                                *tuple(f"{site}_dim_{i}" for i in range(arr.ndim - 1)),
-                            ),
-                        )
-                    queues[site].put(arr[:, : -n_pad or None])
-                if not error_queue.empty():
-                    _, exc, tb = error_queue.get()
-                    raise exc.with_traceback(tb)
-                pbar.update()
-            pbar.set_description("Sampling complete, writing in progress...")
-            _shutdown_writer_threads(threads, queues)
-        except:
-            _shutdown_writer_threads(threads, queues)
-            logger.exception(
-                "Exception encountered. Cleaning up output directory: %s",
-                output_dir,
-            )
-            rmtree(output_dir, ignore_errors=True)
-            raise
-        finally:
-            pbar.close()
-
-        ds = open_zarr(output_dir, consolidated=False).expand_dims(dim="chain", axis=0)
-        ds = ds.assign_coords(
-            {k: np.arange(ds.sizes[k]) for k in ds.sizes},
-        ).assign_attrs(_make_attrs())
-        out = xr.DataTree(name="root")
-        out["posterior"] = self._dt_posterior
-        out[group] = xr.DataTree(ds)
-
-        return out
 
     def predict_on_batch(
         self,
         X: ArrayLike,
         *,
         intervention: dict | None = None,
-        rng_key: Array | None = None,
+        rng_key: ArrayLike | None = None,
         in_sample: bool = True,
         return_sites: tuple[str] | None = None,
         **kwargs: object,
@@ -851,8 +982,8 @@ class ImpactModel(BaseModel):
         This method returns predictions for a single batch of input data and is better
         suited for:
 
-            1) Models incompatible with :py:meth:`~aimz.model.ImpactModel.predict` due
-            to their posterior sample shapes.
+            1) Models incompatible with :py:meth:`~aimz.ImpactModel.predict` due to
+            their posterior sample shapes.
 
             2) Scenarios where writing results to to files (e.g., disk, cloud storage)
             is not desired.
@@ -866,8 +997,8 @@ class ImpactModel(BaseModel):
                 their corresponding intervention values. Interventions enable
                 counterfactual analysis by modifying the specified sample sites during
                 prediction (posterior predictive sampling).
-            rng_key (Array | None, optional): A pseudo-random number generator key. By
-                default, an internal key is used and split as needed.
+            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
+                By default, an internal key is used and split as needed.
             in_sample (bool, optional): Specifies the group where posterior predictive
                 samples are stored in the returned output. If ``True``, samples are
                 stored in the ``posterior_predictive`` group, indicating they were
@@ -888,19 +1019,18 @@ class ImpactModel(BaseModel):
         """
         _check_is_fitted(self)
 
-        if rng_key is None:
-            self.rng_key, rng_key = random.split(self.rng_key)
-
-        X = _validate_X_y_to_jax(X)
+        X = cast("Array", _validate_X_y_to_jax(X))
 
         # Validate the provided parameters against the kernel's signature
         args_bound = (
             signature(self.kernel).bind(**{self.param_input: X, **kwargs}).arguments
         )
         if self.param_output in args_bound:
-            sub = self.param_output
-            msg = f"{sub!r} is not allowed in `.predict_on_batch()`."
+            msg = f"Specifying {self.param_output!r} is not allowed."
             raise TypeError(msg)
+
+        if rng_key is None:
+            self._rng_key, rng_key = random.split(self._rng_key)
 
         if intervention is None:
             kernel = self.kernel
@@ -914,9 +1044,9 @@ class ImpactModel(BaseModel):
             _sample_forward(
                 kernel,
                 rng_key=rng_key,
-                num_samples=self.num_samples,
+                num_samples=self._num_samples,
                 return_sites=return_sites or self._return_sites,
-                posterior_samples=self.posterior,
+                samples=self._posterior,
                 model_kwargs=args_bound,
             ),
         )
@@ -928,7 +1058,7 @@ class ImpactModel(BaseModel):
         X: ArrayLike | ArrayLoader,
         *,
         intervention: dict | None = None,
-        rng_key: Array | None = None,
+        rng_key: ArrayLike | None = None,
         in_sample: bool = True,
         return_sites: tuple[str] | None = None,
         batch_size: int | None = None,
@@ -953,8 +1083,8 @@ class ImpactModel(BaseModel):
                 their corresponding intervention values. Interventions enable
                 counterfactual analysis by modifying the specified sample sites during
                 prediction (posterior predictive sampling).
-            rng_key (Array | None, optional): A pseudo-random number generator key. By
-                default, an internal key is used and split as needed.
+            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
+                By default, an internal key is used and split as needed.
             in_sample (bool, optional): Specifies the group where posterior predictive
                 samples are stored in the returned output. If ``True``, samples are
                 stored in the ``posterior_predictive`` group, indicating they were
@@ -984,24 +1114,16 @@ class ImpactModel(BaseModel):
             TypeError: If ``self.param_output`` is passed as an argument.
 
         See Also:
-            :py:meth:`~aimz.model.ImpactModel.cleanup` to remove the temporary directory
-            if created.
+            :py:meth:`~aimz.ImpactModel.cleanup` to remove the temporary directory if
+            created.
         """
         _check_is_fitted(self)
 
-        # Check for compatibility with the `.predict()` method.
-        #
-        # If any array in the posterior has shape (num_samples, num_obs)—i.e.,
-        # `ndim == 2` and the second dimension matches the number of observations in
-        # `X`—it suggests that the model produces per-observation posterior samples.
-        # This makes it incompatible with the current `.predict()` implementation, which
-        # uses sharded parallelism. In such cases, fall back to `.predict_on_batch()`
-        # and raise a warning.
         if isinstance(X, ArrayLike):
             ndim_posterior_sample = 2
-            if self.posterior and any(
+            if self._posterior and any(
                 v.ndim == ndim_posterior_sample and v.shape[1] == len(X)
-                for v in self.posterior.values()
+                for v in self._posterior.values()
             ):
                 msg = (
                     "One or more posterior sample shapes are not compatible with "
@@ -1011,7 +1133,7 @@ class ImpactModel(BaseModel):
                 warn(msg, category=UserWarning, stacklevel=2)
 
                 return self.predict_on_batch(
-                    X,
+                    cast("ArrayLike", X),
                     intervention=intervention,
                     rng_key=rng_key,
                     in_sample=in_sample,
@@ -1023,18 +1145,19 @@ class ImpactModel(BaseModel):
                 signature(self.kernel).bind(**{self.param_input: X, **kwargs}).arguments
             )
             if self.param_output in args_bound:
-                sub = self.param_output
-                msg = f"{sub!r} is not allowed in `.predict()`."
+                msg = f"Specifying {self.param_output!r} is not allowed."
                 raise TypeError(msg)
 
         if rng_key is None:
-            self.rng_key, rng_key = random.split(self.rng_key)
+            self._rng_key, rng_key = random.split(self._rng_key)
 
         if intervention is None:
             kernel = self.kernel
         else:
             rng_key, rng_subkey = random.split(rng_key)
             kernel = seed(do(self.kernel, data=intervention), rng_seed=rng_subkey)
+
+        return_sites = return_sites or self._return_sites
 
         kwargs_array, kwargs_extra = _group_kwargs(kwargs)
         if self._fn_sample_posterior_predictive is None:
@@ -1058,18 +1181,47 @@ class ImpactModel(BaseModel):
             )
         output_subdir = _create_output_subdir(output_dir)
 
-        return self.__sample_posterior_predictive(
-            fn_sample_posterior_predictive=self._fn_sample_posterior_predictive,
-            kernel=kernel,
+        dataloader, _ = _setup_inputs(
             X=X,
-            rng_key=rng_key,
-            group="posterior_predictive" if in_sample else "predictions",
-            return_sites=return_sites or self._return_sites,
+            y=None,
+            rng_key=self.rng_key,
             batch_size=batch_size,
-            output_dir=output_subdir,
-            progress=progress,
+            shuffle=False,
+            device=self._device,
             **kwargs,
         )
+
+        pbar = tqdm(
+            desc=(f"Posterior predictive sampling [{', '.join(return_sites)}]"),
+            total=len(dataloader),
+            disable=not progress,
+        )
+
+        self._sample_and_write(
+            num_samples=self._num_samples,
+            rng_key=rng_key,
+            return_sites=return_sites,
+            output_dir=output_subdir,
+            kernel=kernel,
+            sampler=self._fn_sample_posterior_predictive,
+            samples=cast("dict[str, Array]", self._posterior),
+            dataloader=dataloader,
+            pbar=pbar,
+            **kwargs,
+        )
+
+        ds = open_zarr(output_subdir, consolidated=False).expand_dims(
+            dim="chain",
+            axis=0,
+        )
+        ds = ds.assign_coords(
+            {k: np.arange(ds.sizes[k]) for k in ds.sizes},
+        ).assign_attrs(_make_attrs())
+        out = xr.DataTree(name="root")
+        out["posterior"] = self._dt_posterior
+        out["posterior_predictive" if in_sample else "predictions"] = xr.DataTree(ds)
+
+        return out
 
     def estimate_effect(
         self,
@@ -1086,12 +1238,12 @@ class ImpactModel(BaseModel):
             output_intervention (xr.DataTree | None, optional): Precomputed output for
                 the intervention scenario.
             args_baseline (dict | None, optional): Input arguments for the baseline
-                scenario. Passed to the :py:meth:`~aimz.model.ImpactModel.predict` to
-                compute predictions if ``output_baseline`` is not provided. Ignored if
+                scenario. Passed to the :py:meth:`~aimz.ImpactModel.predict` to compute
+                predictions if ``output_baseline`` is not provided. Ignored if
                 ``output_baseline`` is already given.
             args_intervention (dict | None, optional): Input arguments for the
                 intervention scenario. Passed to the
-                :py:meth:`~aimz.model.ImpactModel.predict` to compute predictions if
+                :py:meth:`~aimz.ImpactModel.predict` to compute predictions if
                 ``output_intervention`` is not provided. Ignored if
                 ``output_intervention`` is already given.
 
@@ -1104,8 +1256,8 @@ class ImpactModel(BaseModel):
                 ``args_intervention`` is provided.
 
         See Also:
-            :py:meth:`~aimz.model.ImpactModel.cleanup` to remove the temporary directory
-            if created.
+            :py:meth:`~aimz.ImpactModel.cleanup` to remove the temporary directory if
+            created.
         """
         _check_is_fitted(self)
 
@@ -1173,8 +1325,8 @@ class ImpactModel(BaseModel):
             Log-likelihood values. Posterior samples are included if available.
 
         See Also:
-            :py:meth:`~aimz.model.ImpactModel.cleanup` to remove the temporary directory
-            if created.
+            :py:meth:`~aimz.ImpactModel.cleanup` to remove the temporary directory if
+            created.
         """
         _check_is_fitted(self)
 
@@ -1237,7 +1389,7 @@ class ImpactModel(BaseModel):
                         # Although computing the log-likelihood is deterministic, the
                         # model still needs to be seeded in order to trace its graph.
                         seed(self.kernel, rng_seed=self.rng_key),
-                        self.posterior,
+                        self._posterior,
                         self.param_input,
                         site,
                         kwargs_array._fields + kwargs_extra._fields,
@@ -1249,10 +1401,10 @@ class ImpactModel(BaseModel):
                 if site not in zarr_arr:
                     zarr_arr[site] = zarr_group.create_array(
                         name=site,
-                        shape=(self.num_samples, 0, *arr.shape[2:]),
+                        shape=(self._num_samples, 0, *arr.shape[2:]),
                         dtype="float32" if arr.dtype == "bfloat16" else arr.dtype,
                         chunks=(
-                            self.num_samples,
+                            self._num_samples,
                             dataloader.batch_size,
                             *arr.shape[2:],
                         ),
@@ -1305,3 +1457,112 @@ class ImpactModel(BaseModel):
             logger.info("Temporary directory cleaned up at: %s", self.temp_dir.name)
             self.temp_dir.cleanup()
             del self.temp_dir
+
+    def _sample_and_write(
+        self,
+        num_samples: int,
+        rng_key: ArrayLike,
+        return_sites: tuple[str],
+        output_dir: Path,
+        kernel: Callable,
+        sampler: Callable,
+        samples: dict[str, Array],
+        dataloader: ArrayLoader,
+        pbar: tqdm,
+        **kwargs: object,
+    ) -> None:
+        """Draw samples using a predictive function and write them concurrently to disk.
+
+        This function iterates over batches from the provided data loader, calls the
+        specified sampling function (``sampler``) to generate predictions conditioned on
+        the provided ``samples``, and writes the resulting arrays to a Zarr group.
+
+        Args:
+            num_samples (int): Number of samples to draw.
+            rng_key (ArrayLike): Pseudo-random number generator key.
+            return_sites (tuple[str]): Names of variables (sites) to return.
+            output_dir (Path): Directory where outputs will be saved.
+            kernel (Callable): Probabilistic model with Pyro primitives.
+            sampler (Callable): Function performing predictive sampling; must accept
+                the same signature as this function.
+            samples (dict[str, Array]): Arrays to condition predictions on.
+            dataloader (ArrayLoader): Iterator over batches of input data. Each batch
+                must be a tuple containing a dictionary of arrays and a padding value.
+            pbar (tqdm): Progress bar instance to display sampling progress.
+            **kwargs (object): Additional arguments passed to the model. All array-like
+                values are expected to be JAX arrays.
+
+        Raises:
+            Exception: Any exception raised during sampling or writing is logged, the
+                output directory is cleaned up, and the exception is re-raised.
+        """
+        kwargs_array, kwargs_extra = _group_kwargs(kwargs)
+
+        rng_key, *subkeys = random.split(rng_key, num=len(dataloader) + 1)
+        if self._device and self._mesh:
+            subkeys = device_put(
+                subkeys,
+                NamedSharding(self._mesh, PartitionSpec()),
+            )
+
+        zarr_group = open_group(output_dir, mode="w")
+        zarr_arr = {}
+        threads, queues, error_queue = _start_writer_threads(
+            return_sites,
+            group_path=output_dir,
+            writer=_writer,
+            queue_size=min(cpu_count() or 1, 4),
+        )
+        try:
+            for (batch, n_pad), subkey in zip(dataloader, subkeys, strict=True):
+                kwargs_batch = [
+                    v
+                    for k, v in batch.items()
+                    if k not in (self.param_input, self.param_output)
+                ]
+                dict_arr = device_get(
+                    sampler(
+                        kernel,
+                        num_samples,
+                        subkey,
+                        return_sites,
+                        samples,
+                        self.param_input,
+                        kwargs_array._fields + kwargs_extra._fields,
+                        batch[self.param_input],
+                        *(*kwargs_batch, *kwargs_extra),
+                    ),
+                )
+                for site, arr in dict_arr.items():
+                    if site not in zarr_arr:
+                        zarr_arr[site] = zarr_group.create_array(
+                            name=site,
+                            shape=(num_samples, 0, *arr.shape[2:]),
+                            dtype="float32" if arr.dtype == "bfloat16" else arr.dtype,
+                            chunks=(
+                                num_samples,
+                                dataloader.batch_size,
+                                *arr.shape[2:],
+                            ),
+                            dimension_names=(
+                                "draw",
+                                *tuple(f"{site}_dim_{i}" for i in range(arr.ndim - 1)),
+                            ),
+                        )
+                    queues[site].put(arr[:, : -n_pad or None])
+                if not error_queue.empty():
+                    _, exc, tb = error_queue.get()
+                    raise exc.with_traceback(tb)
+                pbar.update()
+            pbar.set_description("Sampling complete, writing in progress...")
+            _shutdown_writer_threads(threads, queues)
+        except:
+            _shutdown_writer_threads(threads, queues)
+            logger.exception(
+                "Exception encountered. Cleaning up output directory: %s",
+                output_dir,
+            )
+            rmtree(output_dir, ignore_errors=True)
+            raise
+        finally:
+            pbar.close()

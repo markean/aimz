@@ -1,4 +1,4 @@
-.. currentmodule:: aimz.model
+.. currentmodule:: aimz
 
 ImpactModel
 ===========
@@ -15,7 +15,9 @@ Attributes
 .. autosummary::
    :toctree: generated/
 
+   ImpactModel.rng_key
    ImpactModel.vi_result
+   ImpactModel.posterior
 
 
 Inference
@@ -42,6 +44,8 @@ Explicit Sampling
 .. autosummary::
    :toctree: generated/
 
-   ImpactModel.sample
+   ImpactModel.sample_prior_predictive_on_batch
    ImpactModel.sample_prior_predictive
+   ImpactModel.sample
+   ImpactModel.sample_posterior_predictive_on_batch
    ImpactModel.sample_posterior_predictive

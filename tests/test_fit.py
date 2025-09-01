@@ -26,8 +26,8 @@ from numpyro.infer.autoguide import AutoNormal
 from numpyro.optim import Adam
 from sklearn.exceptions import DataConversionWarning
 
+from aimz import ImpactModel
 from aimz._exceptions import KernelValidationError
-from aimz.model import ImpactModel
 from aimz.utils._validation import _is_fitted
 
 

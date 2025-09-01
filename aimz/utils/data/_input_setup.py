@@ -14,10 +14,9 @@
 
 """Module for initializing inputs and preprocessing arguments for data pipelines."""
 
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple, cast
 from warnings import warn
 
-from jax import Array
 from jax.typing import ArrayLike
 from sklearn.utils.validation import check_array, check_X_y
 
@@ -32,7 +31,7 @@ def _setup_inputs(
     *,
     X: ArrayLike | ArrayLoader,
     y: ArrayLike | None,
-    rng_key: Array,
+    rng_key: ArrayLike,
     batch_size: int | None,
     shuffle: bool = False,
     device: "Sharding | None" = None,
@@ -47,7 +46,7 @@ def _setup_inputs(
             ``rng_key``, ``batch_size`` and ``shuffle`` are ignored.
         y (ArrayLike | None): Output data with shape ``(n_samples_Y,)``. Must be
             ``None`` if ``X`` is a data loader.
-        rng_key (Array): A pseudo-random number generator key.
+        rng_key (ArrayLike): A pseudo-random number generator key.
         batch_size (int): The size of batches for data loading.
         shuffle (bool, optional): Whether to shuffle the dataset before batching.
         device (Sharding | None, optional): The device or sharding specification to
@@ -58,8 +57,8 @@ def _setup_inputs(
                 values are expected to be JAX arrays.
 
     Returns:
-            The data loader for batching.
-            Extra keyword arguments to be passed downstream.
+        - The data loader for batching.
+        - Extra keyword arguments to be passed downstream.
     """
     kwargs_array, kwargs_extra = _group_kwargs(kwargs)
 
@@ -84,7 +83,7 @@ def _setup_inputs(
             )
             warn(msg, category=UserWarning, stacklevel=2)
         loader = ArrayLoader(
-            ArrayDataset(X=X, y=y, **kwargs_array._asdict()),
+            ArrayDataset(X=cast("ArrayLike", X), y=y, **kwargs_array._asdict()),
             rng_key=rng_key,
             batch_size=batch_size,
             shuffle=shuffle,

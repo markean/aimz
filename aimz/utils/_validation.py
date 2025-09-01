@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
     import xarray as xr
 
-    from aimz.model import ImpactModel
+    from aimz import ImpactModel
 
 
 def _check_is_fitted(model: "ImpactModel", msg: str | None = None) -> None:

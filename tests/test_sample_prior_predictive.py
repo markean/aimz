@@ -17,11 +17,12 @@
 from typing import TYPE_CHECKING
 
 import pytest
+import xarray as xr
 from conftest import lm
 from jax import random
 from jax.typing import ArrayLike
 
-from aimz.model import ImpactModel
+from aimz import ImpactModel
 
 if TYPE_CHECKING:
     from numpyro.infer import SVI
@@ -48,10 +49,18 @@ def test_sample_prior_predictive_lm(
     synthetic_data: tuple[ArrayLike, ArrayLike],
     vi: "SVI",
 ) -> None:
-    """Test the `.sample_prior_predictive()` method of `ImpactModel`."""
+    """Test the `.sample_prior_predictive()` method of ImpactModel."""
     X, _ = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
-    samples = im.sample_prior_predictive(X=X, num_samples=99)
+    msg = (
+        r"The `batch_size` \(\d+\) is not divisible by the number of devices \(\d+\)\."
+    )
+    with pytest.warns(UserWarning, match=msg):
+        samples = im.sample_prior_predictive(
+            X=X,
+            batch_size=len(X) // 2,
+            num_samples=99,
+        )
 
-    assert isinstance(samples, dict)
-    assert samples["y"].shape == (99, len(X))
+    assert isinstance(samples, xr.DataTree)
+    assert samples.prior_predictive["y"].values.shape == (1, 99, len(X))

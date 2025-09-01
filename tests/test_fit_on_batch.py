@@ -22,7 +22,7 @@ from numpyro.infer import MCMC, SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
 from numpyro.optim import Adam
 
-from aimz.model import ImpactModel
+from aimz import ImpactModel
 from aimz.utils._validation import _is_fitted
 
 

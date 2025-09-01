@@ -21,7 +21,7 @@ from jax import random
 from jax.typing import ArrayLike
 from numpyro.infer import SVI
 
-from aimz.model import ImpactModel
+from aimz import ImpactModel
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
