@@ -14,6 +14,7 @@
 
 """Module for initializing inputs and preprocessing arguments for data pipelines."""
 
+import logging
 from typing import TYPE_CHECKING, NamedTuple, cast
 from warnings import warn
 
@@ -26,6 +27,13 @@ from aimz.utils.data import ArrayDataset, ArrayLoader
 if TYPE_CHECKING:
     from jax.sharding import Sharding
 
+logger = logging.getLogger(__name__)
+
+# Maximum number of elements allowed per batch or chunk. Each element is assumed to be
+# 4 bytes (float32 or int32). `MAX_ELEMENTS = 25_000_000` corresponds to ~100 MB per
+# chunk, helping to control disk and memory usage during data processing.
+MAX_ELEMENTS = 25_000_000
+
 
 def _setup_inputs(
     *,
@@ -33,6 +41,7 @@ def _setup_inputs(
     y: ArrayLike | None,
     rng_key: ArrayLike,
     batch_size: int | None,
+    num_samples: int,
     shuffle: bool = False,
     device: "Sharding | None" = None,
     **kwargs: object,
@@ -47,7 +56,8 @@ def _setup_inputs(
         y (ArrayLike | None): Output data with shape ``(n_samples_Y,)``. Must be
             ``None`` if ``X`` is a data loader.
         rng_key (ArrayLike): A pseudo-random number generator key.
-        batch_size (int): The size of batches for data loading.
+        batch_size (int | None): The size of batches for data loading.
+        num_samples (int): Number of samples to draw, which affects the size of batches.
         shuffle (bool, optional): Whether to shuffle the dataset before batching.
         device (Sharding | None, optional): The device or sharding specification to
             which the data should be moved. By default, no device transfer is applied.
@@ -69,12 +79,16 @@ def _setup_inputs(
             X, y = check_X_y(X, y, force_writeable=True, y_numeric=True)
         num_devices = device.num_devices if device else 1
         if batch_size is None:
-            batch_size = len(X)
-            msg = (
-                f"No `batch_size` specified. Using full dataset size ({batch_size}). "
-                "Specify `batch_size` to prevent memory issues."
+            if len(X) * num_samples < MAX_ELEMENTS:
+                batch_size = len(X)
+            else:
+                batch_size = MAX_ELEMENTS // num_samples
+                batch_size -= batch_size % num_devices
+            logger.info(
+                "Using batch_size=%d. Specify explicitly to better control memory "
+                "usage.",
+                batch_size,
             )
-            warn(msg, category=UserWarning, stacklevel=2)
         if batch_size % num_devices != 0:
             msg = (
                 f"The `batch_size` ({batch_size}) is not divisible by the number of "

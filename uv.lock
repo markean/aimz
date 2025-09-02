@@ -21,7 +21,7 @@ wheels = [
 
 [[package]]
 name = "aimz"
-version = "0.5.0"
+version = "0.6.0.dev0"
 source = { editable = "." }
 dependencies = [
     { name = "dask" },

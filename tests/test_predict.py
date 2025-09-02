@@ -127,8 +127,6 @@ class TestBatchSize:
         X, y = synthetic_data
         im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
         im.fit(X=X, y=y, batch_size=3)
-        # NOTE: An additional warning about batch size not being divisible by the number
-        # of devices may also be raised.
         with pytest.warns(UserWarning, match=".*"):
             im.predict(X=X, progress=False)
 
@@ -141,10 +139,6 @@ def test_predict_after_cleanup(
     """Test `.predict()` recreates tempdir after `.cleanup()`."""
     X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
-    # NOTE: An additional warning about batch size not being divisible by the number
-    # of devices may also be raised.
-    with pytest.warns(UserWarning, match=".*"):
-        im.fit(X=X, y=y)
     im.fit(X=X, y=y, batch_size=3)
     msg = (
         r"The `batch_size` \(\d+\) is not divisible by the number of devices \(\d+\)\."
