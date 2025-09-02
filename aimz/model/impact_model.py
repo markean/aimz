@@ -292,10 +292,10 @@ class ImpactModel(BaseModel):
             return_sites (tuple[str] | None, optional): Names of variables (sites) to
                 return. If ``None``, samples ``self.param_output`` and deterministic
                 sites.
-            batch_size (int | None, optional): The size of batches for data loading
-                during prior predictive sampling. By default, it is set to the total
-                number of samples (``n_samples_X``). This value also determines the
-                chunk size for storing the prior predictive samples.
+            batch_size (int | None, optional): The batch size for data loading during
+                prior predictive sampling. It also determines the chunk size used to
+                store the samples. If ``None``, it is determined automatically based on
+                the input data and number of samples.
             output_dir (str | Path | None, optional): The directory where the outputs
                 will be saved. If the specified directory does not exist, it will be
                 created automatically. If ``None``, a default temporary directory will
@@ -329,6 +329,7 @@ class ImpactModel(BaseModel):
             y=None,
             rng_key=self.rng_key,
             batch_size=self._device.num_devices if self._device is not None else 1,
+            num_samples=num_samples,
             shuffle=False,
             device=self._device,
             **kwargs,
@@ -382,6 +383,7 @@ class ImpactModel(BaseModel):
             y=None,
             rng_key=self.rng_key,
             batch_size=batch_size,
+            num_samples=num_samples,
             shuffle=False,
             device=self._device,
             **kwargs,
@@ -567,10 +569,10 @@ class ImpactModel(BaseModel):
             return_sites (tuple[str] | None, optional): Names of variables (sites) to
                 return. If ``None``, samples ``self.param_output`` and deterministic
                 sites.
-            batch_size (int | None, optional): The size of batches for data loading
-                during posterior predictive sampling. By default, it is set to the
-                total number of samples (``n_samples_X``). This value also determines
-                the chunk size for storing the posterior predictive samples.
+            batch_size (int | None, optional): The batch size for data loading during
+                posterior predictive sampling. It also determines the chunk size used to
+                store the samples. If ``None``, it is determined automatically based on
+                the input data and number of samples.
             output_dir (str | Path | None, optional): The directory where the outputs
                 will be saved. If the specified directory does not exist, it will be
                 created automatically. If ``None``, a default temporary directory will
@@ -849,7 +851,8 @@ class ImpactModel(BaseModel):
             X=X,
             y=y,
             rng_key=rng_subkey,
-            batch_size=batch_size,
+            batch_size=batch_size if batch_size is not None else len(X),
+            num_samples=num_samples,
             shuffle=shuffle,
             device=None,
             **kwargs,
@@ -1094,10 +1097,10 @@ class ImpactModel(BaseModel):
             return_sites (tuple[str] | None, optional): Names of variables (sites) to
                 return. If ``None``, samples ``self.param_output`` and deterministic
                 sites.
-            batch_size (int | None, optional): The size of batches for data loading
-                during posterior predictive sampling. By default, it is set to the
-                total number of samples (``n_samples_X``). This value also determines
-                the chunk size for storing the posterior predictive samples.
+            batch_size (int | None, optional): The batch size for data loading during
+                posterior predictive sampling. It also determines the chunk size used to
+                store the samples. If ``None``, it is determined automatically based on
+                the input data and number of samples.
             output_dir (str | Path | None, optional): The directory where the outputs
                 will be saved. If the specified directory does not exist, it will be
                 created automatically. If ``None``, a default temporary directory will
@@ -1186,6 +1189,7 @@ class ImpactModel(BaseModel):
             y=None,
             rng_key=self.rng_key,
             batch_size=batch_size,
+            num_samples=self._num_samples,
             shuffle=False,
             device=self._device,
             **kwargs,
@@ -1296,7 +1300,7 @@ class ImpactModel(BaseModel):
         progress: bool = True,
         **kwargs: object,
     ) -> xr.DataTree:
-        """Compute the log likelihood of the data under the given model.
+        """Compute the log-likelihood of the data under the given model.
 
         Results are written to disk in the Zarr format, with computing and file writing
         decoupled and executed concurrently.
@@ -1308,10 +1312,10 @@ class ImpactModel(BaseModel):
                 ``batch_size`` is ignored.
             y (ArrayLike | None): Output data with shape ``(n_samples_Y,)``. Must be
                 ``None`` if ``X`` is a data loader.
-            batch_size (int | None, optional): The size of batches for data loading
-                during posterior predictive sampling. By default, it is set to the total
-                number of samples (``n_samples_X``). This value also determines the
-                chunk size for storing the log-likelihood values.
+            batch_size (int | None, optional): The batch size for data loading during
+                log-likelihood computation. It also determines the chunk size used to
+                store the samples. If ``None``, it is determined automatically based on
+                the input data and number of samples.
             output_dir (str | Path | None, optional): The directory where the outputs
                 will be saved. If the specified directory does not exist, it will be
                 created automatically. If ``None``, a default temporary directory will
@@ -1357,6 +1361,7 @@ class ImpactModel(BaseModel):
             y=y,
             rng_key=self.rng_key,
             batch_size=batch_size,
+            num_samples=self._num_samples,
             shuffle=False,
             device=self._device,
             **kwargs,

@@ -94,7 +94,7 @@ Before training the model, we draw prior predictive samples and visualize the pr
 Posterior Sampling
 ------------------
 
-We first train the model using variational inference, but only draw a single posterior sample for demonstration purposes. 
+We first train the model using variational inference, but only draw a single posterior sample for demonstration purposes.
 After fitting, we use :py:meth:`~aimz.ImpactModel.sample` to draw 100 posterior samples for further analysis:
 
 .. jupyter-execute::
