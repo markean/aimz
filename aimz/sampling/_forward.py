@@ -39,7 +39,7 @@ def _sample_forward(
     parameter values. Deterministic sites in the model are excluded from substitution.
 
     Args:
-        model (Callable): A probabilistic model with Pyro primitives.
+        model (Callable): A probabilistic model with NumPyro primitives.
         num_samples (int): The number of samples to draw.
         rng_key (ArrayLike): A pseudo-random number generator key.
         return_sites (tuple[str] | None): Names of variables (sites) to return.

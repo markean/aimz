@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to this project will be documented in this file and are best viewed on the [Changelog](https://aimz.readthedocs.io/en/latest/changelog.html) page.
+All notable changes to this project will be documented in this file and are best viewed on the [Changelog](https://aimz.readthedocs.io/latest/changelog.html) page.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Methods in {class}`~aimz.ImpactModel` now automatically determine the `batch_size` if it is not provided, based on the input data and number of samples([#70](https://github.com/markean/aimz/issues/70)).
+- Methods in {class}`~aimz.ImpactModel` now automatically determine the `batch_size` if it is not provided, based on the input data and number of samples ([#70](https://github.com/markean/aimz/issues/70)).
 
 ## [v0.5.0](https://github.com/markean/aimz/releases/tag/v0.5.0) - 2025-09-01
 

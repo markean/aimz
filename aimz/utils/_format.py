@@ -15,7 +15,7 @@
 """Module for formatting and handling model outputs."""
 
 import datetime
-from importlib import metadata
+from importlib.metadata import version
 
 import numpy as np
 import xarray as xr
@@ -30,7 +30,7 @@ def _make_attrs() -> dict[str, str]:
     """
     return {
         "created_at": datetime.datetime.now(datetime.UTC).isoformat(),
-        "aimz_version": metadata.version("aimz"),
+        "aimz_version": version("aimz"),
     }
 
 

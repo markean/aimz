@@ -52,7 +52,7 @@ def _create_sharded_sampler(
     Returns:
         Callable: A sharded function that takes the following arguments:
             - rng_key (Array): A pseudo-random number generator key.
-            - kernel (Callable): A probabilistic model with Pyro primitives.
+            - kernel (Callable): A probabilistic model with NumPyro primitives.
             - samples (dict): A dictionary of samples to condition on.
             - batch_shape (tuple[int]): The shape of the batch dimension, specifically
                 ``(num_samples,)``.
@@ -151,7 +151,7 @@ def _create_sharded_log_likelihood(
 
     Returns:
         Callable: A sharded function that takes the following arguments:
-            - kernel (Callable): A probabilistic model with Pyro primitives optimized
+            - kernel (Callable): A probabilistic model with NumPyro primitives optimized
                 with variational inference.
             - posterior_samples (dict): A dictionary of posterior samples.
             - param_input (str): The name of the parameter in the ``kernel`` for the
