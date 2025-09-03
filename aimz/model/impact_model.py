@@ -26,6 +26,7 @@ from warnings import warn
 
 import jax.numpy as jnp
 import numpy as np
+import numpy.typing as npt
 import xarray as xr
 from jax import (
     Array,
@@ -233,8 +234,9 @@ class ImpactModel(BaseModel):
         num_samples: int = 1000,
         rng_key: ArrayLike | None = None,
         return_sites: tuple[str] | None = None,
+        return_datatree: bool = True,
         **kwargs: object,
-    ) -> xr.DataTree:
+    ) -> xr.DataTree | dict[str, npt.NDArray]:
         """Draw samples from the prior predictive distribution.
 
         Args:
@@ -245,6 +247,9 @@ class ImpactModel(BaseModel):
             return_sites (tuple[str] | None, optional): Names of variables (sites) to
                 return. If ``None``, samples all latent, observed, and deterministic
                 sites.
+            return_datatree (bool, optional): If ``True``, return a
+                :external:py:class:`~xarray.DataTree`; otherwise return a
+                :py:class:`dict`.
             **kwargs (object): Additional arguments passed to the model. All array-like
                 values are expected to be JAX arrays.
 
@@ -277,6 +282,10 @@ class ImpactModel(BaseModel):
                 model_kwargs=args_bound,
             ),
         )
+
+        if not return_datatree:
+            return prior_predictive_samples
+
         out = xr.DataTree(name="root")
         out["prior_predictive"] = _dict_to_datatree(prior_predictive_samples)
 
@@ -437,11 +446,13 @@ class ImpactModel(BaseModel):
 
     def sample(
         self,
+        *,
         num_samples: int = 1000,
         rng_key: ArrayLike | None = None,
         return_sites: tuple[str] | None = None,
+        return_datatree: bool = True,
         **kwargs: object,
-    ) -> xr.DataTree:
+    ) -> xr.DataTree | dict[str, npt.NDArray]:
         """Draw posterior samples from a fitted model.
 
         Args:
@@ -453,6 +464,9 @@ class ImpactModel(BaseModel):
             return_sites (tuple[str] | None, optional): Names of variables (sites) to
                 return. If ``None``, samples all latent sites. Has no effect if the
                 inference method is MCMC.
+            return_datatree (bool, optional): If ``True``, return a
+                :external:py:class:`~xarray.DataTree`; otherwise return a
+                :py:class:`dict`.
             **kwargs (object): Additional arguments passed to the model. All array-like
                 values are expected to be JAX arrays. Only relevant when the inference
                 method is MCMC.
@@ -480,14 +494,19 @@ class ImpactModel(BaseModel):
             self.inference.run(self.inference.post_warmup_state.rng_key, **args_bound)
             posterior_samples = device_get(self.inference.get_samples())
         else:
-            posterior_samples = _sample_forward(
-                substitute(self.inference.guide, data=self.vi_result.params),
-                rng_key=rng_key,
-                num_samples=num_samples,
-                return_sites=return_sites,
-                samples=None,
-                model_kwargs=None,
+            posterior_samples = device_get(
+                _sample_forward(
+                    substitute(self.inference.guide, data=self.vi_result.params),
+                    rng_key=rng_key,
+                    num_samples=num_samples,
+                    return_sites=return_sites,
+                    samples=None,
+                    model_kwargs=None,
+                ),
             )
+
+        if not return_datatree:
+            return posterior_samples
 
         out = xr.DataTree(name="root")
         out["posterior"] = _dict_to_datatree(posterior_samples)
@@ -502,8 +521,9 @@ class ImpactModel(BaseModel):
         rng_key: ArrayLike | None = None,
         in_sample: bool = True,
         return_sites: tuple[str] | None = None,
+        return_datatree: bool = True,
         **kwargs: object,
-    ) -> xr.DataTree:
+    ) -> xr.DataTree | dict[str, npt.NDArray]:
         """Draw samples from the posterior predictive distribution.
 
         This method is a convenience alias for
@@ -526,6 +546,9 @@ class ImpactModel(BaseModel):
             return_sites (tuple[str] | None, optional): Names of variables (sites) to
                 return. If ``None``, samples ``self.param_output`` and deterministic
                 sites.
+            return_datatree (bool, optional): If ``True``, return a
+                :external:py:class:`~xarray.DataTree`; otherwise return a
+                :py:class:`dict`.
             **kwargs (object): Additional arguments passed to the model. All array-like
                 values are expected to be JAX arrays.
 
@@ -544,6 +567,7 @@ class ImpactModel(BaseModel):
             rng_key=rng_key,
             in_sample=in_sample,
             return_sites=return_sites,
+            return_datatree=return_datatree,
             **kwargs,
         )
 
@@ -993,8 +1017,9 @@ class ImpactModel(BaseModel):
         rng_key: ArrayLike | None = None,
         in_sample: bool = True,
         return_sites: tuple[str] | None = None,
+        return_datatree: bool = True,
         **kwargs: object,
-    ) -> xr.DataTree:
+    ) -> xr.DataTree | dict[str, npt.NDArray]:
         """Predict the output based on the fitted model.
 
         This method returns predictions for a single batch of input data and is better
@@ -1026,6 +1051,9 @@ class ImpactModel(BaseModel):
             return_sites (tuple[str] | None, optional): Names of variables (sites) to
                 return. If ``None``, samples ``self.param_output`` and deterministic
                 sites.
+            return_datatree (bool, optional): If ``True``, return a
+                :external:py:class:`~xarray.DataTree`; otherwise return a
+                :py:class:`dict`.
             **kwargs (object): Additional arguments passed to the model. All array-like
                 values are expected to be JAX arrays.
 
@@ -1056,9 +1084,7 @@ class ImpactModel(BaseModel):
             rng_key, rng_subkey = random.split(rng_key)
             kernel = seed(do(self.kernel, data=intervention), rng_seed=rng_subkey)
 
-        out = xr.DataTree(name="root")
-        out["posterior"] = self._dt_posterior
-        out["posterior_predictive" if in_sample else "predictions"] = _dict_to_datatree(
+        samples = device_get(
             _sample_forward(
                 kernel,
                 rng_key=rng_key,
@@ -1067,6 +1093,15 @@ class ImpactModel(BaseModel):
                 samples=self._posterior,
                 model_kwargs=args_bound,
             ),
+        )
+
+        if not return_datatree:
+            return samples
+
+        out = xr.DataTree(name="root")
+        out["posterior"] = self._dt_posterior
+        out["posterior_predictive" if in_sample else "predictions"] = _dict_to_datatree(
+            samples,
         )
 
         return out
@@ -1156,6 +1191,7 @@ class ImpactModel(BaseModel):
                     rng_key=rng_key,
                     in_sample=in_sample,
                     return_sites=return_sites or self._return_sites,
+                    return_datatree=True,
                     **kwargs,
                 )
             # Validate the provided parameters against the kernel's signature

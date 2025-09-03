@@ -13,13 +13,14 @@ aimz provides three sets of explicit sampling methods from the :py:class:`~aimz.
 2. **Posterior Sampling**: :py:meth:`~aimz.ImpactModel.sample`.
 3. **Posterior Predictive Sampling**: :py:meth:`~aimz.ImpactModel.sample_posterior_predictive_on_batch` and :py:meth:`~aimz.ImpactModel.sample_posterior_predictive`.
 
-All of these methods return an :external:py:class:`xarray.DataTree` object, with the relevant group labeled as ``prior_predictive``, ``posterior``, or ``posterior_predictive``.
+By default, these methods return results as an :external:py:class:`xarray.DataTree`, with the relevant group labeled as ``prior_predictive``, ``posterior``, or ``posterior_predictive``.
+For some methods, setting ``return_datatree=False`` instead returns a :py:class:`dict`.
 
 The prior predictive sampling methods perform forward sampling based on the model’s prior specification in the ``kernel`` and are not part of the standard training and inference workflow (:py:meth:`~aimz.ImpactModel.fit`/:py:meth:`~aimz.ImpactModel.predict`), making them particularly useful for conducting prior predictive checks.
 
 Unlike :py:meth:`~aimz.ImpactModel.fit` or :py:meth:`~aimz.ImpactModel.fit_on_batch`, :py:meth:`~aimz.ImpactModel.sample` does not modify the internal ``posterior`` attribute.
 It is primarily intended for drawing posterior samples from a fitted model using variational inference.
-Users can update the internal posterior manually by passing the samples obtained from :py:meth:`~aimz.ImpactModel.sample` to `.set_posterior_samples()` without retraining the model.
+Users can update the internal posterior manually by passing the samples obtained from :py:meth:`~aimz.ImpactModel.sample` to :py:meth:`~aimz.ImpactModel.set_posterior_sample` without retraining the model.
 
 The posterior predictive sampling methods serve as convenient aliases for :py:meth:`~aimz.ImpactModel.predict_on_batch` and :py:meth:`~aimz.ImpactModel.predict`, respectively.
 
@@ -94,25 +95,22 @@ Before training the model, we draw prior predictive samples and visualize the pr
 Posterior Sampling
 ------------------
 
-We first train the model using variational inference, but only draw a single posterior sample for demonstration purposes.
-After fitting, we use :py:meth:`~aimz.ImpactModel.sample` to draw 100 posterior samples for further analysis:
+We first train the model using variational inference, drawing only a single posterior sample for demonstration purposes. 
+After fitting, we call :py:meth:`~aimz.ImpactModel.sample` to generate 100 posterior samples for further analysis. 
+Setting ``return_datatree=False`` ensures that the results are returned as a dictionary rather than an :external:py:class:`xarray.DataTree`.
 
 .. jupyter-execute::
 
     im.fit_on_batch(X, y, num_samples=1, progress=False)
-    dt_posterior = im.sample(num_samples=100)
-    dt_posterior
+    posterior_samples = im.sample(num_samples=100, return_datatree=False)
 
 \
 
-We convert the posterior samples to a dictionary and pass them to :py:meth:`~aimz.ImpactModel.set_posterior_samples` to update the model’s internal ``posterior``:
+We pass posterior samples to :py:meth:`~aimz.ImpactModel.set_posterior_sample` to update the model’s internal ``posterior``:
 
 .. jupyter-execute::
 
-    # We need to remove the auxiliary `chain` dimension
-    im.set_posterior_sample(
-        {k: v.values for k, v in dt_posterior.sel(chain=0).posterior.items()},
-    );
+    im.set_posterior_sample(posterior_samples);
 
 
 Posterior Predictive Sampling
