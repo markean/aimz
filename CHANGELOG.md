@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+-{meth}`~aimz.ImpactModel.sample_prior_predictive_on_batch`, {meth}`~aimz.ImpactModel.sample`, {meth}`~aimz.ImpactModel.sample_posterior_predictive_on_batch`, and {meth}`~aimz.ImpactModel.predict_on_batch` methods in {class}`~aimz.ImpactModel` now support a `return_datatree` parameter. When set to ``True`` (by default), results are returned as an {class}`xarray.DataTree`; otherwise, a ``dict`` is returned ([#74](https://github.com/markean/aimz/issues/74)).
+
 ### Changed
 
 - Methods in {class}`~aimz.ImpactModel` now automatically determine the `batch_size` if it is not provided, based on the input data and number of samples ([#70](https://github.com/markean/aimz/issues/70)).

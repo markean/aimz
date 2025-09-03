@@ -48,17 +48,28 @@ def test_sample_with_mcmc(
 
     num_samples = 7
     # rng_key is ignored for MCMC; sampling uses the post_warmup_state
-    posterior_samples = im.sample(
+    samples = im.sample(
         num_samples=num_samples,
         rng_key=random.key(42),
         X=X,
         y=y,
     ).posterior
 
+    assert im.inference.num_samples == num_samples
+
     # Check shapes for all sampled sites
-    for var in posterior_samples.data_vars:
-        assert posterior_samples[var].values.shape[1] == num_samples, (
+    for var in samples.data_vars:
+        assert samples[var].values.shape[1] == num_samples, (
             f"Incorrect number of samples for site {var}"
         )
 
-    assert im.inference.num_samples == num_samples
+    samples_dict = im.sample(
+        num_samples=num_samples,
+        rng_key=random.key(42),
+        return_datatree=False,
+        X=X,
+        y=y,
+    )
+
+    for k, v in samples_dict.items():
+        assert v.shape[0] == num_samples, f"Incorrect number of samples for site {k}"

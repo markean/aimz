@@ -111,4 +111,4 @@ def test_predict_on_batch_lm_with_kwargs_array(
     im.fit(X=X, y=y, c=y, batch_size=3)
     im.predict_on_batch(X=X, c=y)
     # `.sample_posterior_predictive_on_batch()` is an alias for `.predict_on_batch()`
-    im.sample_posterior_predictive_on_batch(X=X, c=y)
+    im.sample_posterior_predictive_on_batch(X=X, c=y, return_datatree=False)
