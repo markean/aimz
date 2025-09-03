@@ -27,7 +27,7 @@ class BaseModel(ABC):
     """Abstract base class for the impact model.
 
     Attributes:
-        kernel (Callable): A probabilistic model with Pyro primitives.
+        kernel (Callable): A probabilistic model with NumPyro primitives.
     """
 
     def __init__(
@@ -39,16 +39,16 @@ class BaseModel(ABC):
         """Initialize the BaseModel with a callable model.
 
         Args:
-            kernel (Callable): A probabilistic model with Pyro primitives.
+            kernel (Callable): A probabilistic model with NumPyro primitives.
             param_input (str, optional): Name of the parameter in the ``kernel`` for the
                 main input data.
             param_output (str, optional): Name of the parameter in the ``kernel`` for
                 the output data.
         """
-        self.kernel = kernel
-        self.param_input = param_input
-        self.param_output = param_output
-        _validate_kernel_signature(self.kernel, self.param_input, self.param_output)
+        self._kernel = kernel
+        self._param_input = param_input
+        self._param_output = param_output
+        _validate_kernel_signature(self._kernel, self._param_input, self._param_output)
 
     @abstractmethod
     def fit(self, X, y, **kwargs) -> Self:  # noqa: ANN001 ANN003

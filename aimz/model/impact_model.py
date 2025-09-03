@@ -87,7 +87,7 @@ class ImpactModel(BaseModel):
         """Initialize an ImpactModel instance.
 
         Args:
-            kernel (Callable): A probabilistic model with Pyro primitives.
+            kernel (Callable): A probabilistic model with NumPyro primitives.
             rng_key (ArrayLike): A pseudo-random number generator key.
             inference (SVI | MCMC): An inference method supported by NumPyro, such as an
                 instance of :external:py:class:`numpyro.infer.svi.SVI` or
@@ -173,6 +173,11 @@ class ImpactModel(BaseModel):
         self._init_runtime_attrs()
 
     @property
+    def kernel(self) -> Callable:
+        """A probabilistic model with NumPyro primitives."""
+        return self._kernel
+
+    @property
     def rng_key(self) -> ArrayLike:
         """Pseudo-random number generator key."""
         return self._rng_key
@@ -186,6 +191,16 @@ class ImpactModel(BaseModel):
             :py:meth:`~aimz.ImpactModel.sample` separately to obtain samples.
         """
         return self._vi_result
+
+    @property
+    def param_input(self) -> str:
+        """Name of the parameter in the ``kernel`` for the main input data."""
+        return self._param_input
+
+    @property
+    def param_output(self) -> str:
+        """Name of the parameter in the ``kernel`` for the output data."""
+        return self._param_output
 
     @vi_result.setter
     def vi_result(self, vi_result: SVIRunResult) -> None:
@@ -1487,7 +1502,7 @@ class ImpactModel(BaseModel):
             rng_key (ArrayLike): Pseudo-random number generator key.
             return_sites (tuple[str]): Names of variables (sites) to return.
             output_dir (Path): Directory where outputs will be saved.
-            kernel (Callable): Probabilistic model with Pyro primitives.
+            kernel (Callable): Probabilistic model with NumPyro primitives.
             sampler (Callable): Function performing predictive sampling; must accept
                 the same signature as this function.
             samples (dict[str, Array]): Arrays to condition predictions on.

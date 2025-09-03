@@ -15,7 +15,10 @@ Attributes
 .. autosummary::
    :toctree: generated/
 
+   ImpactModel.kernel
    ImpactModel.rng_key
+   ImpactModel.param_input
+   ImpactModel.param_output
    ImpactModel.vi_result
    ImpactModel.posterior
 
