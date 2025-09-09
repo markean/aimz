@@ -20,9 +20,12 @@ import sys
 from importlib import metadata
 from pathlib import Path
 
+import mlflow
+
 import aimz
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "aimz"))
+
 
 # Configuration file for the Sphinx documentation builder.
 #
@@ -61,6 +64,7 @@ intersphinx_mapping = {
     "numpyro": ("https://num.pyro.ai/en/stable/", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
     "xarray": ("https://docs.xarray.dev/en/stable/", None),
+    "mlflow": ("https://mlflow.org/docs/latest/api_reference/", None),
 }
 tls_verify = False
 
