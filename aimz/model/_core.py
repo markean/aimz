@@ -51,10 +51,10 @@ class BaseModel(ABC):
         _validate_kernel_signature(self._kernel, self._param_input, self._param_output)
 
     @abstractmethod
-    def fit(self, X, y, **kwargs) -> Self:  # noqa: ANN001 ANN003
+    def fit(self, X, y, **kwargs) -> Self:
         """Fit the model to the input data ``X`` and output data ``y``."""
         return self
 
     @abstractmethod
-    def predict(self, X, **kwargs) -> object:  # noqa: ANN001 ANN003
+    def predict(self, X, **kwargs) -> object:
         """Predict the output based on the fitted model."""

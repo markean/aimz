@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Methods in {class}`~aimz.ImpactModel` now automatically determine the `batch_size` if it is not provided, based on the input data and number of samples ([#70](https://github.com/markean/aimz/issues/70)).
 
+### Fixed
+
+- Methods in {class}`~aimz.ImpactModel` now handle empty posterior dictionaries (`{}`) gracefully instead of failing when no posterior samples are available ([#76](https://github.com/markean/aimz/issues/76)).
+
 ## [v0.5.0](https://github.com/markean/aimz/releases/tag/v0.5.0) - 2025-09-01
 
 ### Added

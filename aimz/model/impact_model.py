@@ -116,6 +116,7 @@ class ImpactModel(BaseModel):
             )
             raise TypeError(msg)
         self.inference = inference
+        self._vi_result: SVIRunResult | None = None
         self._vi_state = None
         self._posterior: dict[str, Array] | None = None
         self._init_runtime_attrs()
@@ -184,16 +185,6 @@ class ImpactModel(BaseModel):
         return self._rng_key
 
     @property
-    def vi_result(self) -> SVIRunResult:
-        """Variational inference result.
-
-        :setter: This sets :external:py:data:`numpyro.infer.svi.SVIRunResult` and marks
-            the model as fitted. It does not perform posterior sampling — use
-            :py:meth:`~aimz.ImpactModel.sample` separately to obtain samples.
-        """
-        return self._vi_result
-
-    @property
     def param_input(self) -> str:
         """Name of the parameter in the ``kernel`` for the main input data."""
         return self._param_input
@@ -202,6 +193,16 @@ class ImpactModel(BaseModel):
     def param_output(self) -> str:
         """Name of the parameter in the ``kernel`` for the output data."""
         return self._param_output
+
+    @property
+    def vi_result(self) -> SVIRunResult | None:
+        """Variational inference result.
+
+        :setter: This sets :external:py:data:`numpyro.infer.svi.SVIRunResult` and marks
+            the model as fitted. It does not perform posterior sampling — use
+            :py:meth:`~aimz.ImpactModel.sample` separately to obtain samples.
+        """
+        return self._vi_result
 
     @vi_result.setter
     def vi_result(self, vi_result: SVIRunResult) -> None:
@@ -496,7 +497,10 @@ class ImpactModel(BaseModel):
         else:
             posterior_samples = device_get(
                 _sample_forward(
-                    substitute(self.inference.guide, data=self.vi_result.params),
+                    substitute(
+                        self.inference.guide,
+                        data=cast("SVIRunResult", self.vi_result).params,
+                    ),
                     rng_key=rng_key,
                     num_samples=num_samples,
                     return_sites=return_sites,
@@ -1185,14 +1189,17 @@ class ImpactModel(BaseModel):
                 )
                 warn(msg, category=UserWarning, stacklevel=2)
 
-                return self.predict_on_batch(
-                    cast("ArrayLike", X),
-                    intervention=intervention,
-                    rng_key=rng_key,
-                    in_sample=in_sample,
-                    return_sites=return_sites or self._return_sites,
-                    return_datatree=True,
-                    **kwargs,
+                return cast(
+                    "xr.DataTree",
+                    self.predict_on_batch(
+                        cast("ArrayLike", X),
+                        intervention=intervention,
+                        rng_key=rng_key,
+                        in_sample=in_sample,
+                        return_sites=return_sites or self._return_sites,
+                        return_datatree=True,
+                        **kwargs,
+                    ),
                 )
             # Validate the provided parameters against the kernel's signature
             args_bound = (
@@ -1455,15 +1462,12 @@ class ImpactModel(BaseModel):
                     ),
                 )
                 if site not in zarr_arr:
+                    draws = self._num_samples if self.posterior else 1
                     zarr_arr[site] = zarr_group.create_array(
                         name=site,
-                        shape=(self._num_samples, 0, *arr.shape[2:]),
+                        shape=(draws, 0, *arr.shape[2:]),
                         dtype="float32" if arr.dtype == "bfloat16" else arr.dtype,
-                        chunks=(
-                            self._num_samples,
-                            dataloader.batch_size,
-                            *arr.shape[2:],
-                        ),
+                        chunks=(draws, dataloader.batch_size, *arr.shape[2:]),
                         dimension_names=(
                             "draw",
                             *tuple(f"{site}_dim_{i}" for i in range(arr.ndim - 1)),
@@ -1602,10 +1606,16 @@ class ImpactModel(BaseModel):
                             ),
                             dimension_names=(
                                 "draw",
-                                *tuple(f"{site}_dim_{i}" for i in range(arr.ndim - 1)),
+                                *tuple(
+                                    f"{site}_dim_{i}"
+                                    for i in range(max(arr.ndim - 1, 1))
+                                ),
                             ),
                         )
-                    queues[site].put(arr[:, : -n_pad or None])
+                    queues[site].put(
+                        (arr[:, None] if arr.ndim == 1 else arr)[:, : -n_pad or None],
+                    )
+
                 if not error_queue.empty():
                     _, exc, tb = error_queue.get()
                     raise exc.with_traceback(tb)
