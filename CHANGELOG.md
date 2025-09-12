@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - {meth}`~aimz.ImpactModel.sample_posterior_predictive_on_batch` and {meth}`~aimz.ImpactModel.sample_posterior_predictive` no longer accept the ``in_sample`` argument. Results are now always written to the ``posterior_predictive`` group.
 
+### Removed
+
+- Removed the `tqdm` dependency ([#80](https://github.com/markean/aimz/issues/80)).
+
 ### Fixed
 
 - Methods in {class}`~aimz.ImpactModel` now handle empty posterior dictionaries (`{}`) gracefully instead of failing when no posterior samples are available ([#76](https://github.com/markean/aimz/issues/76)).

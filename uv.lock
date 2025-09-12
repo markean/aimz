@@ -28,7 +28,6 @@ dependencies = [
     { name = "jax" },
     { name = "numpyro" },
     { name = "scikit-learn" },
-    { name = "tqdm" },
     { name = "xarray" },
     { name = "zarr" },
 ]
@@ -77,7 +76,6 @@ requires-dist = [
     { name = "sphinx", marker = "extra == 'docs'", specifier = ">=8.2" },
     { name = "sphinx-copybutton", marker = "extra == 'docs'", specifier = ">=0.5" },
     { name = "sphinx-design", marker = "extra == 'docs'", specifier = ">=0.6" },
-    { name = "tqdm", specifier = ">=4.67" },
     { name = "xarray", specifier = ">=2025.4" },
     { name = "zarr", specifier = ">=3,<4" },
 ]
