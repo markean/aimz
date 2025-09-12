@@ -63,6 +63,7 @@ intersphinx_mapping = {
     "jax": ("https://docs.jax.dev/en/latest/", None),
     "numpyro": ("https://num.pyro.ai/en/stable/", None),
     "numpy": ("https://numpy.org/doc/stable/", None),
+    "pandas": ("https://pandas.pydata.org/docs", None),
     "xarray": ("https://docs.xarray.dev/en/stable/", None),
     "mlflow": ("https://mlflow.org/docs/latest/api_reference/", None),
 }

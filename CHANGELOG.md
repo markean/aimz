@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
--{meth}`~aimz.ImpactModel.sample_prior_predictive_on_batch`, {meth}`~aimz.ImpactModel.sample`, {meth}`~aimz.ImpactModel.sample_posterior_predictive_on_batch`, and {meth}`~aimz.ImpactModel.predict_on_batch` methods in {class}`~aimz.ImpactModel` now support a `return_datatree` parameter. When set to ``True`` (by default), results are returned as an {class}`xarray.DataTree`; otherwise, a ``dict`` is returned ([#74](https://github.com/markean/aimz/issues/74)).
+- {meth}`~aimz.ImpactModel.sample_prior_predictive_on_batch`, {meth}`~aimz.ImpactModel.sample`, {meth}`~aimz.ImpactModel.sample_posterior_predictive_on_batch`, and {meth}`~aimz.ImpactModel.predict_on_batch` methods in {class}`~aimz.ImpactModel` now support a `return_datatree` parameter. When set to ``True`` (by default), results are returned as an {class}`xarray.DataTree`; otherwise, a ``dict`` is returned ([#74](https://github.com/markean/aimz/issues/74)).
 
 ### Changed
 
