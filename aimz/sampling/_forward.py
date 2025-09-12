@@ -39,18 +39,17 @@ def _sample_forward(
     parameter values. Deterministic sites in the model are excluded from substitution.
 
     Args:
-        model (Callable): A probabilistic model with NumPyro primitives.
-        num_samples (int): The number of samples to draw.
+        model: A probabilistic model with NumPyro primitives.
+        num_samples: The number of samples to draw.
         rng_key (ArrayLike): A pseudo-random number generator key.
-        return_sites (tuple[str] | None): Names of variables (sites) to return.
-        samples (dict[str, Array]| None): A dictionary of samples to condition on,
-            where each array has shape ``(num_samples, ...)``.
-        model_kwargs (dict[str, Array] | None): Additional arguments passed to the
-            model.
+        return_sites: Names of variables (sites) to return.
+        samples: A dictionary of samples to condition on, where each array has shape
+            ``(num_samples, ...)``.
+        model_kwargs: Additional arguments passed to the model.
 
     Returns:
-        dict[str, Array]: A dictionary mapping each return site to an array of traced
-            values with shape ``(num_samples, ...)``.
+        A dictionary mapping each return site to an array of traced values with shape
+            ``(num_samples, ...)``.
     """
 
     def _trace_one_sample(

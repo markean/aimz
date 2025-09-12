@@ -43,14 +43,14 @@ def _create_sharded_sampler(
     """Create a sharded predictive sampling function.
 
     Args:
-        mesh (Mesh): The JAX mesh object defining the device mesh for sharding.
-        n_kwargs_array (int): The number of arguments in the keyword arguments that are
+        mesh: The JAX mesh object defining the device mesh for sharding.
+        n_kwargs_array: The number of arguments in the keyword arguments that are
             array-like (sharded).
-        n_kwargs_extra (int): The number of extra keyword arguments that are not
-            array-like (not sharded).
+        n_kwargs_extra: The number of extra keyword arguments that are not array-like
+            (not sharded).
 
     Returns:
-        Callable: A sharded function that takes the following arguments:
+        A sharded function that takes the following arguments:
             - rng_key (Array): A pseudo-random number generator key.
             - kernel (Callable): A probabilistic model with NumPyro primitives.
             - samples (dict): A dictionary of samples to condition on.
@@ -143,14 +143,14 @@ def _create_sharded_log_likelihood(
     """Create a sharded log-likelihood function.
 
     Args:
-        mesh (Mesh): The JAX mesh object defining the device mesh for sharding.
-        n_kwargs_array (int): The number of arguments in the keyword arguments that are
+        mesh: The JAX mesh object defining the device mesh for sharding.
+        n_kwargs_array: The number of arguments in the keyword arguments that are
             array-like (sharded).
-        n_kwargs_extra (int): The number of extra keyword arguments that are not
-            array-like (not sharded).
+        n_kwargs_extra: The number of extra keyword arguments that are not array-like
+            (not sharded).
 
     Returns:
-        Callable: A sharded function that takes the following arguments:
+        A sharded function that takes the following arguments:
             - kernel (Callable): A probabilistic model with NumPyro primitives optimized
                 with variational inference.
             - posterior_samples (dict): A dictionary of posterior samples.

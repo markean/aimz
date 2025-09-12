@@ -68,8 +68,10 @@ per-file-ignores = { "aimz/model/_core.py" = [
     "ANN001", # missing-type-function-argument
     "ANN003", # missing-type-kwargs
 ], "aimz/mlflow*" = [
+    "ANN202",  # missing-return-type-private-function
     "ARG001",  # unused-function-argument
     "PLR0913", # too-many-arguments
+    "PLC0415", # import-outside-top-level
 ], "docs*" = [
     "INP001", # implicit-namespace-package
     "A001",   # builtin-variable-shadowing
@@ -99,7 +101,6 @@ pylint = { max-args = 10 }
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"
-banned-module-level-imports = ["cloudpickle"]
 
 [tool.setuptools.packages.find]
 include = ["aimz*"]

@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 from warnings import warn
 
 import jax.numpy as jnp
+import numpy.typing as npt
 from jax import Array, device_put, local_device_count, random
 from jax.typing import ArrayLike
 
@@ -32,7 +33,6 @@ from aimz.utils.data.array_dataset import ArrayDataset
 
 if TYPE_CHECKING:
     from jax.sharding import Sharding
-    from numpy import ndarray
 
 
 class ArrayLoader:
@@ -50,14 +50,13 @@ class ArrayLoader:
         """Initialize an ArrayLoader instance.
 
         Args:
-            dataset (ArrayDataset): The dataset to load.
+            dataset: The dataset to load.
             rng_key (ArrayLike): A pseudo-random number generator key.
-            batch_size (int): The number of samples per batch.
-            shuffle (bool, optional): Whether to shuffle the dataset before batching.
-            device (Sharding | None, optional): The device or sharding specification to
-                which the data should be moved. By default, no device transfer is
-                applied. When used as an input to a model, this will be overridden by
-                the device setting of the model.
+            batch_size: The number of samples per batch.
+            shuffle: Whether to shuffle the dataset before batching.
+            device: The device or sharding specification to which the data should be
+                moved. By default, no device transfer is applied. When used as an input
+                to a model, this will be overridden by the device setting of the model.
         """
         self.dataset = dataset
         if (
@@ -78,13 +77,13 @@ class ArrayLoader:
         self._num_devices = local_device_count()
         self.device = device
 
-    def pad_array(self, x: "Array | ndarray", n_pad: int, axis: int = 0) -> Array:
+    def pad_array(self, x: Array | npt.NDArray, n_pad: int, axis: int = 0) -> Array:
         """Pad an array to ensure compatibility with sharding.
 
         Args:
-            x (Array | ndarray): The input array to be padded.
-            n_pad (int): The number of padding elements to add.
-            axis (int): The axis along which to apply the padding.
+            x: The input array to be padded.
+            n_pad: The number of padding elements to add.
+            axis: The axis along which to apply the padding.
 
         Returns:
             The padded array with padding applied along the specified axis.

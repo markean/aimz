@@ -56,15 +56,14 @@ def _setup_inputs(
         y (ArrayLike | None): Output data with shape ``(n_samples_Y,)``. Must be
             ``None`` if ``X`` is a data loader.
         rng_key (ArrayLike): A pseudo-random number generator key.
-        batch_size (int | None): The size of batches for data loading.
-        num_samples (int): Number of samples to draw, which affects the size of batches.
-        shuffle (bool, optional): Whether to shuffle the dataset before batching.
-        device (Sharding | None, optional): The device or sharding specification to
-            which the data should be moved. By default, no device transfer is applied.
-            If ``X`` is a data loader, it will override the device setting of the
-            loader.
-        **kwargs (object): Additional arguments passed to the model. All array-like
-                values are expected to be JAX arrays.
+        batch_size: The size of batches for data loading.
+        num_samples: Number of samples to draw, which affects the size of batches.
+        shuffle: Whether to shuffle the dataset before batching.
+        device: The device or sharding specification to which the data should be moved.
+            By default, no device transfer is applied. If ``X`` is a data loader, it
+            will override the device setting of the loader.
+        **kwargs: Additional arguments passed to the model. All array-like values are
+            expected to be JAX arrays.
 
     Returns:
         - The data loader for batching.

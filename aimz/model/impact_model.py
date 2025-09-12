@@ -88,15 +88,14 @@ class ImpactModel(BaseModel):
         """Initialize an ImpactModel instance.
 
         Args:
-            kernel (Callable): A probabilistic model with NumPyro primitives.
+            kernel: A probabilistic model with NumPyro primitives.
             rng_key (ArrayLike): A pseudo-random number generator key.
-            inference (SVI | MCMC): An inference method supported by NumPyro, such as an
-                instance of :external:py:class:`numpyro.infer.svi.SVI` or
+            inference: An inference method supported by NumPyro, such as an instance of
+                :external:py:class:`numpyro.infer.svi.SVI` or
                 :external:py:class:`numpyro.infer.mcmc.MCMC`.
-            param_input (str, optional): The name of the parameter in the ``kernel`` for
-                the main input data.
-            param_output (str, optional): The name of the parameter in the ``kernel``
-                for the output data.
+            param_input: Name of the parameter in the ``kernel`` for the main input
+                data.
+            param_output: Name of the parameter in the ``kernel`` for the output data.
 
         Warning:
             The ``rng_key`` parameter should be provided as a **typed key array**
@@ -169,7 +168,7 @@ class ImpactModel(BaseModel):
         """Restore the state and reinitialize runtime attributes.
 
         Args:
-            state (dict): The state to restore, excluding the runtime attributes.
+            state: The state to restore, excluding the runtime attributes.
         """
         self.__dict__.update(state)
         self._init_runtime_attrs()
@@ -242,17 +241,16 @@ class ImpactModel(BaseModel):
 
         Args:
             X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
-            num_samples (int, optional): The number of samples to draw.
-            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
-                By default, an internal key is used and split as needed.
-            return_sites (tuple[str] | None, optional): Names of variables (sites) to
-                return. If ``None``, samples all latent, observed, and deterministic
-                sites.
-            return_datatree (bool, optional): If ``True``, return a
+            num_samples: The number of samples to draw.
+            rng_key (ArrayLike | None): A pseudo-random number generator key. By
+                default, an internal key is used and split as needed.
+            return_sites: Names of variables (sites) to return. If ``None``, samples all
+                latent, observed, and deterministic sites.
+            return_datatree: If ``True``, return a
                 :external:py:class:`~xarray.DataTree`; otherwise return a
                 :py:class:`dict`.
-            **kwargs (object): Additional arguments passed to the model. All array-like
-                values are expected to be JAX arrays.
+            **kwargs: Additional arguments passed to the model. All array-like values
+                are expected to be JAX arrays.
 
         Returns:
             Prior predictive samples.
@@ -311,24 +309,23 @@ class ImpactModel(BaseModel):
 
         Args:
             X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
-            num_samples (int, optional): The number of samples to draw.
-            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
-                By default, an internal key is used and split as needed.
-            return_sites (tuple[str] | None, optional): Names of variables (sites) to
-                return. If ``None``, samples ``self.param_output`` and deterministic
-                sites.
-            batch_size (int | None, optional): The batch size for data loading during
-                prior predictive sampling. It also determines the chunk size used to
-                store the samples. If ``None``, it is determined automatically based on
-                the input data and number of samples.
-            output_dir (str | Path | None, optional): The directory where the outputs
-                will be saved. If the specified directory does not exist, it will be
-                created automatically. If ``None``, a default temporary directory will
-                be created. A timestamped subdirectory will be generated within this
-                directory to store the outputs. Outputs are saved in the Zarr format.
-            progress (bool, optional): Whether to display a progress bar.
-            **kwargs (object): Additional arguments passed to the model. All array-like
-                values are expected to be JAX arrays.
+            num_samples: The number of samples to draw.
+            rng_key (ArrayLike | None): A pseudo-random number generator key. By
+                default, an internal key is used and split as needed.
+            return_sites: Names of variables (sites) to return. If ``None``, samples
+                ``self.param_output`` and deterministic sites.
+            batch_size: The batch size for data loading during prior predictive
+                sampling. It also determines the chunk size used to store the samples.
+                If ``None``, it is determined automatically based on the input data and
+                number of samples.
+            output_dir: The directory where the outputs will be saved. If the specified
+                directory does not exist, it will be created automatically. If ``None``,
+                a default temporary directory will be created. A timestamped
+                subdirectory will be generated within this directory to store the
+                outputs. Outputs are saved in the Zarr format.
+            progress: Whether to display a progress bar.
+            **kwargs: Additional arguments passed to the model. All array-like values
+                are expected to be JAX arrays.
 
         Returns:
             Prior predictive samples.
@@ -457,20 +454,19 @@ class ImpactModel(BaseModel):
         """Draw posterior samples from a fitted model.
 
         Args:
-            num_samples (int, optional): The number of posterior samples to draw.
-            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
-                By default, an internal key is used and split as needed. Has no effect
-                if the inference method is MCMC, where the ``post_warmup_state``
-                property will be used to continue sampling.
-            return_sites (tuple[str] | None, optional): Names of variables (sites) to
-                return. If ``None``, samples all latent sites. Has no effect if the
-                inference method is MCMC.
-            return_datatree (bool, optional): If ``True``, return a
+            num_samples: The number of posterior samples to draw.
+            rng_key (ArrayLike | None): A pseudo-random number generator key. By
+                default, an internal key is used and split as needed. Has no effect if
+                the inference method is MCMC, where the ``post_warmup_state`` property
+                will be used to continue sampling.
+            return_sites: Names of variables (sites) to return. If ``None``, samples
+                all latent sites. Has no effect if the inference method is MCMC.
+            return_datatree: If ``True``, return a
                 :external:py:class:`~xarray.DataTree`; otherwise return a
                 :py:class:`dict`.
-            **kwargs (object): Additional arguments passed to the model. All array-like
-                values are expected to be JAX arrays. Only relevant when the inference
-                method is MCMC.
+            **kwargs: Additional arguments passed to the model. All array-like values
+                are expected to be JAX arrays. Only relevant when the inference method
+                is MCMC.
 
         Returns:
             Posterior samples.
@@ -523,7 +519,6 @@ class ImpactModel(BaseModel):
         *,
         intervention: dict | None = None,
         rng_key: ArrayLike | None = None,
-        in_sample: bool = True,
         return_sites: tuple[str] | None = None,
         return_datatree: bool = True,
         **kwargs: object,
@@ -531,30 +526,24 @@ class ImpactModel(BaseModel):
         """Draw samples from the posterior predictive distribution.
 
         This method is a convenience alias for
-        :py:meth:`~aimz.ImpactModel.predict_on_batch`.
+        :py:meth:`~aimz.ImpactModel.predict_on_batch`, with ``in_sample`` automatically
+        set to ``True``.
 
         Args:
             X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
-            intervention (dict | None, optional): A dictionary mapping sample sites to
-                their corresponding intervention values. Interventions enable
-                counterfactual analysis by modifying the specified sample sites during
-                prediction (posterior predictive sampling).
-            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
-                By default, an internal key is used and split as needed.
-            in_sample (bool, optional): Specifies the group where posterior predictive
-                samples are stored in the returned output. If ``True``, samples are
-                stored in the ``posterior_predictive`` group, indicating they were
-                generated based on data used during model fitting. If ``False``, samples
-                are stored in the ``predictions`` group, indicating they were generated
-                based on out-of-sample data.
-            return_sites (tuple[str] | None, optional): Names of variables (sites) to
-                return. If ``None``, samples ``self.param_output`` and deterministic
-                sites.
-            return_datatree (bool, optional): If ``True``, return a
+            intervention: A dictionary mapping sample sites to their corresponding
+                intervention values. Interventions enable counterfactual analysis by
+                modifying the specified sample sites during prediction (posterior
+                predictive sampling).
+            rng_key (ArrayLike | None): A pseudo-random number generator key. By
+                default, an internal key is used and split as needed.
+            return_sites: Names of variables (sites) to return. If ``None``, samples
+                ``self.param_output`` and deterministic sites.
+            return_datatree: If ``True``, return a
                 :external:py:class:`~xarray.DataTree`; otherwise return a
                 :py:class:`dict`.
-            **kwargs (object): Additional arguments passed to the model. All array-like
-                values are expected to be JAX arrays.
+            **kwargs: Additional arguments passed to the model. All array-like values
+                are expected to be JAX arrays.
 
         Returns:
             Posterior predictive samples. Posterior samples are included if available.
@@ -569,7 +558,7 @@ class ImpactModel(BaseModel):
             X,
             intervention=intervention,
             rng_key=rng_key,
-            in_sample=in_sample,
+            in_sample=True,
             return_sites=return_sites,
             return_datatree=return_datatree,
             **kwargs,
@@ -581,7 +570,6 @@ class ImpactModel(BaseModel):
         *,
         intervention: dict | None = None,
         rng_key: ArrayLike | None = None,
-        in_sample: bool = True,
         return_sites: tuple[str] | None = None,
         batch_size: int | None = None,
         output_dir: str | Path | None = None,
@@ -590,40 +578,34 @@ class ImpactModel(BaseModel):
     ) -> xr.DataTree:
         """Draw samples from the posterior predictive distribution.
 
-        This method is a convenience alias for :py:meth:`~aimz.ImpactModel.predict`.
+        This method is a convenience alias for :py:meth:`~aimz.ImpactModel.predict`,
+        with ``in_sample`` automatically set to ``True``.
 
         Args:
             X (ArrayLike | ArrayLoader): Input data, either an array-like of shape
                 ``(n_samples, n_features)`` or a data loader that holds all array-like
                 objects and handles batching internally; if a data loader is passed,
                 ``batch_size`` is ignored.
-            intervention (dict | None, optional): A dictionary mapping sample sites to
-                their corresponding intervention values. Interventions enable
-                counterfactual analysis by modifying the specified sample sites during
-                prediction (posterior predictive sampling).
-            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
-                By default, an internal key is used and split as needed.
-            in_sample (bool, optional): Specifies the group where posterior predictive
-                samples are stored in the returned output. If ``True``, samples are
-                stored in the ``posterior_predictive`` group, indicating they were
-                generated based on data used during model fitting. If ``False``, samples
-                are stored in the ``predictions`` group, indicating they were generated
-                based on out-of-sample data.
-            return_sites (tuple[str] | None, optional): Names of variables (sites) to
-                return. If ``None``, samples ``self.param_output`` and deterministic
-                sites.
-            batch_size (int | None, optional): The batch size for data loading during
-                posterior predictive sampling. It also determines the chunk size used to
-                store the samples. If ``None``, it is determined automatically based on
-                the input data and number of samples.
-            output_dir (str | Path | None, optional): The directory where the outputs
-                will be saved. If the specified directory does not exist, it will be
-                created automatically. If ``None``, a default temporary directory will
-                be created. A timestamped subdirectory will be generated within this
-                directory to store the outputs. Outputs are saved in the Zarr format.
-            progress (bool, optional): Whether to display a progress bar.
-            **kwargs (object): Additional arguments passed to the model. All array-like
-                values are expected to be JAX arrays.
+            intervention: A dictionary mapping sample sites to their corresponding
+                intervention values. Interventions enable counterfactual analysis by
+                modifying the specified sample sites during prediction (posterior
+                predictive sampling).
+            rng_key (ArrayLike | None): A pseudo-random number generator key. By
+                default, an internal key is used and split as needed.
+            return_sites: Names of variables (sites) to return. If ``None``, samples
+                ``self.param_output`` and deterministic sites.
+            batch_size: The batch size for data loading during posterior predictive
+                sampling. It also determines the chunk size used to store the samples.
+                If ``None``, it is determined automatically based on the input data and
+                number of samples.
+            output_dir: The directory where the outputs will be saved. If the specified
+                directory does not exist, it will be created automatically. If ``None``,
+                a default temporary directory will be created. A timestamped
+                subdirectory will be generated within this directory to store the
+                outputs. Outputs are saved in the Zarr format.
+            progress: Whether to display a progress bar.
+            **kwargs: Additional arguments passed to the model. All array-like values
+                are expected to be JAX arrays.
 
         Returns:
             Posterior predictive samples. Posterior samples are included if available.
@@ -638,7 +620,7 @@ class ImpactModel(BaseModel):
             X,
             intervention=intervention,
             rng_key=rng_key,
-            in_sample=in_sample,
+            in_sample=True,
             return_sites=return_sites,
             batch_size=batch_size,
             output_dir=output_dir,
@@ -658,11 +640,11 @@ class ImpactModel(BaseModel):
         Args:
             X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
             y (ArrayLike): Output data with shape ``(n_samples_Y,)``.
-            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
-                By default, an internal key is used and split as needed. The key is only
+            rng_key (ArrayLike | None): A pseudo-random number generator key. By
+                default, an internal key is used and split as needed. The key is only
                 used for initialization if the internal SVI state is not yet set.
-            **kwargs (object): Additional arguments passed to the model. All array-like
-                values are expected to be JAX arrays.
+            **kwargs: Additional arguments passed to the model. All array-like values
+                are expected to be JAX arrays.
 
         Returns:
             - Updated SVI state after the training step.
@@ -739,16 +721,16 @@ class ImpactModel(BaseModel):
         Args:
             X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
             y (ArrayLike): Output data with shape ``(n_samples_Y,)``.
-            num_steps (int, optional): Number of steps for variational inference
-                optimization. Has no effect if the inference method is MCMC.
-            num_samples (int | None, optional): The number of posterior samples to draw.
-                Has no effect if the inference method is MCMC.
-            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
-                By default, an internal key is used and split as needed.
-            progress (bool, optional): Whether to display a progress bar. Has no effect
+            num_steps: Number of steps for variational inference optimization. Has no
+                effect if the inference method is MCMC.
+            num_samples: The number of posterior samples to draw. Has no effect if the
+                inference method is MCMC.
+            rng_key (ArrayLike | None): A pseudo-random number generator key. By
+                default, an internal key is used and split as needed.
+            progress: Whether to display a progress bar. Has no effect
                 if the inference method is MCMC.
-            **kwargs (object): Additional arguments passed to the model. All array-like
-                values are expected to be JAX arrays.
+            **kwargs: Additional arguments passed to the model. All array-like values
+                are expected to be JAX arrays.
 
         Returns:
             The fitted model instance, enabling method chaining.
@@ -851,18 +833,17 @@ class ImpactModel(BaseModel):
                 ``batch_size`` is ignored.
             y (ArrayLike | None): Output data with shape ``(n_samples_Y,)``. Must be
                 ``None`` if ``X`` is a data loader.
-            num_samples (int | None, optional): The number of posterior samples to draw.
-            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
-                By default, an internal key is used and split as needed.
-            progress (bool, optional): Whether to display a progress bar.
-            batch_size (int | None, optional): The number of data points processed at
-                each step of variational inference. If ``None``, the entire dataset is
-                used as a single batch in each epoch.
-            epochs (int, optional): The number of epochs for variational inference
-                optimization.
-            shuffle (bool, optional): Whether to shuffle the data at each epoch.
-            **kwargs (object): Additional arguments passed to the model. All array-like
-                values are expected to be JAX arrays.
+            num_samples: The number of posterior samples to draw.
+            rng_key (ArrayLike | None): A pseudo-random number generator key. By
+                default, an internal key is used and split as needed.
+            progress: Whether to display a progress bar.
+            batch_size: The number of data points processed at each step of variational
+                inference. If ``None``, the entire dataset is used as a single batch in
+                each epoch.
+            epochs: The number of epochs for variational inference optimization.
+            shuffle: Whether to shuffle the data at each epoch.
+            **kwargs: Additional arguments passed to the model. All array-like values
+                are expected to be JAX arrays.
 
         Returns:
             The fitted model instance, enabling method chaining.
@@ -986,9 +967,9 @@ class ImpactModel(BaseModel):
         `NumPyro documentation <https://num.pyro.ai/en/stable/utilities.html#predictive>`__.
 
         Args:
-            posterior_sample (dict[str, Array]): Posterior samples to set for the model.
-            return_sites (tuple[str] | None, optional): Names of variable (sites) to
-                return in :py:meth:`~aimz.ImpactModel.predict`. By default, it is set to
+            posterior_sample: Posterior samples to set for the model.
+            return_sites: Names of variable (sites) to return in
+                :py:meth:`~aimz.ImpactModel.predict`. By default, it is set to
                 ``self.param_output``.
 
         Returns:
@@ -1040,26 +1021,25 @@ class ImpactModel(BaseModel):
 
         Args:
             X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
-            intervention (dict | None, optional): A dictionary mapping sample sites to
-                their corresponding intervention values. Interventions enable
-                counterfactual analysis by modifying the specified sample sites during
-                prediction (posterior predictive sampling).
-            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
-                By default, an internal key is used and split as needed.
-            in_sample (bool, optional): Specifies the group where posterior predictive
-                samples are stored in the returned output. If ``True``, samples are
-                stored in the ``posterior_predictive`` group, indicating they were
-                generated based on data used during model fitting. If ``False``, samples
-                are stored in the ``predictions`` group, indicating they were generated
-                based on out-of-sample data.
-            return_sites (tuple[str] | None, optional): Names of variables (sites) to
-                return. If ``None``, samples ``self.param_output`` and deterministic
-                sites.
-            return_datatree (bool, optional): If ``True``, return a
+            intervention: A dictionary mapping sample sites to their corresponding
+                intervention values. Interventions enable counterfactual analysis by
+                modifying the specified sample sites during prediction (posterior
+                predictive sampling).
+            rng_key (ArrayLike | None): A pseudo-random number generator key. By
+                default, an internal key is used and split as needed.
+            in_sample: Specifies the group where posterior predictive samples are stored
+                in the returned output. If ``True``, samples are stored in the
+                ``posterior_predictive`` group, indicating they were generated based on
+                data used during model fitting. If ``False``, samples are stored in the
+                ``predictions`` group, indicating they were generated based on
+                out-of-sample data.
+            return_sites: Names of variables (sites) to return. If ``None``, samples
+                ``self.param_output`` and deterministic sites.
+            return_datatree: If ``True``, return a
                 :external:py:class:`~xarray.DataTree`; otherwise return a
                 :py:class:`dict`.
-            **kwargs (object): Additional arguments passed to the model. All array-like
-                values are expected to be JAX arrays.
+            **kwargs: Additional arguments passed to the model. All array-like values
+                are expected to be JAX arrays.
 
         Returns:
             Posterior predictive samples. Posterior samples are included if available.
@@ -1136,33 +1116,32 @@ class ImpactModel(BaseModel):
                 ``(n_samples, n_features)`` or a data loader that holds all array-like
                 objects and handles batching internally; if a data loader is passed,
                 ``batch_size`` is ignored.
-            intervention (dict | None, optional): A dictionary mapping sample sites to
-                their corresponding intervention values. Interventions enable
-                counterfactual analysis by modifying the specified sample sites during
-                prediction (posterior predictive sampling).
-            rng_key (ArrayLike | None, optional): A pseudo-random number generator key.
-                By default, an internal key is used and split as needed.
-            in_sample (bool, optional): Specifies the group where posterior predictive
-                samples are stored in the returned output. If ``True``, samples are
-                stored in the ``posterior_predictive`` group, indicating they were
-                generated based on data used during model fitting. If ``False``, samples
-                are stored in the ``predictions`` group, indicating they were generated
-                based on out-of-sample data.
-            return_sites (tuple[str] | None, optional): Names of variables (sites) to
-                return. If ``None``, samples ``self.param_output`` and deterministic
-                sites.
-            batch_size (int | None, optional): The batch size for data loading during
-                posterior predictive sampling. It also determines the chunk size used to
-                store the samples. If ``None``, it is determined automatically based on
-                the input data and number of samples.
-            output_dir (str | Path | None, optional): The directory where the outputs
-                will be saved. If the specified directory does not exist, it will be
-                created automatically. If ``None``, a default temporary directory will
-                be created. A timestamped subdirectory will be generated within this
-                directory to store the outputs. Outputs are saved in the Zarr format.
-            progress (bool, optional): Whether to display a progress bar.
-            **kwargs (object): Additional arguments passed to the model. All array-like
-                values are expected to be JAX arrays.
+            intervention: A dictionary mapping sample sites to their corresponding
+                intervention values. Interventions enable counterfactual analysis by
+                modifying the specified sample sites during prediction (posterior
+                predictive sampling).
+            rng_key (ArrayLike | None): A pseudo-random number generator key. By
+                default, an internal key is used and split as needed.
+            in_sample: Specifies the group where posterior predictive samples are stored
+                in the returned output. If ``True``, samples are stored in the
+                ``posterior_predictive`` group, indicating they were generated based on
+                data used during model fitting. If ``False``, samples are stored in the
+                ``predictions`` group, indicating they were generated based on
+                out-of-sample data.
+            return_sites: Names of variables (sites) to return. If ``None``, samples
+                ``self.param_output`` and deterministic sites.
+            batch_size: The batch size for data loading during posterior predictive
+                sampling. It also determines the chunk size used to store the samples.
+                If ``None``, it is determined automatically based on the input data
+                and number of samples.
+            output_dir: The directory where the outputs will be saved. If the specified
+                directory does not exist, it will be created automatically. If ``None``,
+                a default temporary directory will be created. A timestamped
+                subdirectory will be generated within this directory to store the
+                outputs. Outputs are saved in the Zarr format.
+            progress: Whether to display a progress bar.
+            **kwargs: Additional arguments passed to the model. All array-like values
+                are expected to be JAX arrays.
 
         Returns:
             Posterior predictive samples. Posterior samples are included if available.
@@ -1295,17 +1274,14 @@ class ImpactModel(BaseModel):
         """Estimate the effect of an intervention.
 
         Args:
-            output_baseline (xr.DataTree | None, optional): Precomputed output for the
-                baseline scenario.
-            output_intervention (xr.DataTree | None, optional): Precomputed output for
-                the intervention scenario.
-            args_baseline (dict | None, optional): Input arguments for the baseline
-                scenario. Passed to the :py:meth:`~aimz.ImpactModel.predict` to compute
-                predictions if ``output_baseline`` is not provided. Ignored if
-                ``output_baseline`` is already given.
-            args_intervention (dict | None, optional): Input arguments for the
-                intervention scenario. Passed to the
+            output_baseline: Precomputed output for the baseline scenario.
+            output_intervention: Precomputed output for the intervention scenario.
+            args_baseline: Input arguments for the baseline scenario. Passed to the
                 :py:meth:`~aimz.ImpactModel.predict` to compute predictions if
+                ``output_baseline`` is not provided. Ignored if ``output_baseline`` is
+                already given.
+            args_intervention: Input arguments for the intervention scenario. Passed to
+                the :py:meth:`~aimz.ImpactModel.predict` to compute predictions if
                 ``output_intervention`` is not provided. Ignored if
                 ``output_intervention`` is already given.
 
@@ -1370,18 +1346,18 @@ class ImpactModel(BaseModel):
                 ``batch_size`` is ignored.
             y (ArrayLike | None): Output data with shape ``(n_samples_Y,)``. Must be
                 ``None`` if ``X`` is a data loader.
-            batch_size (int | None, optional): The batch size for data loading during
-                log-likelihood computation. It also determines the chunk size used to
-                store the samples. If ``None``, it is determined automatically based on
-                the input data and number of samples.
-            output_dir (str | Path | None, optional): The directory where the outputs
-                will be saved. If the specified directory does not exist, it will be
-                created automatically. If ``None``, a default temporary directory will
-                be created. A timestamped subdirectory will be generated within this
-                directory to store the outputs. Outputs are saved in the Zarr format.
-            progress (bool, optional): Whether to display a progress bar.
-            **kwargs (object): Additional arguments passed to the model. All array-like
-                values are expected to be JAX arrays.
+            batch_size: The batch size for data loading during log-likelihood
+                computation. It also determines the chunk size used to store the
+                samples. If ``None``, it is determined automatically based on the input
+                data and number of samples.
+            output_dir: The directory where the outputs will be saved. If the specified
+                directory does not exist, it will be created automatically. If ``None``,
+                a default temporary directory will be created. A timestamped
+                subdirectory will be generated within this directory to store the
+                outputs. Outputs are saved in the Zarr format.
+            progress: Whether to display a progress bar.
+            **kwargs: Additional arguments passed to the model. All array-like values
+                are expected to be JAX arrays.
 
         Returns:
             Log-likelihood values. Posterior samples are included if available.
@@ -1538,19 +1514,19 @@ class ImpactModel(BaseModel):
         the provided ``samples``, and writes the resulting arrays to a Zarr group.
 
         Args:
-            num_samples (int): Number of samples to draw.
-            rng_key (ArrayLike): Pseudo-random number generator key.
-            return_sites (tuple[str]): Names of variables (sites) to return.
-            output_dir (Path): Directory where outputs will be saved.
-            kernel (Callable): Probabilistic model with NumPyro primitives.
-            sampler (Callable): Function performing predictive sampling; must accept
-                the same signature as this function.
-            samples (dict[str, Array]): Arrays to condition predictions on.
-            dataloader (ArrayLoader): Iterator over batches of input data. Each batch
-                must be a tuple containing a dictionary of arrays and a padding value.
-            pbar (tqdm): Progress bar instance to display sampling progress.
-            **kwargs (object): Additional arguments passed to the model. All array-like
-                values are expected to be JAX arrays.
+            num_samples: Number of samples to draw.
+            rng_key: Pseudo-random number generator key.
+            return_sites: Names of variables (sites) to return.
+            output_dir: Directory where outputs will be saved.
+            kernel: Probabilistic model with NumPyro primitives.
+            sampler: Function performing predictive sampling; must accept the same
+                signature as this function.
+            samples: Arrays to condition predictions on.
+            dataloader: Iterator over batches of input data. Each batch must be a tuple
+                containing a dictionary of arrays and a padding value.
+            pbar: Progress bar instance to display sampling progress.
+            **kwargs: Additional arguments passed to the model. All array-like values
+                are expected to be JAX arrays.
 
         Raises:
             Exception: Any exception raised during sampling or writing is logged, the

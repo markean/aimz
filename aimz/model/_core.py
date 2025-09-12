@@ -39,11 +39,10 @@ class BaseModel(ABC):
         """Initialize the BaseModel with a callable model.
 
         Args:
-            kernel (Callable): A probabilistic model with NumPyro primitives.
-            param_input (str, optional): Name of the parameter in the ``kernel`` for the
-                main input data.
-            param_output (str, optional): Name of the parameter in the ``kernel`` for
-                the output data.
+            kernel: A probabilistic model with NumPyro primitives.
+            param_input: Name of the parameter in the ``kernel`` for the main input
+                data.
+            param_output: Name of the parameter in the ``kernel`` for the output data.
         """
         self._kernel = kernel
         self._param_input = param_input
