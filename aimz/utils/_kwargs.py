@@ -24,11 +24,11 @@ def _group_kwargs(kwargs: dict) -> tuple[NamedTuple, NamedTuple]:
     """Separate keyword arguments into array-like and non-array-like groups.
 
     Args:
-        kwargs (dict): A dictionary of keyword arguments where values could be
-            array-like or non-array-like.
+        kwargs: A dictionary of keyword arguments where values could be array-like or
+            non-array-like.
 
     Returns:
-        tuple[KwargsArray, KwargsExtra]: A tuple containing two ``NamedTuple`` objects:
+        A tuple containing two ``NamedTuple`` objects:
             - kwargs_array (KwargsArray): Contains the array-like arguments.
             - kwargs_extra (KwargsExtra): Contains the non-array-like arguments.
     """

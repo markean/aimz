@@ -39,8 +39,7 @@ def _create_output_subdir(output_dir: str | Path) -> Path:
     specified output directory with a timestamp.
 
     Args:
-        output_dir (str | Path): The directory where the output subdirectory will be
-            created.
+        output_dir: The directory where the output subdirectory will be created.
 
     Returns:
         Path: The path to the created output subdirectory.
@@ -64,10 +63,10 @@ def _writer(site: str, queue: Queue, group_path: Path, error_queue: Queue) -> No
     details are put into the ``error_queue``.
 
     Args:
-        site (str): The name of the sample site.
-        queue (Queue): The queue to retrieve posterior predictive samples from.
-        group_path (Path): The path to the Zarr group where data will be written.
-        error_queue (Queue): The queue to collect errors raised by the writer thread.
+        site: The name of the sample site.
+        queue: The queue to retrieve posterior predictive samples from.
+        group_path: The path to the Zarr group where data will be written.
+        error_queue: The queue to collect errors raised by the writer thread.
     """
     group = open_group(group_path, mode="r+")
 
@@ -105,14 +104,14 @@ def _start_writer_threads(
     """Start writer threads and their corresponding queues for each site.
 
     Args:
-        sites (tuple[str]): Names of the return sites.
-        group_path (Path): The path to the Zarr group where data will be written.
-        writer (Callable): The function that processes queued data and writes to Zarr.
-        queue_size (int): Maximum size of each queue (per site).
+        sites: Names of the return sites.
+        group_path: The path to the Zarr group where data will be written.
+        writer: The function that processes queued data and writes to Zarr.
+        queue_size: Maximum size of each queue (per site).
 
     Returns:
-        tuple[list[Thread], dict[str, Queue]]: A tuple containing a list of threads and
-            a dictionary mapping each site to its corresponding queue.
+        A tuple containing a list of threads and a dictionary mapping each site to its
+        corresponding queue.
     """
     queues: dict[str, Queue] = {site: Queue(queue_size) for site in sites}
     threads = []
@@ -132,9 +131,9 @@ def _shutdown_writer_threads(
     """Signal writer threads to stop and wait for their completion.
 
     Args:
-        threads (list[Thread]): List of writer threads to join.
-        queues (dict[str, Queue]): Mapping of site names to their respective queues.
-        error_queue (Queue): Queue to collect errors raised by writer threads.
+        threads: List of writer threads to join.
+        queues: Mapping of site names to their respective queues.
+        error_queue: Queue to collect errors raised by writer threads.
     """
     for queue in queues.values():
         queue.put(None)

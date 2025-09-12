@@ -26,7 +26,7 @@ def _make_attrs() -> dict[str, str]:
     """Generate metadata attributes for the aimz library.
 
     Returns:
-        dict[str, str]: Attributes including creation timestamp and library version.
+        Attributes including creation timestamp and library version.
     """
     return {
         "created_at": datetime.datetime.now(datetime.UTC).isoformat(),
@@ -43,9 +43,9 @@ def _dict_to_datatree(data: dict[str, Array]) -> xr.DataTree:
     pattern ``<variable>_dim_<N>``.
 
     Args:
-        data (dict[str, Array]): Dictionary mapping variable names to arrays. Each array
-        should have shape ``(num_samples, dim_0, dim_1, ...)`` where the first dimension
-        represents samples or draws.
+        data: A dictionary mapping variable names to arrays. Each array should have
+            shape ``(num_samples, dim_0, dim_1, ...)`` where the first dimension
+            represents samples or draws.
 
     Returns:
         All variables with added ``chain`` and ``draw`` dimensions, along with

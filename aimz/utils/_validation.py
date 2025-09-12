@@ -59,11 +59,11 @@ def _validate_group(dt_baseline: "xr.DataTree", dt_intervention: "xr.DataTree") 
     """Validate the groups in ``dt_baseline`` and ``dt_intervention``.
 
     Args:
-        dt_baseline (xr.DataTree): Precomputed output for the baseline scenario.
-        dt_intervention (xr.DataTree): Precomputed output for the intervention scenario.
+        dt_baseline: Precomputed output for the baseline scenario.
+        dt_intervention: Precomputed output for the intervention scenario.
 
     Returns:
-        str: The group name (``predictions`` or ``posterior_predictive``).
+        The group name (``predictions`` or ``posterior_predictive``).
 
     Raises:
         ValueError: If the group is not found in ``dt_intervention``.
@@ -93,11 +93,9 @@ def _validate_kernel_signature(
     """Validate the signature of a kernel function.
 
     Args:
-        kernel (Callable): The kernel function to validate.
-        param_input (str): Name of the parameter in ``kernel`` corresponding to the
-            input.
-        param_output (str): Name of the parameter in ``kernel`` corresponding to the
-            output.
+        kernel: The kernel function to validate.
+        param_input: Name of the parameter in ``kernel`` corresponding to the input.
+        param_output: Name of the parameter in ``kernel`` corresponding to the output.
 
     Raises:
         KernelValidationError: If the kernel signature does not meet the required
@@ -140,10 +138,9 @@ def _validate_kernel_body(
     """Validate the body of a kernel function.
 
     Args:
-        kernel (Callable): The kernel function to validate.
-        param_output (str): Name of the parameter in ``kernel`` corresponding to the
-            output.
-        model_trace (OrderedDict[str, dict]): The model trace containing the sites.
+        kernel: The kernel function to validate.
+        param_output: Name of the parameter in ``kernel`` corresponding to the output.
+        model_trace: The model trace containing the sites.
 
     Raises:
         KernelValidationError: If the kernel body does not meet the required
