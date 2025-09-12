@@ -31,14 +31,14 @@ class TestArrayDataset:
 
     def test_empty_array(self) -> None:
         """Initializing with no arrays raises a ValueError."""
-        with pytest.raises(ValueError, match="At least one array must be provided."):
+        with pytest.raises(ValueError, match=r"At least one array must be provided."):
             ArrayDataset()
 
     def test_same_lengths(self) -> None:
         """All arrays must have the same length; otherwise, raise a ValueError."""
         X = jnp.array([[1, 2, 3], [4, 5, 6]])
         y = jnp.array([1, 2, 3])
-        with pytest.raises(ValueError, match="All arrays must have the same length."):
+        with pytest.raises(ValueError, match=r"All arrays must have the same length."):
             ArrayDataset(X=X, y=y)
 
     def test_no_jax_conversion(self) -> None:
@@ -85,7 +85,7 @@ class TestArrayLoader:
         loader = ArrayLoader(dataset, rng_key=random.key(42))
         with pytest.raises(
             ValueError,
-            match="Padding 1D arrays is only supported along axis 0.",
+            match=r"Padding 1D arrays is only supported along axis 0.",
         ):
             loader.pad_array(y, n_pad=1, axis=1)
 
