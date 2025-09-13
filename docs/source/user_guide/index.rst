@@ -6,4 +6,5 @@ User Guide
 
    sampling
    model_persistence
+   mlflow
    mcmc
