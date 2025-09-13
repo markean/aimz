@@ -17,7 +17,7 @@
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import dill
+import cloudpickle
 import pytest
 from conftest import lm
 from jax import random
@@ -40,11 +40,11 @@ def test_save_load(
     im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
     im.fit(X=X, y=y, batch_size=3)
 
-    p = tmp_path / "model.dill"
+    p = tmp_path / "model.pkl"
     with Path.open(p, "wb") as f:
-        dill.dump(im, f)
+        cloudpickle.dump(im, f)
     del im  # Simulate reloading from scratch
     with Path.open(p, "rb") as f:
-        im = dill.load(f)
+        im = cloudpickle.load(f)
 
     assert isinstance(im, ImpactModel)

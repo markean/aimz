@@ -95,8 +95,8 @@ Before training the model, we draw prior predictive samples and visualize the pr
 Posterior Sampling
 ------------------
 
-We first train the model using variational inference, drawing only a single posterior sample for demonstration purposes. 
-After fitting, we call :py:meth:`~aimz.ImpactModel.sample` to generate 100 posterior samples for further analysis. 
+We first train the model using variational inference, drawing only a single posterior sample for demonstration purposes.
+After fitting, we call :py:meth:`~aimz.ImpactModel.sample` to generate 100 posterior samples for further analysis.
 Setting ``return_datatree=False`` ensures that the results are returned as a dictionary rather than an :external:py:class:`xarray.DataTree`.
 
 .. jupyter-execute::
