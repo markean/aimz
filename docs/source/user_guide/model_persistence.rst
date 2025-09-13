@@ -8,8 +8,14 @@ Model Persistence
 \
 
 Model persistence allows you to save a trained model to disk and reload it later for inference or continued training.
-This documentation shows how to serialize and deserialize an :py:class:`~aimz.ImpactModel` instance using the `dill <https://pypi.org/project/dill/>`__ package.
-``dill`` can handle a wider range of Python objects than the standard ``pickle`` module, including closures and local functions, making it convenient to use and reducing boilerplate code.
+This documentation shows how to serialize and deserialize an :py:class:`~aimz.ImpactModel` instance using `cloudpickle <https://pypi.org/project/cloudpickle/>`__, which extends the standard ``pickle`` module to handle a wide range of Python objects, including closures and local functions.
+An alternative is `dill <https://pypi.org/project/dill/>`__, which offers similar functionality.
+
+.. note::
+
+   For MLflow users, see the :doc:`mlflow` page for details on saving and loading
+   models with MLflow.
+
 
 Model Training
 --------------
@@ -19,7 +25,7 @@ Model Training
 
     from pathlib import Path
 
-    import dill
+    import cloudpickle
     import jax.numpy as jnp
     import numpyro.distributions as dist
     from jax import random
@@ -68,8 +74,8 @@ Save a trained :py:class:`~aimz.ImpactModel` (and optionally its input data) to 
 
 .. jupyter-execute::
 
-    with Path.open("train.dill", "wb") as f:
-        dill.dump((im, X, y), f)
+    with Path.open("model.pkl", "wb") as f:
+        cloudpickle.dump((im, X, y), f)
 
 Deserialization
 ---------------
@@ -83,13 +89,13 @@ Any JAX array—whether part of the :py:class:`~aimz.ImpactModel` or the input d
 
     from pathlib import Path
 
-    import dill
+    import cloudpickle
     import jax.numpy as jnp
     import numpyro.distributions as dist
     from numpyro import sample
 
-    with Path.open("train.dill", "rb") as f:
-        im, X, y = dill.load(f)
+    with Path.open("model.pkl", "rb") as f:
+        im, X, y = cloudpickle.load(f)
 
 Model Usage
 -----------

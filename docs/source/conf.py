@@ -56,7 +56,7 @@ extensions = [
     "sphinx_design",
 ]
 templates_path = ["_templates"]
-exclude_patterns = ["**.dill", "**.ipynb_checkpoints"]
+exclude_patterns = ["**.pkl", "**.ipynb_checkpoints"]
 autodoc_typehints = "description"
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
