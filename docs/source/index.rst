@@ -19,6 +19,7 @@ Features
 - Scalable computation via parallelism and distributed data processing—no manual orchestration required.
 - Variational inference as the primary inference engine, supporting custom optimization strategies and results.
 - Support for interventional causal inference for modeling counterfactuals and causal relations.
+- MLflow integration for experiment tracking and model management.
 
 Workflow
 --------
