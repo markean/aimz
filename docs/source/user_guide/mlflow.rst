@@ -63,11 +63,11 @@ Artifacts
     def model(X, y=None):
         ...
 * Contents inside the MLflow Model artifact:
-  
+
   - Pickled model (requires ``cloudpickle``; logged if ``log_models=True``)
   - Conda / requirements / Python environment descriptors (for reproducibility)
   - Optional input example and signature (if ``log_input_examples`` or ``log_model_signatures`` are enabled and ``log_models=True``), where:
-    
+
     + An input example is created from the first few rows of the data passed to :meth:`~aimz.ImpactModel.fit`.
     + If the first positional argument (``X``) is an :class:`~aimz.utils.data.ArrayLoader`, the example is built from its underlying arrays except for the output variable.
     + A signature is inferred with :func:`mlflow.models.infer_signature` using a short forward pass through :meth:`~aimz.ImpactModel.predict`.
@@ -133,7 +133,7 @@ Logging directly to an active MLflow run:
 
 PyFunc Interface
 ----------------
-Models saved or logged with aimz.mlflow can be loaded as generic MLflow PyFunc models. 
+Models saved or logged with aimz.mlflow can be loaded as generic MLflow PyFunc models.
 You can use :func:`mlflow.pyfunc.load_model` to load them and call ``predict`` in a standard way.
 
 .. code-block:: python
@@ -155,7 +155,7 @@ Under the hood the pyfunc wrapper delegates to :meth:`~aimz.ImpactModel.predict`
 
 Environment & Dependencies
 --------------------------
-When saving a model with aimz.mlflow, both a Conda environment (``conda.yaml``) and a ``python_env.yaml`` are exported, along with pinned requirements. 
+When saving a model with aimz.mlflow, both a Conda environment (``conda.yaml``) and a ``python_env.yaml`` are exported, along with pinned requirements.
 Helper functions:
 
 * :func:`~aimz.mlflow.get_default_pip_requirements`
