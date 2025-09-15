@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aimz"
-version = "0.6.0"
+version = "0.6.1.dev0"
 description = "Scalable probabilistic impact modeling"
 readme = "README.md"
 license = "Apache-2.0"
@@ -49,7 +49,7 @@ docs = [
 
 [project.urls]
 source = "https://github.com/markean/aimz"
-documentation = "https://markean.github.io/aimz/"
+documentation = "https://aimz.readthedocs.io/"
 
 [tool.coverage.run]
 omit = ["aimz/mlflow/*"]
@@ -95,7 +95,6 @@ per-file-ignores = { "aimz/model/_core.py" = [
     "D107",   # undocumented-public-init
     "D417",   # undocumented-param
     "S101",   # assert
-    "S301",   # suspicious-pickle-usage
     "F811",   # redefined-while-unused
 ] }
 pydocstyle = { convention = "google" }

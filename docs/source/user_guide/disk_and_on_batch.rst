@@ -20,7 +20,7 @@ Why Disk-Backed by Default
 --------------------------
 The non-``*_on_batch`` methods default to a disk-backed (chunked) execution model for several reasons:
 
-* Posterior predictive and prior predictive tensors can scale as ``(#samples x #dims x #posterior_samples x ...)``. 
+* Posterior predictive and prior predictive tensors can scale as ``(#samples x #dims x #posterior_samples x ...)``.
   Even moderate increases in any axis (time, spatial units, parameter samples) can exceed host or accelerator RAM.
 * Using ``batch_size`` with chunked iteration limits peak memory and prevents out-of-memory errors.
 * Persisted Zarr arrays with metadata (coords, dims, attrs) create an artifact you can reopen without rerunning inference.
@@ -31,7 +31,7 @@ The non-``*_on_batch`` methods default to a disk-backed (chunked) execution mode
 
 Comparison
 ----------
-Disk-backed variants target larger datasets, enable chunked processing, multi-device parallelism, and stable artifact generation. 
+Disk-backed variants target larger datasets, enable chunked processing, multi-device parallelism, and stable artifact generation.
 These methods build internal data loaders, iterate in chunks, and decouple sampling from file I/O, enabling concurrent execution.
 Outputs consolidate into a single :external:py:class:`xarray.DataTree` backed by Zarr files for post-hoc analysis.
 On-batch variants, in contrast, favor minimal overhead, immediate return, and greater flexibility when posterior sample shapes are not shard-friendly.
@@ -41,10 +41,10 @@ Feature Summary
 ============================= ==================================== =======================================================
 Feature                       Disk-backed (default)                On-batch (``*_on_batch``)
 ============================= ==================================== =======================================================
-Typical dataset size          Medium → large                       Small → moderate             
+Typical dataset size          Medium → large                       Small → moderate
 Supported use cases           Standard models                      Broader model support
-Peak memory usage             Chunk-bounded                        Full batch resident                                    
-Writes to disk                Yes                                  No                                                      
+Peak memory usage             Chunk-bounded                        Full batch resident
+Writes to disk                Yes                                  No
 Return type                   :external:py:class:`xarray.DataTree` :external:py:class:`xarray.DataTree` or :py:class:`dict`
                                                                    (via ``return_datatree=False``)
 Custom batch sizing           Yes (``batch_size``)                 No (single pass)
@@ -88,7 +88,7 @@ Quick Recommendations
 Example: :meth:`~aimz.ImpactModel.predict` with Fallback Warning
 ----------------------------------------------------------------
 
-A common scenario for the fallback warning occurs when the model contains **local latent variables**, which can make posterior sample shapes incompatible with shard-based parallel execution. 
+A common scenario for the fallback warning occurs when the model contains **local latent variables**, which can make posterior sample shapes incompatible with shard-based parallel execution.
 The example below illustrates this case.
 
 .. jupyter-execute::
@@ -127,7 +127,7 @@ The example below illustrates this case.
             optim=optim.Adam(step_size=1e-3),
             loss=Trace_ELBO(),
         ),
-    # This internally calls the `.run()` method of `SVI`  
+    # This internally calls the `.run()` method of `SVI`
     ).fit_on_batch(X, y)
 
 .. jupyter-execute::

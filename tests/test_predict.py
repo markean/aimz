@@ -145,11 +145,11 @@ def test_predict_after_cleanup(
     )
     with pytest.warns(UserWarning, match=msg):
         im.predict(X=X, batch_size=len(X) // 2, progress=False)
-    temp_dir_before = im.temp_dir.name
+    temp_dir_before = im.temp_dir
     im.cleanup()
     with pytest.warns(UserWarning, match=msg):
         im.predict(X=X, batch_size=len(X) // 2, progress=False)
-    temp_dir_after = im.temp_dir.name
+    temp_dir_after = im.temp_dir
 
     assert temp_dir_before != temp_dir_after
 

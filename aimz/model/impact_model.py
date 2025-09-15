@@ -14,6 +14,7 @@
 
 """Impact model."""
 
+import contextlib
 import logging
 from collections.abc import Callable
 from inspect import signature
@@ -135,6 +136,7 @@ class ImpactModel(BaseModel):
         else:
             self._mesh = None
             self._device = None
+        self._temp_dir: TemporaryDirectory | None = None
         logger.info(
             "Backend: %s, Devices: %d",
             default_backend(),
@@ -143,7 +145,8 @@ class ImpactModel(BaseModel):
 
     def __del__(self) -> None:
         """Clean up the temporary directory when the instance is deleted."""
-        self.cleanup()
+        with contextlib.suppress(AttributeError):
+            self.cleanup()
         # Call the parent's __del__ method only if it exists and is callable
         super_del = getattr(super(), "__del__", None)
         if callable(super_del):
@@ -195,7 +198,7 @@ class ImpactModel(BaseModel):
 
     @property
     def vi_result(self) -> SVIRunResult | None:
-        """Variational inference result.
+        """Variational inference result, or ``None`` if not set.
 
         :setter: This sets :external:py:data:`numpyro.infer.svi.SVIRunResult` and marks
             the model as fitted. It does not perform posterior sampling — use
@@ -224,8 +227,13 @@ class ImpactModel(BaseModel):
 
     @property
     def posterior(self) -> dict[str, Array] | None:
-        """Posterior samples by variable name."""
+        """Posterior samples by variable name, or ``None`` if not set."""
         return self._posterior
+
+    @property
+    def temp_dir(self) -> str | None:
+        """Temporary directory path, or ``None`` if not set."""
+        return self._temp_dir.name if self._temp_dir else None
 
     def sample_prior_predictive_on_batch(
         self,
@@ -387,17 +395,16 @@ class ImpactModel(BaseModel):
             )
 
         if output_dir is None:
-            if not hasattr(self, "temp_dir"):
-                self.temp_dir = TemporaryDirectory()
-                logger.info(
-                    "Temporary directory created at: %s",
-                    self.temp_dir.name,
-                )
-            output_dir = self.temp_dir.name
+            if self._temp_dir is None:
+                self._temp_dir = TemporaryDirectory()
+                logger.info("Temporary directory created at: %s", self._temp_dir.name)
+            output_dir = self._temp_dir.name
             logger.info(
                 "No output directory provided. Using the model's temporary directory "
                 "for storing output.",
             )
+        output_dir = Path(output_dir).expanduser().resolve()
+        output_dir.mkdir(parents=True, exist_ok=True)
         output_subdir = _create_output_subdir(output_dir)
 
         dataloader, _ = _setup_inputs(
@@ -439,6 +446,8 @@ class ImpactModel(BaseModel):
         ).assign_attrs(_make_attrs())
         out = xr.DataTree(name="root")
         out["prior_predictive"] = xr.DataTree(ds)
+        out["prior_predictive"].attrs["output_dir"] = str(output_subdir)
+        out.attrs["output_dir"] = str(output_dir)
 
         return out
 
@@ -1208,17 +1217,16 @@ class ImpactModel(BaseModel):
             )
 
         if output_dir is None:
-            if not hasattr(self, "temp_dir"):
-                self.temp_dir = TemporaryDirectory()
-                logger.info(
-                    "Temporary directory created at: %s",
-                    self.temp_dir.name,
-                )
-            output_dir = self.temp_dir.name
+            if self._temp_dir is None:
+                self._temp_dir = TemporaryDirectory()
+                logger.info("Temporary directory created at: %s", self._temp_dir.name)
+            output_dir = self._temp_dir.name
             logger.info(
                 "No output directory provided. Using the model's temporary directory "
                 "for storing output.",
             )
+        output_dir = Path(output_dir).expanduser().resolve()
+        output_dir.mkdir(parents=True, exist_ok=True)
         output_subdir = _create_output_subdir(output_dir)
 
         dataloader, _ = _setup_inputs(
@@ -1260,7 +1268,10 @@ class ImpactModel(BaseModel):
         ).assign_attrs(_make_attrs())
         out = xr.DataTree(name="root")
         out["posterior"] = self._dt_posterior
-        out["posterior_predictive" if in_sample else "predictions"] = xr.DataTree(ds)
+        group = "posterior_predictive" if in_sample else "predictions"
+        out[group] = xr.DataTree(ds)
+        out[group].attrs["output_dir"] = str(output_subdir)
+        out.attrs["output_dir"] = str(output_dir)
 
         return out
 
@@ -1377,17 +1388,16 @@ class ImpactModel(BaseModel):
             )
 
         if output_dir is None:
-            if not hasattr(self, "temp_dir"):
-                self.temp_dir = TemporaryDirectory()
-                logger.info(
-                    "Temporary directory created at: %s",
-                    self.temp_dir.name,
-                )
-            output_dir = self.temp_dir.name
+            if self._temp_dir is None:
+                self._temp_dir = TemporaryDirectory()
+                logger.info("Temporary directory created at: %s", self._temp_dir.name)
+            output_dir = self._temp_dir.name
             logger.info(
                 "No output directory provided. Using the model's temporary directory "
                 "for storing output.",
             )
+        output_dir = Path(output_dir).expanduser().resolve()
+        output_dir.mkdir(parents=True, exist_ok=True)
         output_subdir = _create_output_subdir(output_dir)
 
         dataloader, _ = _setup_inputs(
@@ -1477,6 +1487,8 @@ class ImpactModel(BaseModel):
         out = xr.DataTree(name="root")
         out["posterior"] = self._dt_posterior
         out["log_likelihood"] = xr.DataTree(ds)
+        out["log_likelihood"].attrs["output_dir"] = str(output_subdir)
+        out.attrs["output_dir"] = str(output_dir)
 
         return out
 
@@ -1489,10 +1501,10 @@ class ImpactModel(BaseModel):
         during garbage collection, this behavior is not guaranteed. Therefore, calling
         this method explicitly is recommended to ensure timely resource release.
         """
-        if hasattr(self, "temp_dir"):
-            logger.info("Temporary directory cleaned up at: %s", self.temp_dir.name)
-            self.temp_dir.cleanup()
-            del self.temp_dir
+        if hasattr(self, "_temp_dir") and self._temp_dir is not None:
+            logger.info("Temporary directory cleaned up at: %s", self._temp_dir.name)
+            self._temp_dir.cleanup()
+            self._temp_dir = None
 
     def _sample_and_write(
         self,
