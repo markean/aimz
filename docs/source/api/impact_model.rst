@@ -21,6 +21,7 @@ Attributes
    ImpactModel.param_output
    ImpactModel.vi_result
    ImpactModel.posterior
+   ImpactModel.temp_dir
 
 
 Inference

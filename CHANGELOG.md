@@ -5,17 +5,23 @@ All notable changes to this project will be documented in this file and are best
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+`output_dir` attribute to the root and group nodes of {class}`xarray.DataTree` objects returned by {meth}`~aimz.ImpactModel.sample_prior_predictive`, {meth}`~aimz.ImpactModel.predict`, and {meth}`~aimz.ImpactModel.log_likelihood`, specifying the directory where results are saved ([#85](https://github.com/markean/aimz/issues/85)).
+
 ## [v0.6.0](https://github.com/markean/aimz/releases/tag/v0.6.0) - 2025-09-14
 
 ### Added
 
-- {meth}`~aimz.ImpactModel.sample_prior_predictive_on_batch`, {meth}`~aimz.ImpactModel.sample`, {meth}`~aimz.ImpactModel.sample_posterior_predictive_on_batch`, and {meth}`~aimz.ImpactModel.predict_on_batch` methods in {class}`~aimz.ImpactModel` now support a `return_datatree` parameter. When set to ``True`` (by default), results are returned as an {class}`xarray.DataTree`; otherwise, a ``dict`` is returned ([#74](https://github.com/markean/aimz/issues/74)).
+- {meth}`~aimz.ImpactModel.sample_prior_predictive_on_batch`, {meth}`~aimz.ImpactModel.sample`, {meth}`~aimz.ImpactModel.sample_posterior_predictive_on_batch`, and {meth}`~aimz.ImpactModel.predict_on_batch` methods in {class}`~aimz.ImpactModel` now support a `return_datatree` parameter. When set to `True` (by default), results are returned as an {class}`xarray.DataTree`; otherwise, a `dict` is returned ([#74](https://github.com/markean/aimz/issues/74)).
 
 ### Changed
 
 - Methods in {class}`~aimz.ImpactModel` now automatically determine the `batch_size` if it is not provided, based on the input data and number of samples ([#70](https://github.com/markean/aimz/issues/70)).
 
-- {meth}`~aimz.ImpactModel.sample_posterior_predictive_on_batch` and {meth}`~aimz.ImpactModel.sample_posterior_predictive` no longer accept the ``in_sample`` argument. Results are now always written to the ``posterior_predictive`` group.
+- {meth}`~aimz.ImpactModel.sample_posterior_predictive_on_batch` and {meth}`~aimz.ImpactModel.sample_posterior_predictive` no longer accept the `in_sample` argument. Results are now always written to the `posterior_predictive` group.
 
 ### Removed
 
@@ -45,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Enhanced data array validation to preserve device placement for JAX arrays ([#53](https://github.com/markean/aimz/issues/53)).
 - Fixed incompatibility with Zarr when models output arrays in `bfloat16` by automatically promoting them to `float32` before saving ([#57](https://github.com/markean/aimz/issues/57)).
-- Fixed the error message in {meth}`~aimz.ImpactModel.sample_posterior_predictive` when ``self.param_output`` is passed as an argument, which previously incorrectly referenced {meth}`~aimz.ImpactModel.sample_prior_predictive` ([#65](https://github.com/markean/aimz/issues/65)).
+- Fixed the error message in {meth}`~aimz.ImpactModel.sample_posterior_predictive` when `self.param_output` is passed as an argument, which previously incorrectly referenced {meth}`~aimz.ImpactModel.sample_prior_predictive` ([#65](https://github.com/markean/aimz/issues/65)).
 
 ## [v0.4.0](https://github.com/markean/aimz/releases/tag/v0.4.0) - 2025-08-18
 

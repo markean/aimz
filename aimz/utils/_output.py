@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from zarr import Array
 
 
-def _create_output_subdir(output_dir: str | Path) -> Path:
+def _create_output_subdir(output_dir: Path) -> Path:
     """Create a subdirectory for storing output.
 
     This function is called for its side effect: it creates a subdirectory within the
@@ -44,8 +44,6 @@ def _create_output_subdir(output_dir: str | Path) -> Path:
     Returns:
         Path: The path to the created output subdirectory.
     """
-    output_dir = Path(output_dir).resolve()
-    output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     output_subdir = output_dir / timestamp
     output_subdir.mkdir(parents=False, exist_ok=False)
