@@ -9,7 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-`output_dir` attribute to the root and group nodes of {class}`xarray.DataTree` objects returned by {meth}`~aimz.ImpactModel.sample_prior_predictive`, {meth}`~aimz.ImpactModel.predict`, and {meth}`~aimz.ImpactModel.log_likelihood`, specifying the directory where results are saved ([#85](https://github.com/markean/aimz/issues/85)).
+- `output_dir` attribute to the root and group nodes of {class}`xarray.DataTree` objects returned by {meth}`~aimz.ImpactModel.sample_prior_predictive`, {meth}`~aimz.ImpactModel.predict`, and {meth}`~aimz.ImpactModel.log_likelihood`, specifying the directory where results are saved ([#85](https://github.com/markean/aimz/issues/85)).
+
+### Changed
+
+- All `tqdm` progress bars now use `dynamic_ncols=True` to adjust column width dynamically ([#93](https://github.com/markean/aimz/issues/93)).
 
 ## [v0.6.0](https://github.com/markean/aimz/releases/tag/v0.6.0) - 2025-09-14
 

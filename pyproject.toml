@@ -82,8 +82,6 @@ per-file-ignores = { "aimz/model/_core.py" = [
     "INP001", # implicit-namespace-package
     "ARG001", # unused-function-argument
     "S101",   # assert
-    "S301",   # suspicious-pickle-usage
-    "S403",   # suspicious-pickle-import
 ], "*.ipynb" = [
     "ERA001", # commented-out-code
     "T201",   # print
