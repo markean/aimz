@@ -12,10 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Module for handling output directories and files."""
+"""Module for handling output files."""
 
 import logging
-from datetime import UTC, datetime
 from pathlib import Path
 from queue import Queue
 from sys import exc_info
@@ -30,25 +29,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from zarr import Array
-
-
-def _create_output_subdir(output_dir: Path) -> Path:
-    """Create a subdirectory for storing output.
-
-    This function is called for its side effect: it creates a subdirectory within the
-    specified output directory with a timestamp.
-
-    Args:
-        output_dir: The directory where the output subdirectory will be created.
-
-    Returns:
-        Path: The path to the created output subdirectory.
-    """
-    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    output_subdir = output_dir / timestamp
-    output_subdir.mkdir(parents=False, exist_ok=False)
-
-    return output_subdir
 
 
 def _writer(site: str, queue: Queue, group_path: Path, error_queue: Queue) -> None:

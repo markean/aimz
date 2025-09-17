@@ -26,13 +26,14 @@ An explicit ``output_dir`` is **not** deleted by :py:meth:`~aimz.ImpactModel.cle
 
 Cleanup Behavior
 ----------------
-:py:meth:`~aimz.ImpactModel.cleanup` removes only the internally created **temporary** root directory (and all its timestamped subdirectories).
+Removes only the internally created **temporary** root directory, including all its timestamped subdirectories.
+The path of the removed directory is logged for reference.
 If no temporary directory exists, or if it has already been removed, the method is a no-op.
 
 Additional guarantees:
 
 * Safe to call multiple times; subsequent calls do nothing.
-* Explicitly provided output_dir values are never deleted.
+* Explicitly provided ``output_dir`` and its subdirectories are never deleted.
 * Internal references are cleared so future implicit calls create a fresh temporary root.
 
 

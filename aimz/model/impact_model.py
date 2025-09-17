@@ -17,6 +17,7 @@
 import contextlib
 import logging
 from collections.abc import Callable
+from datetime import UTC, datetime
 from inspect import signature
 from os import cpu_count
 from pathlib import Path
@@ -53,7 +54,7 @@ from aimz.sampling._forward import _sample_forward
 from aimz.utils._format import _dict_to_datatree, _make_attrs
 from aimz.utils._kwargs import _group_kwargs
 from aimz.utils._output import (
-    _create_output_subdir,
+    # _create_output_subdir,
     _shutdown_writer_threads,
     _start_writer_threads,
     _writer,
@@ -394,18 +395,7 @@ class ImpactModel(BaseModel):
                 len(kwargs_extra),
             )
 
-        if output_dir is None:
-            if self._temp_dir is None:
-                self._temp_dir = TemporaryDirectory()
-                logger.info("Temporary directory created at: %s", self._temp_dir.name)
-            output_dir = self._temp_dir.name
-            logger.info(
-                "No output directory provided. Using the model's temporary directory "
-                "for storing output.",
-            )
-        output_dir = Path(output_dir).expanduser().resolve()
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_subdir = _create_output_subdir(output_dir)
+        output_subdir = self._create_output_subdir(output_dir)
 
         dataloader, _ = _setup_inputs(
             X=X,
@@ -418,12 +408,6 @@ class ImpactModel(BaseModel):
             **kwargs,
         )
 
-        pbar = tqdm(
-            desc=(f"Prior predictive sampling [{', '.join(return_sites)}]"),
-            total=len(dataloader),
-            disable=not progress,
-        )
-
         self._sample_and_write(
             num_samples,
             rng_key=rng_key,
@@ -433,7 +417,12 @@ class ImpactModel(BaseModel):
             sampler=self._fn_sample_prior_predictive,
             samples=prior_samples,
             dataloader=dataloader,
-            pbar=pbar,
+            pbar=tqdm(
+                desc=(f"Prior predictive sampling [{', '.join(return_sites)}]"),
+                total=len(dataloader),
+                disable=not progress,
+                dynamic_ncols=True,
+            ),
             **kwargs,
         )
 
@@ -898,9 +887,10 @@ class ImpactModel(BaseModel):
             losses_epoch: list[float] = []
             pbar = tqdm(
                 dataloader,
-                total=len(dataloader),
                 desc=f"Epoch {epoch + 1}/{epochs}",
+                total=len(dataloader),
                 disable=not progress,
+                dynamic_ncols=True,
             )
             for batch, _ in pbar:
                 self._vi_state, loss = self.train_on_batch(
@@ -1216,18 +1206,7 @@ class ImpactModel(BaseModel):
                 len(kwargs_extra),
             )
 
-        if output_dir is None:
-            if self._temp_dir is None:
-                self._temp_dir = TemporaryDirectory()
-                logger.info("Temporary directory created at: %s", self._temp_dir.name)
-            output_dir = self._temp_dir.name
-            logger.info(
-                "No output directory provided. Using the model's temporary directory "
-                "for storing output.",
-            )
-        output_dir = Path(output_dir).expanduser().resolve()
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_subdir = _create_output_subdir(output_dir)
+        output_subdir = self._create_output_subdir(output_dir)
 
         dataloader, _ = _setup_inputs(
             X=X,
@@ -1240,12 +1219,6 @@ class ImpactModel(BaseModel):
             **kwargs,
         )
 
-        pbar = tqdm(
-            desc=(f"Posterior predictive sampling [{', '.join(return_sites)}]"),
-            total=len(dataloader),
-            disable=not progress,
-        )
-
         self._sample_and_write(
             num_samples=self._num_samples,
             rng_key=rng_key,
@@ -1255,7 +1228,12 @@ class ImpactModel(BaseModel):
             sampler=self._fn_sample_posterior_predictive,
             samples=cast("dict[str, Array]", self._posterior),
             dataloader=dataloader,
-            pbar=pbar,
+            pbar=tqdm(
+                desc=(f"Posterior predictive sampling [{', '.join(return_sites)}]"),
+                total=len(dataloader),
+                disable=not progress,
+                dynamic_ncols=True,
+            ),
             **kwargs,
         )
 
@@ -1387,18 +1365,7 @@ class ImpactModel(BaseModel):
                 len(kwargs_extra),
             )
 
-        if output_dir is None:
-            if self._temp_dir is None:
-                self._temp_dir = TemporaryDirectory()
-                logger.info("Temporary directory created at: %s", self._temp_dir.name)
-            output_dir = self._temp_dir.name
-            logger.info(
-                "No output directory provided. Using the model's temporary directory "
-                "for storing output.",
-            )
-        output_dir = Path(output_dir).expanduser().resolve()
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_subdir = _create_output_subdir(output_dir)
+        output_subdir = self._create_output_subdir(output_dir)
 
         dataloader, _ = _setup_inputs(
             X=X,
@@ -1416,6 +1383,7 @@ class ImpactModel(BaseModel):
             desc=(f"Computing log-likelihood of {site}..."),
             total=len(dataloader),
             disable=not progress,
+            dynamic_ncols=True,
         )
 
         zarr_group = open_group(output_subdir, mode="w")
@@ -1505,6 +1473,35 @@ class ImpactModel(BaseModel):
             logger.info("Temporary directory cleaned up at: %s", self._temp_dir.name)
             self._temp_dir.cleanup()
             self._temp_dir = None
+
+    def _create_output_subdir(self, output_dir: str | Path | None) -> Path:
+        """Create a subdirectory for storing output.
+
+        This function is called for its side effect: it creates a subdirectory within
+        the specified output directory with a timestamp.
+
+        Args:
+            output_dir: The directory where the output subdirectory will be created.
+
+        Returns:
+            The path to the created output subdirectory.
+        """
+        if output_dir is None:
+            if self._temp_dir is None:
+                self._temp_dir = TemporaryDirectory()
+                logger.info("Temporary directory created at: %s", self._temp_dir.name)
+            output_dir = self._temp_dir.name
+            logger.info(
+                "No output directory provided. Using the model's temporary directory "
+                "for storing output.",
+            )
+        output_dir = Path(output_dir).expanduser().resolve()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        output_subdir = output_dir / timestamp
+        output_subdir.mkdir(parents=False, exist_ok=False)
+
+        return output_subdir
 
     def _sample_and_write(
         self,
