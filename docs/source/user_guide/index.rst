@@ -7,5 +7,6 @@ User Guide
    sampling
    disk_and_on_batch
    model_persistence
+   cleanup
    mlflow
    mcmc
