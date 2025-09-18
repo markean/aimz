@@ -798,9 +798,6 @@ class ImpactModel(BaseModel):
             )
 
         self._is_fitted = True
-        self._dt_posterior = (
-            _dict_to_datatree(self._posterior) if self._posterior else None
-        )
 
         return self
 
@@ -928,9 +925,6 @@ class ImpactModel(BaseModel):
             samples=None,
             model_kwargs=None,
         )
-        self._dt_posterior = (
-            _dict_to_datatree(self._posterior) if self._posterior else None
-        )
 
         return self
 
@@ -989,7 +983,6 @@ class ImpactModel(BaseModel):
         self._posterior = posterior_sample
         self._return_sites = return_sites or (self.param_output,)
         self._is_fitted = True
-        self._dt_posterior = _dict_to_datatree(self._posterior)
 
         return self
 
@@ -1082,7 +1075,8 @@ class ImpactModel(BaseModel):
             return samples
 
         out = xr.DataTree(name="root")
-        out["posterior"] = self._dt_posterior
+        if self._posterior:
+            out["posterior"] = _dict_to_datatree(self._posterior)
         out["posterior_predictive" if in_sample else "predictions"] = _dict_to_datatree(
             samples,
         )
@@ -1245,7 +1239,8 @@ class ImpactModel(BaseModel):
             {k: np.arange(ds.sizes[k]) for k in ds.sizes},
         ).assign_attrs(_make_attrs())
         out = xr.DataTree(name="root")
-        out["posterior"] = self._dt_posterior
+        if self._posterior:
+            out["posterior"] = _dict_to_datatree(self._posterior)
         group = "posterior_predictive" if in_sample else "predictions"
         out[group] = xr.DataTree(ds)
         out[group].attrs["output_dir"] = str(output_subdir)
@@ -1453,7 +1448,8 @@ class ImpactModel(BaseModel):
             {k: np.arange(ds.sizes[k]) for k in ds.sizes},
         ).assign_attrs(_make_attrs())
         out = xr.DataTree(name="root")
-        out["posterior"] = self._dt_posterior
+        if self._posterior:
+            out["posterior"] = _dict_to_datatree(self._posterior)
         out["log_likelihood"] = xr.DataTree(ds)
         out["log_likelihood"].attrs["output_dir"] = str(output_subdir)
         out.attrs["output_dir"] = str(output_dir)
