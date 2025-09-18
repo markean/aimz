@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - All `tqdm` progress bars now use `dynamic_ncols=True` to adjust column width dynamically ([#93](https://github.com/markean/aimz/issues/93)).
 
+### Fixed
+
+- Methods in {class}`~aimz.ImpactModel` no longer include an empty `posterior` data variable in root node of the returned {class}`xarray.DataTree` when no posterior samples are available ([#91](https://github.com/markean/aimz/issues/91)).
+
 ## [v0.6.0](https://github.com/markean/aimz/releases/tag/v0.6.0) - 2025-09-14
 
 ### Added

@@ -54,7 +54,6 @@ from aimz.sampling._forward import _sample_forward
 from aimz.utils._format import _dict_to_datatree, _make_attrs
 from aimz.utils._kwargs import _group_kwargs
 from aimz.utils._output import (
-    # _create_output_subdir,
     _shutdown_writer_threads,
     _start_writer_threads,
     _writer,
@@ -189,12 +188,12 @@ class ImpactModel(BaseModel):
 
     @property
     def param_input(self) -> str:
-        """Name of the parameter in the ``kernel`` for the main input data."""
+        """Parameter name in :attr:`~aimz.ImpactModel.kernel` for the input data."""
         return self._param_input
 
     @property
     def param_output(self) -> str:
-        """Name of the parameter in the ``kernel`` for the output data."""
+        """Parameter name in :attr:`~aimz.ImpactModel.kernel` for the output data."""
         return self._param_output
 
     @property
@@ -265,7 +264,8 @@ class ImpactModel(BaseModel):
             Prior predictive samples.
 
         Raises:
-            TypeError: If ``self.param_output`` is passed as an argument.
+            TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
+                argument.
         """
         X = cast("Array", _validate_X_y_to_jax(X))
 
@@ -322,7 +322,7 @@ class ImpactModel(BaseModel):
             rng_key (ArrayLike | None): A pseudo-random number generator key. By
                 default, an internal key is used and split as needed.
             return_sites: Names of variables (sites) to return. If ``None``, samples
-                ``self.param_output`` and deterministic sites.
+                :attr:`~aimz.ImpactModel.param_output` and deterministic sites.
             batch_size: The batch size for data loading during prior predictive
                 sampling. It also determines the chunk size used to store the samples.
                 If ``None``, it is determined automatically based on the input data and
@@ -340,7 +340,8 @@ class ImpactModel(BaseModel):
             Prior predictive samples.
 
         Raises:
-            TypeError: If ``self.param_output`` is passed as an argument.
+            TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
+                argument.
 
         See Also:
             :py:meth:`~aimz.ImpactModel.cleanup` to remove the temporary directory if
@@ -395,7 +396,7 @@ class ImpactModel(BaseModel):
                 len(kwargs_extra),
             )
 
-        output_subdir = self._create_output_subdir(output_dir)
+        output_dir, output_subdir = self._create_output_subdir(output_dir)
 
         dataloader, _ = _setup_inputs(
             X=X,
@@ -470,8 +471,8 @@ class ImpactModel(BaseModel):
             Posterior samples.
 
         Raises:
-            TypeError: If ``self.param_output`` is not passed as an argument if the
-                inference method is MCMC.
+            TypeError: If :attr:`~aimz.ImpactModel.param_output` is not passed as an
+                argument when the inference method is MCMC.
         """
         _check_is_fitted(self)
 
@@ -536,7 +537,7 @@ class ImpactModel(BaseModel):
             rng_key (ArrayLike | None): A pseudo-random number generator key. By
                 default, an internal key is used and split as needed.
             return_sites: Names of variables (sites) to return. If ``None``, samples
-                ``self.param_output`` and deterministic sites.
+                :attr:`~aimz.ImpactModel.param_output` and deterministic sites.
             return_datatree: If ``True``, return a
                 :external:py:class:`~xarray.DataTree`; otherwise return a
                 :py:class:`dict`.
@@ -547,7 +548,8 @@ class ImpactModel(BaseModel):
             Posterior predictive samples. Posterior samples are included if available.
 
         Raises:
-            TypeError: If ``self.param_output`` is passed as an argument.
+            TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
+                argument.
 
         See Also:
             :py:meth:`~aimz.ImpactModel.predict_on_batch`.
@@ -591,7 +593,7 @@ class ImpactModel(BaseModel):
             rng_key (ArrayLike | None): A pseudo-random number generator key. By
                 default, an internal key is used and split as needed.
             return_sites: Names of variables (sites) to return. If ``None``, samples
-                ``self.param_output`` and deterministic sites.
+                :attr:`~aimz.ImpactModel.param_output` and deterministic sites.
             batch_size: The batch size for data loading during posterior predictive
                 sampling. It also determines the chunk size used to store the samples.
                 If ``None``, it is determined automatically based on the input data and
@@ -609,7 +611,8 @@ class ImpactModel(BaseModel):
             Posterior predictive samples. Posterior samples are included if available.
 
         Raises:
-            TypeError: If ``self.param_output`` is passed as an argument.
+            TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
+                argument.
 
         See Also:
             :py:meth:`~aimz.ImpactModel.predict()`.
@@ -963,7 +966,7 @@ class ImpactModel(BaseModel):
             posterior_sample: Posterior samples to set for the model.
             return_sites: Names of variable (sites) to return in
                 :py:meth:`~aimz.ImpactModel.predict`. By default, it is set to
-                ``self.param_output``.
+                :attr:`~aimz.ImpactModel.param_output`.
 
         Returns:
             The model instance, treated as fitted with posterior samples set, enabling
@@ -1026,7 +1029,7 @@ class ImpactModel(BaseModel):
                 ``predictions`` group, indicating they were generated based on
                 out-of-sample data.
             return_sites: Names of variables (sites) to return. If ``None``, samples
-                ``self.param_output`` and deterministic sites.
+                :attr:`~aimz.ImpactModel.param_output` and deterministic sites.
             return_datatree: If ``True``, return a
                 :external:py:class:`~xarray.DataTree`; otherwise return a
                 :py:class:`dict`.
@@ -1037,7 +1040,8 @@ class ImpactModel(BaseModel):
             Posterior predictive samples. Posterior samples are included if available.
 
         Raises:
-            TypeError: If ``self.param_output`` is passed as an argument.
+            TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
+                argument.
         """
         _check_is_fitted(self)
 
@@ -1122,7 +1126,7 @@ class ImpactModel(BaseModel):
                 ``predictions`` group, indicating they were generated based on
                 out-of-sample data.
             return_sites: Names of variables (sites) to return. If ``None``, samples
-                ``self.param_output`` and deterministic sites.
+                :attr:`~aimz.ImpactModel.param_output` and deterministic sites.
             batch_size: The batch size for data loading during posterior predictive
                 sampling. It also determines the chunk size used to store the samples.
                 If ``None``, it is determined automatically based on the input data
@@ -1140,7 +1144,8 @@ class ImpactModel(BaseModel):
             Posterior predictive samples. Posterior samples are included if available.
 
         Raises:
-            TypeError: If ``self.param_output`` is passed as an argument.
+            TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
+                argument.
 
         See Also:
             :py:meth:`~aimz.ImpactModel.cleanup` to remove the temporary directory if
@@ -1200,7 +1205,7 @@ class ImpactModel(BaseModel):
                 len(kwargs_extra),
             )
 
-        output_subdir = self._create_output_subdir(output_dir)
+        output_dir, output_subdir = self._create_output_subdir(output_dir)
 
         dataloader, _ = _setup_inputs(
             X=X,
@@ -1360,7 +1365,7 @@ class ImpactModel(BaseModel):
                 len(kwargs_extra),
             )
 
-        output_subdir = self._create_output_subdir(output_dir)
+        output_dir, output_subdir = self._create_output_subdir(output_dir)
 
         dataloader, _ = _setup_inputs(
             X=X,
@@ -1470,7 +1475,7 @@ class ImpactModel(BaseModel):
             self._temp_dir.cleanup()
             self._temp_dir = None
 
-    def _create_output_subdir(self, output_dir: str | Path | None) -> Path:
+    def _create_output_subdir(self, output_dir: str | Path | None) -> tuple[Path, Path]:
         """Create a subdirectory for storing output.
 
         This function is called for its side effect: it creates a subdirectory within
@@ -1480,7 +1485,7 @@ class ImpactModel(BaseModel):
             output_dir: The directory where the output subdirectory will be created.
 
         Returns:
-            The path to the created output subdirectory.
+            The paths to the output directory and the created subdirectory.
         """
         if output_dir is None:
             if self._temp_dir is None:
@@ -1497,7 +1502,7 @@ class ImpactModel(BaseModel):
         output_subdir = output_dir / timestamp
         output_subdir.mkdir(parents=False, exist_ok=False)
 
-        return output_subdir
+        return output_dir, output_subdir
 
     def _sample_and_write(
         self,

@@ -1,16 +1,16 @@
 Output Directory Cleanup
 ========================
 
-Many high‑level methods of :py:class:`~aimz.ImpactModel` stream results to disk (e.g., posterior predictive samples, predictions) to support large datasets and memory efficiency.
+Many high‑level methods of :class:`~aimz.ImpactModel` stream results to disk (e.g., posterior predictive samples, predictions) to support large datasets and memory efficiency.
 Each of these methods accepts an ``output_dir`` parameter (see :doc:`disk_and_on_batch` for broader I/O behavior of them).
-This page focuses on managing the temporary directory created when the user does not supply ``output_dir`` and on the :py:meth:`~aimz.ImpactModel.cleanup` method that removes it.
+This page focuses on managing the temporary directory created when the user does not supply ``output_dir`` and on the :meth:`~aimz.ImpactModel.cleanup` method that removes it.
 
 
 Creation Logic
 --------------
-When a disk‑writing method is called with ``output_dir=None`` (the default), the model creates a process‑scoped temporary root directory (via :py:class:`tempfile.TemporaryDirectory`) the first time such a call occurs.
+When a disk‑writing method is called with ``output_dir=None`` (the default), the model creates a process‑scoped temporary root directory (via :class:`tempfile.TemporaryDirectory`) the first time such a call occurs.
 Each invocation then writes to a timestamped subdirectory under that root, ensuring that earlier results are never overwritten.
-This root directory is stored in the ``model.temp_dir`` attribute and reused for subsequent calls until the user invoke :py:meth:`~aimz.ImpactModel.cleanup`.
+This root directory is stored in the :attr:`~aimz.ImpactModel.temp_dir` attribute and reused for subsequent calls until the user invoke :meth:`~aimz.ImpactModel.cleanup`.
 
 Example Layout (implicit temp root)::
 
@@ -21,7 +21,7 @@ Example Layout (implicit temp root)::
 
 If the user provides ``output_dir``, that directory becomes the root, and it will be created if it does not already exist.
 The same timestamped subdirectory pattern is used there (e.g., ``my_runs/20250917T013040Z``).
-An explicit ``output_dir`` is **not** deleted by :py:meth:`~aimz.ImpactModel.cleanup`, since it is assumed that the user intends to manage its lifecycle manually.
+An explicit ``output_dir`` is **not** deleted by :meth:`~aimz.ImpactModel.cleanup`, since it is assumed that the user intends to manage its lifecycle manually.
 
 
 Cleanup Behavior
@@ -39,18 +39,18 @@ Additional guarantees:
 
 Rationale for Explicit Calls
 ----------------------------
-Although :py:class:`tempfile.TemporaryDirectory` *attempts* automatic removal upon garbage collection, the timing is nondeterministic—especially in notebooks or long-lived processes.
-Large artifacts can accumulate quickly; calling :py:meth:`~aimz.ImpactModel.cleanup` ensures prompt reclamation of disk space.
+Although :class:`tempfile.TemporaryDirectory` *attempts* automatic removal upon garbage collection, the timing is nondeterministic—especially in notebooks or long-lived processes.
+Large artifacts can accumulate quickly; calling :meth:`~aimz.ImpactModel.cleanup` ensures prompt reclamation of disk space.
 
 
 Accessing Output Directories
 ----------------------------
-Every disk-writing method returns an :external:py:class:`xarray.DataTree` containing the paths where results are stored as attributes:
+Every disk-writing method returns an :external:class:`xarray.DataTree` containing the paths where results are stored as attributes:
 
 * ``tree.attrs["output_dir"]`` – the root directory (either the temporary root or the user-provided directory).
 * ``tree[<group>].attrs["output_dir"]`` – the timestamped subdirectory containing the Zarr data for that group.
 
-The output below shows an example :external:py:class:`xarray.DataTree` illustrating the output directory paths.
+The output below shows an example :external:class:`xarray.DataTree` illustrating the output directory paths.
 
 .. jupyter-execute::
     :hide-code:
@@ -111,18 +111,18 @@ The output below shows an example :external:py:class:`xarray.DataTree` illustrat
 
 .. note::
 
-    Even after the ``output_dir`` is deleted, the returned :external:py:class:`xarray.DataTree` and all its group entries remain accessible.
+    Even after the ``output_dir`` is deleted, the returned :external:class:`xarray.DataTree` and all its group entries remain accessible.
     However, any arrays that were stored on disk have **all values set to zero**, since the underlying data files have been removed.
-    Users can still inspect the structure and metadata of the :external:py:class:`xarray.DataTree`, but the original disk-backed values are no longer available.
+    Users can still inspect the structure and metadata of the :external:class:`xarray.DataTree`, but the original disk-backed values are no longer available.
 
 
 Typical Usage Pattern
 ---------------------
-A typical workflow is to run these methods without specifying ``output_dir`` (using a temporary root), optionally access the results via the ``temp_dir`` attribute or the returned :external:py:class:`xarray.DataTree`, and then free disk space with :py:meth:`~aimz.ImpactModel.cleanup`.
+A typical workflow is to run these methods without specifying ``output_dir`` (using a temporary root), optionally access the results via the :attr:`~aimz.ImpactModel.temp_dir` attribute or the returned :external:class:`xarray.DataTree`, and then free disk space with :meth:`~aimz.ImpactModel.cleanup`.
 
 Tips for safe use:
 
-* Call :py:meth:`~aimz.ImpactModel.cleanup` at the end of a notebook or in a ``finally`` block.
-* Copy any results you want to keep before :py:meth:`~aimz.ImpactModel.cleanup`.
+* Call :meth:`~aimz.ImpactModel.cleanup` at the end of a notebook or in a ``finally`` block.
+* Copy any results you want to keep before :meth:`~aimz.ImpactModel.cleanup`.
 * In tests, check that temporary directories are removed to avoid disk bloat.
 * Avoid leaving long sessions with un-cleaned temporary directories.
