@@ -69,4 +69,5 @@ Navigation
    Getting Started <getting_started/index>
    User Guide <user_guide/index>
    API Reference <api>
+   Development <development/index>
    Changelog <changelog>
