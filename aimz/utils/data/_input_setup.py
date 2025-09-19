@@ -25,6 +25,8 @@ from aimz.utils._kwargs import _group_kwargs
 from aimz.utils.data import ArrayDataset, ArrayLoader
 
 if TYPE_CHECKING:
+    from collections.abc import Sized
+
     from jax.sharding import Sharding
 
 logger = logging.getLogger(__name__)
@@ -78,8 +80,8 @@ def _setup_inputs(
             X, y = check_X_y(X, y, force_writeable=True, y_numeric=True)
         num_devices = device.num_devices if device else 1
         if batch_size is None:
-            if len(X) * num_samples < MAX_ELEMENTS:
-                batch_size = len(X)
+            if len(cast("Sized", X)) * num_samples < MAX_ELEMENTS:
+                batch_size = len(cast("Sized", X))
             else:
                 batch_size = MAX_ELEMENTS // num_samples
                 batch_size -= batch_size % num_devices

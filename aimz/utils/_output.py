@@ -74,7 +74,7 @@ def _writer(site: str, queue: Queue, group_path: Path, error_queue: Queue) -> No
 
 
 def _start_writer_threads(
-    sites: tuple[str],
+    sites: tuple[str, ...],
     group_path: Path,
     writer: "Callable[[str, Queue, Path, Queue], None]",
     queue_size: int,

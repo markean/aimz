@@ -18,6 +18,7 @@ import logging
 import tempfile
 from collections.abc import Callable
 from inspect import getsource
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 from mlflow import log_metric, log_param, log_params, log_text
@@ -32,6 +33,10 @@ from mlflow.utils.autologging_utils import (
     safe_patch,
 )
 from sklearn.utils.validation import _is_arraylike
+
+if TYPE_CHECKING:
+    from jax.typing import ArrayLike
+    from numpyro.infer.svi import SVIRunResult
 
 FLAVOR_NAME = "aimz"
 
@@ -127,7 +132,7 @@ def autolog(
         model = original(self, *args, **kwargs)
 
         log_param("num_samples", self._num_samples)
-        losses = self.vi_result.losses
+        losses = cast("SVIRunResult", self.vi_result).losses
         log_metric("elbo_loss", value=losses[-1])
 
         if log_models:
@@ -144,9 +149,13 @@ def autolog(
                     }
                 else:
                     input_example = {
-                        "X": np.asarray(X[:INPUT_EXAMPLE_SAMPLE_ROWS]),
+                        "X": np.asarray(
+                            cast("ArrayLike", X)[:INPUT_EXAMPLE_SAMPLE_ROWS],
+                        ),
                         **{
-                            k: np.asarray(v[:INPUT_EXAMPLE_SAMPLE_ROWS])
+                            k: np.asarray(
+                                cast("ArrayLike", v)[:INPUT_EXAMPLE_SAMPLE_ROWS],
+                            )
                             for k, v in kwargs.items()
                             if k != self.param_output and _is_arraylike(v)
                         },
