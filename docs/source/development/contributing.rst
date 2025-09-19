@@ -69,7 +69,7 @@ All public APIs should have Google-style docstrings.
 For larger additions:
 
 * Add or extend documentation under ``docs/source/``.
-* Use cross references for API objects, e.g. ``:py:meth:`~aimz.ImpactModel.predict```.
+* Use cross references for API objects, e.g. ``:meth:`~aimz.ImpactModel.predict```.
 * Build the Sphinx docs locally (requires ``[docs]`` extra)::
 
    uv pip install -e ."[docs]"

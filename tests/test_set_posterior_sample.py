@@ -14,6 +14,7 @@
 
 """Tests for the `.set_posterior_sample()` method."""
 
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
@@ -50,7 +51,9 @@ def test_set_posterior_sample(
     im = ImpactModel(lm, rng_key=rng_key, inference=vi)
     im.vi_result = vi_result
     # Use the same key for reproducibility
-    posterior_samples = im.sample(num_samples=100, rng_key=rng_subkey).posterior
+    posterior_samples = im.sample(num_samples=100, rng_key=rng_subkey).posterior.sel(
+        chain=0,
+    )
     im.set_posterior_sample({k: v.values for k, v in posterior_samples.items()})
     assert _is_fitted(im), "Model fitting check failed"
     assert isinstance(im.vi_result, SVIRunResult)
@@ -58,11 +61,16 @@ def test_set_posterior_sample(
     for key in posterior_sample:
         assert jnp.allclose(posterior_sample[key], im.posterior[key])
 
-    posterior_samples = im.sample(num_samples=100).posterior
+    posterior_samples = im.sample(num_samples=100).posterior.sel(chain=0)
     im.set_posterior_sample({k: v.values for k, v in posterior_samples.items()})
     for key in posterior_sample:
         # Without the `rng_key` argument, we get different posterior samples
         assert not jnp.allclose(posterior_sample[key], im.posterior[key])
+
+    # Check that prediction works after setting the posterior sample
+    im.predict_on_batch(X)
+    with TemporaryDirectory() as temp_dir:
+        im.predict(X, batch_size=33, output_dir=temp_dir, progress=False)
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)

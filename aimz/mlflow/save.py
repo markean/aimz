@@ -111,11 +111,11 @@ def save_model(
     """Save an aimz model to a path on the local file system.
 
     Args:
-        model: An aimz model (an instance of :py:class:`~aimz.ImpactModel`) to be saved.
+        model: An aimz model (an instance of :class:`~aimz.ImpactModel`) to be saved.
         path (str | Path): Local path where the model is to be saved.
         conda_env: {{ conda_env }}
         code_paths: {{ code_paths }}
-        mlflow_model: :py:class:`mlflow.models.Model` this flavor is being added to.
+        mlflow_model: :class:`mlflow.models.Model` this flavor is being added to.
         signature: {{ signature }}
         input_example: {{ input_example }}
         pip_requirements: {{ pip_requirements }}

@@ -52,10 +52,10 @@ def autolog(
     """Enable and configure autologging for aimz with MLflow.
 
     Autologging is performed when you call:
-        - :py:meth:`ImpactModel.fit() <aimz.ImpactModel.fit>`.
+        - :meth:`ImpactModel.fit() <aimz.ImpactModel.fit>`.
 
     Logs the following:
-        - Selected arguments to :py:meth:`ImpactModel.fit() <aimz.ImpactModel.fit>`,
+        - Selected arguments to :meth:`ImpactModel.fit() <aimz.ImpactModel.fit>`,
           together with ``param_input``, ``param_output``, ``inference_method``, and
           ``optimizer`` as parameters.
         - The final evidence lower bound (ELBO) loss as a metric.
@@ -68,10 +68,10 @@ def autolog(
             ``False``, input examples are not logged. Note: Input examples are MLflow
             model attributes and are only collected if ``log_models`` is also ``True``.
         log_model_signatures: If ``True``,
-            :external:py:class:`ModelSignatures <mlflow.models.ModelSignature>`
-            describing model inputs and outputs are collected and logged along with
-            model artifacts during training. If ``False``, signatures are not logged.
-            Note: Model signatures are MLflow model attributes and are only collected if
+            :external:class:`ModelSignatures <mlflow.models.ModelSignature>` describing
+            model inputs and outputs are collected and logged along with model artifacts
+            during training. If ``False``, signatures are not logged. Note: Model
+            signatures are MLflow model attributes and are only collected if
             ``log_models`` is also ``True``.
         log_models: If ``True``, trained models are logged as MLflow model artifacts. If
             ``False``, trained models are not logged. Input examples and model
@@ -98,7 +98,7 @@ def autolog(
         *args: object,
         **kwargs: object,
     ) -> ImpactModel:
-        """Patch for :py:meth:`~aimz.ImpactModel.fit` to log information.
+        """Patch for :meth:`~aimz.ImpactModel.fit` to log information.
 
         Args:
             original (Callable): The original method.
