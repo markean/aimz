@@ -15,12 +15,15 @@
 """MLflow pyfunc wrapper for aimz models."""
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from mlflow.pyfunc import PyFuncModel
 
 if TYPE_CHECKING:
+    from jax.typing import ArrayLike
+
     from aimz.model.impact_model import ImpactModel
+    from aimz.utils.data import ArrayLoader
 
 
 class _ImpactModelWrapper(PyFuncModel):
@@ -37,7 +40,10 @@ class _ImpactModelWrapper(PyFuncModel):
         """Run predictions using the wrapped ImpactModel."""
         if isinstance(model_input, dict):
             return self.model.predict(**model_input, **(params or {}))
-        return self.model.predict(model_input, **(params or {}))
+        return self.model.predict(
+            cast("ArrayLike | ArrayLoader", model_input),
+            **(params or {}),
+        )
 
 
 def _load_pyfunc(path: str) -> _ImpactModelWrapper:

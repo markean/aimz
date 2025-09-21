@@ -22,16 +22,16 @@ from numpyro.handlers import mask, seed, substitute, trace
 
 if TYPE_CHECKING:
     from collections import OrderedDict
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
 
 def _sample_forward(
     model: "Callable",
     num_samples: int,
     rng_key: ArrayLike,
-    return_sites: tuple[str] | None,
+    return_sites: tuple[str, ...] | None,
     samples: dict[str, Array] | None,
-    model_kwargs: dict[str, Array] | None,
+    model_kwargs: "Mapping[str, object] | None",
 ) -> dict[str, Array]:
     """Generates forward samples from a model conditioned on parameter draws.
 

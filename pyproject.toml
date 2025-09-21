@@ -32,7 +32,7 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-dev = ["cloudpickle>=3", "pytest>=8.4", "pytest-cov>=7"]
+dev = ["pre-commit>=4.3", "pytest>=8.4", "pytest-cov>=7", "ruff>=0.13"]
 gpu = ["jax[cuda12]>=0.7"]
 mlflow = ["mlflow>=3"]
 docs = [
@@ -43,7 +43,6 @@ docs = [
     "sphinx-design>=0.6",
     "pydata-sphinx-theme>=0.16",
     "mlflow>=3",
-    "cloudpickle>=3",
     "arviz-plots[matplotlib]>=0.6",
 ]
 

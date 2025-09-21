@@ -14,9 +14,14 @@
 
 """Module for custom dataset for JAX arrays."""
 
+from typing import TYPE_CHECKING, cast
+
 import jax.numpy as jnp
 from jax import Array
 from jax.typing import ArrayLike
+
+if TYPE_CHECKING:
+    from collections.abc import Sized
 
 
 class ArrayDataset:
@@ -38,7 +43,7 @@ class ArrayDataset:
         if not arrays:
             msg = "At least one array must be provided."
             raise ValueError(msg)
-        lengths = {len(arr) for arr in arrays.values()}
+        lengths = {len(cast("Sized", arr)) for arr in arrays.values()}
         if len(lengths) != 1:
             msg = "All arrays must have the same length."
             raise ValueError(msg)

@@ -16,6 +16,7 @@ Attributes
    :toctree: generated/
 
    ImpactModel.kernel
+   ImpactModel.kernel_spec
    ImpactModel.rng_key
    ImpactModel.param_input
    ImpactModel.param_output

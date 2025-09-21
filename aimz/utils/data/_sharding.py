@@ -51,14 +51,14 @@ def _create_sharded_sampler(
 
     Returns:
         A sharded function that takes the following arguments:
-            - rng_key (Array): A pseudo-random number generator key.
+            - rng_key (ArrayLike): A pseudo-random number generator key.
             - kernel (Callable): A probabilistic model with NumPyro primitives.
             - samples (dict): A dictionary of samples to condition on.
             - batch_shape (tuple[int]): The shape of the batch dimension, specifically
                 ``(num_samples,)``.
             - param_input (str): The name of the parameter in the ``kernel`` for the
                 input data.
-            - kwargs_key (tuple[str]): A tuple of keyword argument names.
+            - kwargs_key (tuple[str, ...]): A tuple of keyword argument names.
             - X (Array): Input data.
             - *args (tuple): Additional arguments constructed from the original keyword
                 arguments (both sharded and non-sharded).
@@ -69,12 +69,12 @@ def _create_sharded_sampler(
         kernel: "Callable",
         num_samples: int,
         rng_key: ArrayLike,
-        return_sites: tuple[str],
+        return_sites: tuple[str, ...],
         samples: dict[str, Array],
         param_input: str,
-        kwargs_key: tuple[str],
+        kwargs_key: tuple[str, ...],
         X: Array,
-        *args: ArrayLike,
+        *args: object,
     ) -> dict[str, Array]:
         return _sample_forward(
             model=kernel,
@@ -158,7 +158,7 @@ def _create_sharded_log_likelihood(
                 input data.
             - param_output (str): The name of the parameter in the ``kernel`` for the
                 output data.
-            - kwargs_key (tuple[str]): A tuple of keyword argument names.
+            - kwargs_key (tuple[str, ...]): A tuple of keyword argument names.
             - X (Array): Input data.
             - y (Array): Output data.
             - *args (tuple): Additional arguments constructed from the original keyword
@@ -171,7 +171,7 @@ def _create_sharded_log_likelihood(
         posterior_samples: dict,
         param_input: str,
         param_output: str,
-        kwargs_key: tuple[str],
+        kwargs_key: tuple[str, ...],
         X: Array,
         y: Array,
         *args: tuple,

@@ -18,6 +18,7 @@ import logging
 import tempfile
 from collections.abc import Callable
 from inspect import getsource
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 from mlflow import log_metric, log_param, log_params, log_text
@@ -32,6 +33,10 @@ from mlflow.utils.autologging_utils import (
     safe_patch,
 )
 from sklearn.utils.validation import _is_arraylike
+
+if TYPE_CHECKING:
+    from jax.typing import ArrayLike
+    from numpyro.infer.svi import SVIRunResult
 
 FLAVOR_NAME = "aimz"
 
@@ -52,10 +57,10 @@ def autolog(
     """Enable and configure autologging for aimz with MLflow.
 
     Autologging is performed when you call:
-        - :py:meth:`ImpactModel.fit() <aimz.ImpactModel.fit>`.
+        - :meth:`ImpactModel.fit() <aimz.ImpactModel.fit>`.
 
     Logs the following:
-        - Selected arguments to :py:meth:`ImpactModel.fit() <aimz.ImpactModel.fit>`,
+        - Selected arguments to :meth:`ImpactModel.fit() <aimz.ImpactModel.fit>`,
           together with ``param_input``, ``param_output``, ``inference_method``, and
           ``optimizer`` as parameters.
         - The final evidence lower bound (ELBO) loss as a metric.
@@ -68,10 +73,10 @@ def autolog(
             ``False``, input examples are not logged. Note: Input examples are MLflow
             model attributes and are only collected if ``log_models`` is also ``True``.
         log_model_signatures: If ``True``,
-            :external:py:class:`ModelSignatures <mlflow.models.ModelSignature>`
-            describing model inputs and outputs are collected and logged along with
-            model artifacts during training. If ``False``, signatures are not logged.
-            Note: Model signatures are MLflow model attributes and are only collected if
+            :external:class:`ModelSignatures <mlflow.models.ModelSignature>` describing
+            model inputs and outputs are collected and logged along with model artifacts
+            during training. If ``False``, signatures are not logged. Note: Model
+            signatures are MLflow model attributes and are only collected if
             ``log_models`` is also ``True``.
         log_models: If ``True``, trained models are logged as MLflow model artifacts. If
             ``False``, trained models are not logged. Input examples and model
@@ -98,7 +103,7 @@ def autolog(
         *args: object,
         **kwargs: object,
     ) -> ImpactModel:
-        """Patch for :py:meth:`~aimz.ImpactModel.fit` to log information.
+        """Patch for :meth:`~aimz.ImpactModel.fit` to log information.
 
         Args:
             original (Callable): The original method.
@@ -127,7 +132,7 @@ def autolog(
         model = original(self, *args, **kwargs)
 
         log_param("num_samples", self._num_samples)
-        losses = self.vi_result.losses
+        losses = cast("SVIRunResult", self.vi_result).losses
         log_metric("elbo_loss", value=losses[-1])
 
         if log_models:
@@ -144,9 +149,13 @@ def autolog(
                     }
                 else:
                     input_example = {
-                        "X": np.asarray(X[:INPUT_EXAMPLE_SAMPLE_ROWS]),
+                        "X": np.asarray(
+                            cast("ArrayLike", X)[:INPUT_EXAMPLE_SAMPLE_ROWS],
+                        ),
                         **{
-                            k: np.asarray(v[:INPUT_EXAMPLE_SAMPLE_ROWS])
+                            k: np.asarray(
+                                cast("ArrayLike", v)[:INPUT_EXAMPLE_SAMPLE_ROWS],
+                            )
                             for k, v in kwargs.items()
                             if k != self.param_output and _is_arraylike(v)
                         },

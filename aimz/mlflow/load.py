@@ -51,7 +51,7 @@ def load_model(model_uri: str, dst_path: str | None = None) -> "ImpactModel":
             path will be created.
 
     Returns:
-        An aimz model (an instance of :py:class:`~aimz.ImpactModel`).
+        An aimz model (an instance of :class:`~aimz.ImpactModel`).
 
     """
     local_model_path = _download_artifact_from_uri(model_uri, output_path=dst_path)

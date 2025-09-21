@@ -11,9 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `output_dir` attribute to the root and group nodes of {class}`xarray.DataTree` objects returned by {meth}`~aimz.ImpactModel.sample_prior_predictive`, {meth}`~aimz.ImpactModel.predict`, and {meth}`~aimz.ImpactModel.log_likelihood`, specifying the directory where results are saved ([#85](https://github.com/markean/aimz/issues/85)).
 
+- Introduced the public {class}`~aimz.model.KernelSpec` dataclass and the {attr}`~aimz.ImpactModel.kernel_spec` attribute on {class}`~aimz.ImpactModel`.
+This exposes a lazily-built, cached structural specification of the user kernel (fields: ``traced``, ``return_sites``, ``output_observed``) so training and predictive methods avoid redundant model tracing ([#98](https://github.com/markean/aimz/issues/98)).
+
 ### Changed
 
 - All `tqdm` progress bars now use `dynamic_ncols=True` to adjust column width dynamically ([#93](https://github.com/markean/aimz/issues/93)).
+
+- {meth}`~aimz.ImpactModel.fit_on_batch`, {meth}`~aimz.ImpactModel.sample_prior_predictive_on_batch`, {meth}`~aimz.ImpactModel.sample_prior_predictive`, and {meth}`~aimz.ImpactModel.train_on_batch` now reuse the cached {attr}`~aimz.ImpactModel.kernel_spec` and avoid redundant model tracing ([#98](https://github.com/markean/aimz/issues/98)).
 
 ### Fixed
 
