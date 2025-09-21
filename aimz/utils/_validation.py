@@ -132,8 +132,10 @@ def _validate_kernel_signature(
 
 def _validate_kernel_body(
     kernel: "Callable",
+    *,
     param_output: str,
     model_trace: "OrderedDict[str, dict]",
+    with_output: bool,
 ) -> None:
     """Validate the body of a kernel function.
 
@@ -141,6 +143,7 @@ def _validate_kernel_body(
         kernel: The kernel function to validate.
         param_output: Name of the parameter in ``kernel`` corresponding to the output.
         model_trace: The model trace containing the sites.
+        with_output: Whether the kernel is expected to have observed output.
 
     Raises:
         KernelValidationError: If the kernel body does not meet the required
@@ -161,7 +164,7 @@ def _validate_kernel_body(
     if site["type"] != "sample":
         msg = f"Expected {param_output!r} to have type 'sample', got {site['type']!r}."
         raise KernelValidationError(msg)
-    if not site.get("is_observed", False):
+    if with_output and not site.get("is_observed", False):
         msg = (
             f"{param_output!r} must be observed (i.e., defined with `obs=` in the "
             "kernel)."

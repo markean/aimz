@@ -14,18 +14,42 @@
 
 """Tests for the `.sample_prior_predictive_on_batch()` method."""
 
-from typing import TYPE_CHECKING
-
+import jax.numpy as jnp
+import numpyro.distributions as dist
 import pytest
 import xarray as xr
 from conftest import lm
 from jax import random
 from jax.typing import ArrayLike
+from numpyro import sample
+from numpyro.infer import SVI, Trace_ELBO
+from numpyro.infer.autoguide import AutoNormal
+from numpyro.optim import Adam
 
 from aimz import ImpactModel
+from aimz._exceptions import KernelValidationError
 
-if TYPE_CHECKING:
-    from numpyro.infer import SVI
+
+def test_kernel_without_output(synthetic_data: tuple[ArrayLike, ArrayLike]) -> None:
+    """Kernel without output sample site raises an error."""
+
+    def kernel(X: ArrayLike, y: ArrayLike | None = None) -> None:
+        sample("z", dist.Delta(y if y is not None else jnp.zeros(len(X))), obs=y)
+
+    X, _ = synthetic_data
+    im = ImpactModel(
+        kernel,
+        rng_key=random.key(42),
+        inference=SVI(
+            kernel,
+            guide=AutoNormal(kernel),
+            optim=Adam(step_size=1e-3),
+            loss=Trace_ELBO(),
+        ),
+    )
+
+    with pytest.raises(KernelValidationError):
+        im.sample_prior_predictive_on_batch(X)
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
@@ -65,3 +89,5 @@ def test_sample_prior_predictive_on_batch_lm(
 
     assert isinstance(samples_dict, dict)
     assert samples_dict["y"].shape == (99, len(X))
+    assert im.kernel_spec.traced
+    assert not im.kernel_spec.output_observed
