@@ -50,8 +50,9 @@ def test_sample_prior_predictive_lm(
     vi: "SVI",
 ) -> None:
     """Test the `.sample_prior_predictive()` method of ImpactModel."""
-    X, _ = synthetic_data
+    X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
+    im.fit_on_batch(X, y)
     msg = (
         r"The `batch_size` \(\d+\) is not divisible by the number of devices \(\d+\)\."
     )
