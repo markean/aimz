@@ -12,8 +12,8 @@ Disk-Backed vs. On-Batch Methods
 
 This page explains and compares the two complementary execution styles provided by :class:`~aimz.ImpactModel`:
 
-* **Disk-backed** (default) methods iterate over the input in chunks, materialize results incrementally, and persist structured artifacts (Zarr‑backed :external:py:class:`xarray.DataTree` plus metadata) to a temporary or user-specified output directory.
-* **On-batch** (``*_on_batch`` suffix) methods execute a single, fully in-memory pass and can optionally return a plain :class:`dict` instead of a :external:py:class:`xarray.DataTree`. The naming mirrors the Keras convention to signal an immediate, single-batch, memory-resident operation.
+* **Disk-backed** (default) methods iterate over the input in chunks, materialize results incrementally, and persist structured artifacts (Zarr‑backed :external:class:`xarray.DataTree` plus metadata) to a temporary or user-specified output directory.
+* **On-batch** (``*_on_batch`` suffix) methods execute a single, fully in-memory pass and can optionally return a plain :class:`dict` instead of a :external:class:`xarray.DataTree`. The naming mirrors the Keras convention to signal an immediate, single-batch, memory-resident operation.
 
 
 Why Disk-Backed by Default
@@ -24,7 +24,7 @@ The non-``*_on_batch`` methods default to a disk-backed (chunked) execution mode
   Even moderate increases in any axis (time, spatial units, parameter samples) can exceed host or accelerator RAM.
 * Using ``batch_size`` with chunked iteration limits peak memory and prevents out-of-memory errors.
 * Persisted Zarr arrays with metadata (coords, dims, attrs) create an artifact you can reopen without rerunning inference.
-* The :external:py:class:`xarray.DataTree` + Zarr format integrates with scientific Python tools such as Dask_ and ArviZ_.
+* The :external:class:`xarray.DataTree` + Zarr format integrates with scientific Python tools such as Dask_ and ArviZ_.
 * Summaries (means, HDIs, residual PPC stats) can be computed lazily over chunked storage without first materializing dense arrays.
 * One API works for both small experiments and large-scale use cases.
 
@@ -33,7 +33,7 @@ Comparison
 ----------
 Disk-backed variants target larger datasets, enable chunked processing, multi-device parallelism, and stable artifact generation.
 These methods build internal data loaders, iterate in chunks, and decouple sampling from file I/O, enabling concurrent execution.
-Outputs consolidate into a single :external:py:class:`xarray.DataTree` backed by Zarr files for post-hoc analysis.
+Outputs consolidate into a single :external:class:`xarray.DataTree` backed by Zarr files for post-hoc analysis.
 On-batch variants, in contrast, favor minimal overhead, immediate return, and greater flexibility when posterior sample shapes are not shard-friendly.
 
 Feature Summary
@@ -45,7 +45,7 @@ Typical dataset size          Medium → large                       Small → m
 Supported use cases           Standard models                      Broader model support
 Peak memory usage             Chunk-bounded                        Full batch resident
 Writes to disk                Yes                                  No
-Return type                   :external:py:class:`xarray.DataTree` :external:py:class:`xarray.DataTree` or :py:class:`dict`
+Return type                   :external:class:`xarray.DataTree`    :external:class:`xarray.DataTree` or :class:`dict`
                                                                    (via ``return_datatree=False``)
 Custom batch sizing           Yes (``batch_size``)                 No (single pass)
 Device parallelism (sharding) Yes                                  No
@@ -77,7 +77,7 @@ Quick Recommendations
   This occurs when the model or posterior sample shapes are incompatible with shard-based chunked execution.
 * Custom training loop: iterate with :meth:`~aimz.ImpactModel.train_on_batch`.
 * Need multi-device (sharding) execution: disk-backed.
-* Need raw NumPy/dict outputs (no :external:py:class:`xarray.DataTree`): on-batch with ``return_datatree=False``.
+* Need raw NumPy/dict outputs (no :external:class:`xarray.DataTree`): on-batch with ``return_datatree=False``.
 
 .. note::
 

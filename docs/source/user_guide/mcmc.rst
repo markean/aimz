@@ -7,7 +7,7 @@ MCMC Support
 
 \
 
-While aimz is primarily designed around variational inference and predictive sampling, it also provides support for MCMC methods via the `NumPyro backend <https://num.pyro.ai/en/stable/mcmc.html#numpyro.infer.mcmc.MCMC>`__, using the same aimz interface (e.g., :py:meth:`~aimz.ImpactModel.fit_on_batch` and :py:meth:`~aimz.ImpactModel.predict_on_batch`).
+While aimz is primarily designed around variational inference and predictive sampling, it also provides support for MCMC methods via the `NumPyro backend <https://num.pyro.ai/en/stable/mcmc.html#numpyro.infer.mcmc.MCMC>`__, using the same aimz interface (e.g., :meth:`~aimz.ImpactModel.fit_on_batch` and :meth:`~aimz.ImpactModel.predict_on_batch`).
 This enables users to apply MCMC to more complex models where variational inference may be less effective and dataset sizes are relatively small.
 
 .. jupyter-execute::
@@ -52,14 +52,14 @@ We set up a linear regression model and create synthetic data for both features 
 MCMC Sampling and Prediction
 ----------------------------
 
-MCMC sampling can be performed using the :py:class:`~aimz.ImpactModel` class by setting the ``inference`` argument to :external:py:class:`~numpyro.infer.mcmc.MCMC`.
+MCMC sampling can be performed using the :class:`~aimz.ImpactModel` class by setting the ``inference`` argument to :external:class:`~numpyro.infer.mcmc.MCMC`.
 Users can configure the sampler, warm-up steps, and other MCMC-specific parameters.
-Calling :py:meth:`~aimz.ImpactModel.fit_on_batch()` initiates the sampling process.
-Internally, aimz executes the sampler via the :external:py:meth:`~numpyro.infer.mcmc.MCMC.run` method and stores the posterior samples using :external:py:meth:`~numpyro.infer.mcmc.MCMC.get_samples`.
+Calling :meth:`~aimz.ImpactModel.fit_on_batch()` initiates the sampling process.
+Internally, aimz executes the sampler via the :external:meth:`~numpyro.infer.mcmc.MCMC.run` method and stores the posterior samples using :external:meth:`~numpyro.infer.mcmc.MCMC.get_samples`.
 
-Note that calling :py:meth:`~aimz.ImpactModel.fit` with :external:py:class:`~numpyro.infer.mcmc.MCMC` as the inference method will raise a :exc:`TypeError`, as this method is intended for mini-batch training or subsampling.
+Note that calling :meth:`~aimz.ImpactModel.fit` with :external:class:`~numpyro.infer.mcmc.MCMC` as the inference method will raise a :exc:`TypeError`, as this method is intended for mini-batch training or subsampling.
 Regardless of the number of chains (``num_chains``) used, the posterior samples are combined across chains to ensure compatibility with the rest of the aimz interface.
-Posterior predictive sampling can be performed using the :py:meth:`~aimz.ImpactModel.predict` or :py:meth:`~aimz.ImpactModel.predict_on_batch` methods.
+Posterior predictive sampling can be performed using the :meth:`~aimz.ImpactModel.predict` or :meth:`~aimz.ImpactModel.predict_on_batch` methods.
 
 .. jupyter-execute::
 
@@ -77,7 +77,7 @@ Posterior predictive sampling can be performed using the :py:meth:`~aimz.ImpactM
 Using External MCMC Samples
 ---------------------------
 
-Users can run MCMC sampling directly using NumPyro and then insert the posterior samples into an :py:class:`~aimz.ImpactModel` instance using the :py:meth:`~aimz.ImpactModel.set_posterior_sample` method for downstream analysis.
+Users can run MCMC sampling directly using NumPyro and then insert the posterior samples into an :class:`~aimz.ImpactModel` instance using the :meth:`~aimz.ImpactModel.set_posterior_sample` method for downstream analysis.
 For example:
 
 .. jupyter-execute::

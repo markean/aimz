@@ -8,7 +8,7 @@ Model Persistence
 \
 
 Model persistence allows you to save a trained model to disk and reload it later for inference or continued training.
-This documentation shows how to serialize and deserialize an :py:class:`~aimz.ImpactModel` instance using `cloudpickle <https://pypi.org/project/cloudpickle/>`__, which extends the standard ``pickle`` module to handle a wide range of Python objects, including closures and local functions.
+This documentation shows how to serialize and deserialize an :class:`~aimz.ImpactModel` instance using `cloudpickle <https://pypi.org/project/cloudpickle/>`__, which extends the standard ``pickle`` module to handle a wide range of Python objects, including closures and local functions.
 An alternative is `dill <https://pypi.org/project/dill/>`__, which offers similar functionality.
 
 .. note::
@@ -70,7 +70,7 @@ Model Training
 Serialization
 -------------
 
-Save a trained :py:class:`~aimz.ImpactModel` (and optionally its input data) to disk for later use:
+Save a trained :class:`~aimz.ImpactModel` (and optionally its input data) to disk for later use:
 
 .. jupyter-execute::
 
@@ -80,9 +80,9 @@ Save a trained :py:class:`~aimz.ImpactModel` (and optionally its input data) to 
 Deserialization
 ---------------
 
-Load a previously saved :py:class:`~aimz.ImpactModel` (and optionally its input data) from disk in a fresh new session or different runtime environment.
+Load a previously saved :class:`~aimz.ImpactModel` (and optionally its input data) from disk in a fresh new session or different runtime environment.
 To use the loaded model correctly, the same dependencies, imports, and any constants or variables that the ``model`` relied on when it was saved must be available.
-Any JAX array—whether part of the :py:class:`~aimz.ImpactModel` or the input data—will be placed on the default device.
+Any JAX array—whether part of the :class:`~aimz.ImpactModel` or the input data—will be placed on the default device.
 
 .. jupyter-execute::
     :hide-output:

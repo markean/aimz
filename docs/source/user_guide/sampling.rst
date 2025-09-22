@@ -7,22 +7,22 @@ Explicit Sampling
 
 \
 
-aimz provides three sets of explicit sampling methods from the :py:class:`~aimz.ImpactModel` class, similar to `PyMC samplers <https://www.pymc.io/projects/docs/en/stable/api/samplers.html>`__:
+aimz provides three sets of explicit sampling methods from the :class:`~aimz.ImpactModel` class, similar to `PyMC samplers <https://www.pymc.io/projects/docs/en/stable/api/samplers.html>`__:
 
-1. **Prior Predictive Sampling**: :py:meth:`~aimz.ImpactModel.sample_prior_predictive_on_batch` and :py:meth:`~aimz.ImpactModel.sample_prior_predictive`.
-2. **Posterior Sampling**: :py:meth:`~aimz.ImpactModel.sample`.
-3. **Posterior Predictive Sampling**: :py:meth:`~aimz.ImpactModel.sample_posterior_predictive_on_batch` and :py:meth:`~aimz.ImpactModel.sample_posterior_predictive`.
+1. **Prior Predictive Sampling**: :meth:`~aimz.ImpactModel.sample_prior_predictive_on_batch` and :meth:`~aimz.ImpactModel.sample_prior_predictive`.
+2. **Posterior Sampling**: :meth:`~aimz.ImpactModel.sample`.
+3. **Posterior Predictive Sampling**: :meth:`~aimz.ImpactModel.sample_posterior_predictive_on_batch` and :meth:`~aimz.ImpactModel.sample_posterior_predictive`.
 
-By default, these methods return results as an :external:py:class:`xarray.DataTree`, with the relevant group labeled as ``prior_predictive``, ``posterior``, or ``posterior_predictive``.
-For some methods, setting ``return_datatree=False`` instead returns a :py:class:`dict`.
+By default, these methods return results as an :external:class:`xarray.DataTree`, with the relevant group labeled as ``prior_predictive``, ``posterior``, or ``posterior_predictive``.
+For some methods, setting ``return_datatree=False`` instead returns a :class:`dict`.
 
-The prior predictive sampling methods perform forward sampling based on the model’s prior specification in the ``kernel`` and are not part of the standard training and inference workflow (:py:meth:`~aimz.ImpactModel.fit`/:py:meth:`~aimz.ImpactModel.predict`), making them particularly useful for conducting prior predictive checks.
+The prior predictive sampling methods perform forward sampling based on the model’s prior specification in the ``kernel`` and are not part of the standard training and inference workflow (:meth:`~aimz.ImpactModel.fit`/:meth:`~aimz.ImpactModel.predict`), making them particularly useful for conducting prior predictive checks.
 
-Unlike :py:meth:`~aimz.ImpactModel.fit` or :py:meth:`~aimz.ImpactModel.fit_on_batch`, :py:meth:`~aimz.ImpactModel.sample` does not modify the internal ``posterior`` attribute.
+Unlike :meth:`~aimz.ImpactModel.fit` or :meth:`~aimz.ImpactModel.fit_on_batch`, :meth:`~aimz.ImpactModel.sample` does not modify the internal ``posterior`` attribute.
 It is primarily intended for drawing posterior samples from a fitted model using variational inference.
-Users can update the internal posterior manually by passing the samples obtained from :py:meth:`~aimz.ImpactModel.sample` to :py:meth:`~aimz.ImpactModel.set_posterior_sample` without retraining the model.
+Users can update the internal posterior manually by passing the samples obtained from :meth:`~aimz.ImpactModel.sample` to :meth:`~aimz.ImpactModel.set_posterior_sample` without retraining the model.
 
-The posterior predictive sampling methods serve as convenient aliases for :py:meth:`~aimz.ImpactModel.predict_on_batch` and :py:meth:`~aimz.ImpactModel.predict`, respectively.
+The posterior predictive sampling methods serve as convenient aliases for :meth:`~aimz.ImpactModel.predict_on_batch` and :meth:`~aimz.ImpactModel.predict`, respectively.
 
 .. jupyter-execute::
     :hide-output:
@@ -96,8 +96,8 @@ Posterior Sampling
 ------------------
 
 We first train the model using variational inference, drawing only a single posterior sample for demonstration purposes.
-After fitting, we call :py:meth:`~aimz.ImpactModel.sample` to generate 100 posterior samples for further analysis.
-Setting ``return_datatree=False`` ensures that the results are returned as a dictionary rather than an :external:py:class:`xarray.DataTree`.
+After fitting, we call :meth:`~aimz.ImpactModel.sample` to generate 100 posterior samples for further analysis.
+Setting ``return_datatree=False`` ensures that the results are returned as a dictionary rather than an :external:class:`xarray.DataTree`.
 
 .. jupyter-execute::
 
@@ -106,7 +106,7 @@ Setting ``return_datatree=False`` ensures that the results are returned as a dic
 
 \
 
-We pass posterior samples to :py:meth:`~aimz.ImpactModel.set_posterior_sample` to update the model’s internal ``posterior``:
+We pass posterior samples to :meth:`~aimz.ImpactModel.set_posterior_sample` to update the model’s internal ``posterior``:
 
 .. jupyter-execute::
 
@@ -116,7 +116,7 @@ We pass posterior samples to :py:meth:`~aimz.ImpactModel.set_posterior_sample` t
 Posterior Predictive Sampling
 -----------------------------
 
-We draw posterior predictive samples from the fitted model using :py:meth:`~aimz.ImpactModel.sample_posterior_predictive_on_batch`, though the same results can be obtained with :py:meth:`~aimz.ImpactModel.predict_on_batch` (or :py:meth:`~aimz.ImpactModel.predict`).
+We draw posterior predictive samples from the fitted model using :meth:`~aimz.ImpactModel.sample_posterior_predictive_on_batch`, though the same results can be obtained with :meth:`~aimz.ImpactModel.predict_on_batch` (or :meth:`~aimz.ImpactModel.predict`).
 The posterior group now contains 100 posterior samples.
 
 .. jupyter-execute::
