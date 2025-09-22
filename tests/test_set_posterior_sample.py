@@ -33,6 +33,15 @@ if TYPE_CHECKING:
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
+def test_empty_posterior_sample(vi: "SVI") -> None:
+    """Empty posterior sample raises ValueError."""
+    im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
+    msg = "`posterior_sample` cannot be empty."
+    with pytest.raises(ValueError, match=msg):
+        im.set_posterior_sample({})
+
+
+@pytest.mark.parametrize("vi", [lm], indirect=True)
 def test_set_posterior_sample(
     synthetic_data: tuple[ArrayLike, ArrayLike],
     vi: "SVI",
@@ -79,6 +88,6 @@ def test_inconsistent_batch_shapes(vi: "SVI") -> None:
     im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
     with pytest.raises(
         ValueError,
-        match="Inconsistent batch shapes found in posterior_sample",
+        match="Inconsistent batch shapes found in `posterior_sample`",
     ):
         im.set_posterior_sample({"a": jnp.ones((100, 10)), "b": jnp.ones((200,))})

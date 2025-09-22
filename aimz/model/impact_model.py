@@ -293,7 +293,6 @@ class ImpactModel(BaseModel):
             return_sites=return_sites,
             output_observed=output_observed,
         )
-        self._return_sites = self._kernel_spec.return_sites
 
     def _create_output_subdir(self, output_dir: str | Path | None) -> tuple[Path, Path]:
         """Create a subdirectory for storing output.
@@ -1113,11 +1112,7 @@ class ImpactModel(BaseModel):
         """
         return hasattr(self, "_is_fitted") and self._is_fitted
 
-    def set_posterior_sample(
-        self,
-        posterior_sample: dict[str, Array],
-        return_sites: tuple[str, ...] | None = None,
-    ) -> Self:
+    def set_posterior_sample(self, posterior_sample: dict[str, Array]) -> Self:
         """Set posterior samples for the model.
 
         This method sets externally obtained posterior samples on the model instance,
@@ -1136,9 +1131,6 @@ class ImpactModel(BaseModel):
 
         Args:
             posterior_sample: Posterior samples to set for the model.
-            return_sites: Names of variable (sites) to return in
-                :meth:`~aimz.ImpactModel.predict`. By default, it is set to
-                :attr:`~aimz.ImpactModel.param_output`.
 
         Returns:
             The model instance, treated as fitted with posterior samples set, enabling
@@ -1151,17 +1143,22 @@ class ImpactModel(BaseModel):
         batch_shapes = {
             sample.shape[:batch_ndims] for sample in posterior_sample.values()
         }
+        if not batch_shapes:
+            msg = "`posterior_sample` cannot be empty."
+            raise ValueError(msg)
         if len(batch_shapes) > 1:
-            msg = f"Inconsistent batch shapes found in posterior_sample: {batch_shapes}"
+            msg = (
+                f"Inconsistent batch shapes found in `posterior_sample`: {batch_shapes}"
+            )
             raise ValueError(msg)
         (self._num_samples,) = batch_shapes.pop()
         self._posterior = posterior_sample
-        self._return_sites = return_sites or (self.param_output,)
-        self._kernel_spec = KernelSpec(
-            traced=False,
-            return_sites=return_sites or (self.param_output,),
-            output_observed=False,
-        )
+        if self._kernel_spec is None:
+            self._kernel_spec = KernelSpec(
+                traced=False,
+                return_sites=(self.param_output,),
+                output_observed=False,
+            )
         self._is_fitted = True
 
         return self

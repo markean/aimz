@@ -11,7 +11,8 @@
 [![DOI](https://zenodo.org/badge/1009062911.svg)](https://doi.org/10.5281/zenodo.16101876)
 
 [**Installation**](https://aimz.readthedocs.io/stable/getting_started/installation.html) |
-[**Documentation**](https://aimz.readthedocs.io/)
+[**Documentation**](https://aimz.readthedocs.io/) |
+[**Changelog**](https://aimz.readthedocs.io/latest/changelog.html)
 
 ## Overview
 
