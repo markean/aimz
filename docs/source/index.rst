@@ -48,12 +48,26 @@ Navigation
 
       Explore tutorials and practical examples.
 
+   .. grid-item-card:: Frequently Asked Questions
+      :class-card: intro-card
+      :link: faq
+      :link-type: doc
+
+      Browse common questions and troubleshooting tips.
+
    .. grid-item-card:: API Reference
       :class-card: intro-card
       :link: api
       :link-type: doc
 
       Browse the documentation for all public functions and classes.
+
+   .. grid-item-card:: Development
+      :class-card: intro-card
+      :link: development/index
+      :link-type: doc
+
+      Access the development documentation and guidelines.
 
    .. grid-item-card:: Changelog
       :class-card: intro-card
@@ -62,12 +76,14 @@ Navigation
 
       View the changelog for release notes and version history.
 
+
 .. toctree::
    :hidden:
    :maxdepth: 1
 
    Getting Started <getting_started/index>
    User Guide <user_guide/index>
+   FAQs <faq>
    API Reference <api>
    Development <development/index>
    Changelog <changelog>

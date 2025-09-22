@@ -65,6 +65,7 @@ intersphinx_mapping = {
     "numpy": ("https://numpy.org/doc/stable/", None),
     "pandas": ("https://pandas.pydata.org/docs", None),
     "xarray": ("https://docs.xarray.dev/en/stable/", None),
+    "arviz": ("https://python.arviz.org/en/stable/", None),
     "mlflow": ("https://mlflow.org/docs/latest/api_reference/", None),
 }
 tls_verify = False
@@ -126,6 +127,7 @@ html_theme_options = {
     "navbar_align": "left",
     "use_edit_page_button": True,
     "footer_end": None,
+    "header_links_before_dropdown": 4,
 }
 html_show_sourcelink = False
 html_show_sphinx = False

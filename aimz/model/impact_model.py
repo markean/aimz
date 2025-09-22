@@ -463,7 +463,7 @@ class ImpactModel(BaseModel):
                 are expected to be JAX arrays.
 
         Returns:
-            Prior predictive samples.
+            Prior predictive samples. Posterior samples are included if available.
 
         Raises:
             TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
@@ -499,6 +499,8 @@ class ImpactModel(BaseModel):
 
         out = xr.DataTree(name="root")
         out["prior_predictive"] = _dict_to_datatree(prior_predictive_samples)
+        if self.posterior:
+            out["posterior"] = _dict_to_datatree(self.posterior)
 
         return out
 
@@ -540,7 +542,7 @@ class ImpactModel(BaseModel):
                 are expected to be JAX arrays.
 
         Returns:
-            Prior predictive samples.
+            Prior predictive samples. Posterior samples are included if available.
 
         Raises:
             TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
@@ -638,6 +640,8 @@ class ImpactModel(BaseModel):
         out = xr.DataTree(name="root")
         out["prior_predictive"] = xr.DataTree(ds)
         out["prior_predictive"].attrs["output_dir"] = str(output_subdir)
+        if self.posterior:
+            out["posterior"] = _dict_to_datatree(self.posterior)
         out.attrs["output_dir"] = str(output_dir)
 
         return out

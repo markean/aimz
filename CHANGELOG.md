@@ -16,10 +16,10 @@ This exposes a lazily-built, cached structural specification of the user kernel 
 ### Changed
 
 - All `tqdm` progress bars now use `dynamic_ncols=True` to adjust column width dynamically ([#93](https://github.com/markean/aimz/issues/93)).
-
 - {meth}`~aimz.ImpactModel.fit_on_batch`, {meth}`~aimz.ImpactModel.sample_prior_predictive_on_batch`, {meth}`~aimz.ImpactModel.sample_prior_predictive`, and {meth}`~aimz.ImpactModel.train_on_batch` now reuse the cached {attr}`~aimz.ImpactModel.kernel_spec` and avoid redundant model tracing ([#98](https://github.com/markean/aimz/issues/98)).
-- {meth}`~aimz.ImpactModel.set_posterior_sample` now raises an error when an empty posterior dictionary (`{}`) is provided.
-- {meth}`~aimz.ImpactModel.set_posterior_sample` no longer accepts a `return_sites` parameter; downstream methods can now set it explicitly.
+- {meth}`~aimz.ImpactModel.set_posterior_sample` no longer accepts a `return_sites` parameter; downstream methods can now set it explicitly ([#100](https://github.com/markean/aimz/issues/100)).
+- {meth}`~aimz.ImpactModel.set_posterior_sample` now raises an error when an empty posterior dictionary (`{}`) is provided ([#101](https://github.com/markean/aimz/issues/101)).
+- {meth}`~aimz.ImpactModel.sample_prior_predictive_on_batch` and {meth}`~aimz.ImpactModel.sample_prior_predictive` now include posterior samples in the returned results if available ([#103](https://github.com/markean/aimz/issues/103)).
 
 ### Fixed
 

@@ -74,8 +74,9 @@ def test_sample_prior_predictive_on_batch_lm(
     vi: "SVI",
 ) -> None:
     """Test the `.sample_prior_predictive_on_batch()` method of ImpactModel."""
-    X, _ = synthetic_data
+    X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
+    im.fit_on_batch(X, y)
     samples = im.sample_prior_predictive_on_batch(X=X, num_samples=99)
 
     assert isinstance(samples, xr.DataTree)
@@ -90,4 +91,4 @@ def test_sample_prior_predictive_on_batch_lm(
     assert isinstance(samples_dict, dict)
     assert samples_dict["y"].shape == (99, len(X))
     assert im.kernel_spec.traced
-    assert not im.kernel_spec.output_observed
+    assert im.kernel_spec.output_observed
