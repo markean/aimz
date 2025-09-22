@@ -10,7 +10,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `output_dir` attribute to the root and group nodes of {class}`xarray.DataTree` objects returned by {meth}`~aimz.ImpactModel.sample_prior_predictive`, {meth}`~aimz.ImpactModel.predict`, and {meth}`~aimz.ImpactModel.log_likelihood`, specifying the directory where results are saved ([#85](https://github.com/markean/aimz/issues/85)).
-
 - Introduced the public {class}`~aimz.model.KernelSpec` dataclass and the {attr}`~aimz.ImpactModel.kernel_spec` attribute on {class}`~aimz.ImpactModel`.
 This exposes a lazily-built, cached structural specification of the user kernel (fields: ``traced``, ``return_sites``, ``output_observed``) so training and predictive methods avoid redundant model tracing ([#98](https://github.com/markean/aimz/issues/98)).
 
@@ -19,6 +18,8 @@ This exposes a lazily-built, cached structural specification of the user kernel 
 - All `tqdm` progress bars now use `dynamic_ncols=True` to adjust column width dynamically ([#93](https://github.com/markean/aimz/issues/93)).
 
 - {meth}`~aimz.ImpactModel.fit_on_batch`, {meth}`~aimz.ImpactModel.sample_prior_predictive_on_batch`, {meth}`~aimz.ImpactModel.sample_prior_predictive`, and {meth}`~aimz.ImpactModel.train_on_batch` now reuse the cached {attr}`~aimz.ImpactModel.kernel_spec` and avoid redundant model tracing ([#98](https://github.com/markean/aimz/issues/98)).
+- {meth}`~aimz.ImpactModel.set_posterior_sample` now raises an error when an empty posterior dictionary (`{}`) is provided.
+- {meth}`~aimz.ImpactModel.set_posterior_sample` no longer accepts a `return_sites` parameter; downstream methods can now set it explicitly.
 
 ### Fixed
 
@@ -33,7 +34,6 @@ This exposes a lazily-built, cached structural specification of the user kernel 
 ### Changed
 
 - Methods in {class}`~aimz.ImpactModel` now automatically determine the `batch_size` if it is not provided, based on the input data and number of samples ([#70](https://github.com/markean/aimz/issues/70)).
-
 - {meth}`~aimz.ImpactModel.sample_posterior_predictive_on_batch` and {meth}`~aimz.ImpactModel.sample_posterior_predictive` no longer accept the `in_sample` argument. Results are now always written to the `posterior_predictive` group.
 
 ### Removed

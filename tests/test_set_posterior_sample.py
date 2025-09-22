@@ -79,6 +79,6 @@ def test_inconsistent_batch_shapes(vi: "SVI") -> None:
     im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
     with pytest.raises(
         ValueError,
-        match="Inconsistent batch shapes found in posterior_sample",
+        match="Inconsistent batch shapes found in `posterior_sample`",
     ):
         im.set_posterior_sample({"a": jnp.ones((100, 10)), "b": jnp.ones((200,))})
