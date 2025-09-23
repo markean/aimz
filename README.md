@@ -219,10 +219,6 @@ impact = im.estimate_effect(
 
 > Local latent variable requires `.predict_on_batch()` here. Prefer `.predict()` whenever it is compatible with the model.
 
-## Getting Help
-
-For feature requests, assistance, or any inquiries, contact maintainers or open an issue/pull request.
-
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
+See the [Contributing Guide](https://aimz.readthedocs.io/latest/development/contributing.html) to get started.
