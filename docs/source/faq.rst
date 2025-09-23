@@ -3,10 +3,40 @@
 Frequently Asked Questions
 ==========================
 
+
+Do I need to know NumPyro_ to use aimz?
+--------------------------------------
+Yes.
+aimz builds on NumPyro_’s primitives and effect handlers.
+You should be comfortable writing a model function, defining a guide (for SVI) or configuring MCMC, and reading model traces.
+The library focuses on orchestration, not abstracting away core probabilistic modeling concepts.
+
+
+Can I use aimz with any NumPyro_ model?
+---------------------------------------
+No.
+Most conventional SVI / MCMC models with global latents and plate-based structure work, but there are limitations:
+
+* Use of the control‑flow primitive: :external:func:`~numpyro.contrib.control_flow.scan` (or deeply nested dynamic control flow) – only partial support.
+* Complex per‑example local latent structure (e.g., very large / nested plates) – only partial support.
+* Models that rely on shapes incompatible with sharded / batched execution may require refactoring.
+
+If a model traces successfully once but fails in batched prediction, try the
+``*_on_batch`` variants or simplify local latent structure.
+We plan to broaden coverage—if you hit an unsupported pattern (ideally with a minimal reproducible example), please open an issue or submit a PR.
+
+
 What is a `kernel`?
 -------------------
 A kernel in aimz is a user-defined NumPyro_ model (a stochastic function or :class:`~collections.abc.Callable`) built with primitives like :external:func:`~numpyro.primitives.sample` and :external:func:`~numpyro.primitives.deterministic`.
 Its signature and body define the inputs and output (e.g., ``X``, ``y``, ...), encoding the probabilistic structure—priors, likelihood, and latent variables.
+
+
+Does aimz ship built-in model templates?
+----------------------------------------
+No.
+This is intentional to keep the library lightweight and avoid prescribing a specific modeling style.
+Future recipes or example galleries may be provided separately, but the library itself does not include canonical model classes.
 
 
 Can I use posterior samples generated elsewhere?
