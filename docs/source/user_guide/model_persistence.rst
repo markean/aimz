@@ -67,6 +67,7 @@ Model Training
     )
     im.fit_on_batch(X, y, progress=False);
 
+
 Serialization
 -------------
 
@@ -76,6 +77,7 @@ Save a trained :class:`~aimz.ImpactModel` (and optionally its input data) to dis
 
     with Path.open("model.pkl", "wb") as f:
         cloudpickle.dump((im, X, y), f)
+
 
 Deserialization
 ---------------
@@ -97,6 +99,7 @@ Any JAX array—whether part of the :class:`~aimz.ImpactModel` or the input data
     with Path.open("model.pkl", "rb") as f:
         im, X, y = cloudpickle.load(f)
 
+
 Model Usage
 -----------
 
@@ -108,8 +111,9 @@ Model Usage
     # Predict using the loaded model
     im.predict_on_batch(X)
 
-Resources
----------
+
+See Also
+--------
 
 * ``dill`` `documentation <https://dill.readthedocs.io/en/latest/>`__
 * ``jax Array`` `serialization <https://docs.jax.dev/en/latest/jax.numpy.html#copying-and-serialization>`__

@@ -1015,7 +1015,8 @@ class ImpactModel(BaseModel):
                 each epoch. Ignored if ``X`` is a data loader, in which case the data
                 loader is expected to handle batching internally.
             epochs: The number of epochs for variational inference optimization.
-            shuffle: Whether to shuffle the data at each epoch.
+            shuffle: Whether to shuffle the data at each epoch. Ignored if ``X`` is a
+                data loader.
             **kwargs: Additional arguments passed to the model. All array-like values
                 are expected to be JAX arrays.
 

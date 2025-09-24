@@ -4,6 +4,12 @@ Frequently Asked Questions
 ==========================
 
 
+What is a `kernel`?
+-------------------
+A kernel in aimz is a user-defined NumPyro_ model (a stochastic function or :class:`~collections.abc.Callable`) built with primitives like :external:func:`~numpyro.primitives.sample` and :external:func:`~numpyro.primitives.deterministic`.
+Its signature and body define the inputs and output (e.g., ``X``, ``y``, ...), encoding the probabilistic structure—priors, likelihood, and latent variables.
+
+
 Do I need to know NumPyro_ to use aimz?
 --------------------------------------
 Yes.
@@ -24,12 +30,6 @@ Most conventional SVI / MCMC models with global latents and plate-based structur
 If a model traces successfully once but fails in batched prediction, try the
 ``*_on_batch`` variants or simplify local latent structure.
 We plan to broaden coverage—if you hit an unsupported pattern (ideally with a minimal reproducible example), please open an issue or submit a PR.
-
-
-What is a `kernel`?
--------------------
-A kernel in aimz is a user-defined NumPyro_ model (a stochastic function or :class:`~collections.abc.Callable`) built with primitives like :external:func:`~numpyro.primitives.sample` and :external:func:`~numpyro.primitives.deterministic`.
-Its signature and body define the inputs and output (e.g., ``X``, ``y``, ...), encoding the probabilistic structure—priors, likelihood, and latent variables.
 
 
 Does aimz ship built-in model templates?
