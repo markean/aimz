@@ -20,6 +20,8 @@ This exposes a lazily-built, cached structural specification of the user kernel 
 - {meth}`~aimz.ImpactModel.set_posterior_sample` no longer accepts a `return_sites` parameter; downstream methods can now set it explicitly ([#100](https://github.com/markean/aimz/issues/100)).
 - {meth}`~aimz.ImpactModel.set_posterior_sample` now raises an error when an empty posterior dictionary (`{}`) is provided ([#101](https://github.com/markean/aimz/issues/101)).
 - {meth}`~aimz.ImpactModel.sample_prior_predictive_on_batch` and {meth}`~aimz.ImpactModel.sample_prior_predictive` now include posterior samples in the returned results if available ([#103](https://github.com/markean/aimz/issues/103)).
+- {meth}`~aimz.ImpactModel.sample_prior_predictive_on_batch`, {meth}`~aimz.ImpactModel.sample_prior_predictive`, {meth}`~aimz.ImpactModel.sample`, {meth}`~aimz.ImpactModel.sample_posterior_predictive_on_batch`, {meth}`~aimz.ImpactModel.sample_posterior_predictive`, {meth}`~aimz.ImpactModel.predict_on_batch`, and {meth}`~aimz.ImpactModel.predict` can now accept a single `str` or an iterable of `str` values for the `return_sites` parameter ([#107](https://github.com/markean/aimz/issues/107)).
+- {meth}`~aimz.ImpactModel.sample_prior_predictive_on_batch` returns the default output site along with deterministic sites when `return_sites` is not specified, to be consistent with the behavior of other sampling methods ([#108](https://github.com/markean/aimz/issues/108)).
 
 ### Fixed
 

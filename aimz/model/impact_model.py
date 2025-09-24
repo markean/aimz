@@ -16,7 +16,7 @@
 
 import contextlib
 import logging
-from collections.abc import Callable, Sized
+from collections.abc import Callable, Iterable, Sized
 from datetime import UTC, datetime
 from inspect import signature
 from os import cpu_count
@@ -294,6 +294,26 @@ class ImpactModel(BaseModel):
             output_observed=output_observed,
         )
 
+    def _coerce_return_sites(
+        self,
+        return_sites: str | Iterable[str] | None,
+    ) -> tuple[str, ...]:
+        """Return a normalized tuple of site names.
+
+        Args:
+            return_sites: User-provided site name(s) or ``None``.
+
+        Returns:
+            A tuple of site names.
+        """
+        if return_sites is None:
+            return cast("KernelSpec", self._kernel_spec).return_sites
+        if isinstance(return_sites, str):
+            return (return_sites,)
+        if not isinstance(return_sites, tuple):
+            return tuple(return_sites)
+        return return_sites
+
     def _create_output_subdir(self, output_dir: str | Path | None) -> tuple[Path, Path]:
         """Create a subdirectory for storing output.
 
@@ -444,7 +464,7 @@ class ImpactModel(BaseModel):
         *,
         num_samples: int = 1000,
         rng_key: ArrayLike | None = None,
-        return_sites: tuple[str, ...] | None = None,
+        return_sites: str | Iterable[str] | None = None,
         return_datatree: bool = True,
         **kwargs: object,
     ) -> xr.DataTree | dict[str, npt.NDArray]:
@@ -455,8 +475,8 @@ class ImpactModel(BaseModel):
             num_samples: The number of samples to draw.
             rng_key (ArrayLike | None): A pseudo-random number generator key. By
                 default, an internal key is used and split as needed.
-            return_sites: Names of variables (sites) to return. If ``None``, samples all
-                latent, observed, and deterministic sites.
+            return_sites: Names of variables (sites) to return. If ``None``, samples
+                :attr:`~aimz.ImpactModel.param_output` and deterministic sites.
             return_datatree: If ``True``, return a :external:class:`~xarray.DataTree`;
                 otherwise return a :class:`dict`.
             **kwargs: Additional arguments passed to the model. All array-like values
@@ -488,7 +508,7 @@ class ImpactModel(BaseModel):
                 self.kernel,
                 rng_key=rng_key,
                 num_samples=num_samples,
-                return_sites=return_sites,
+                return_sites=self._coerce_return_sites(return_sites),
                 samples=None,
                 model_kwargs=args_bound,
             ),
@@ -510,7 +530,7 @@ class ImpactModel(BaseModel):
         *,
         num_samples: int = 1000,
         rng_key: ArrayLike | None = None,
-        return_sites: tuple[str, ...] | None = None,
+        return_sites: str | Iterable[str] | None = None,
         batch_size: int | None = None,
         output_dir: str | Path | None = None,
         progress: bool = True,
@@ -560,6 +580,8 @@ class ImpactModel(BaseModel):
             msg = f"Specifying {self.param_output!r} is not allowed."
             raise TypeError(msg)
 
+        return_sites = self._coerce_return_sites(return_sites)
+
         # Prior sampling
         dataloader, _ = _setup_inputs(
             X=X,
@@ -573,9 +595,6 @@ class ImpactModel(BaseModel):
         )
         batch, _ = next(iter(dataloader))
         self._build_kernel_spec(batch, with_output=False)
-        return_sites = (
-            return_sites or cast("KernelSpec", self._kernel_spec).return_sites
-        )
         if rng_key is None:
             self._rng_key, rng_key = random.split(self._rng_key)
         rng_key, rng_subkey = random.split(rng_key)
@@ -651,7 +670,7 @@ class ImpactModel(BaseModel):
         *,
         num_samples: int = 1000,
         rng_key: ArrayLike | None = None,
-        return_sites: tuple[str, ...] | None = None,
+        return_sites: str | Iterable[str] | None = None,
         return_datatree: bool = True,
         **kwargs: object,
     ) -> xr.DataTree | dict[str, npt.NDArray]:
@@ -660,11 +679,11 @@ class ImpactModel(BaseModel):
         Args:
             num_samples: The number of posterior samples to draw.
             rng_key (ArrayLike | None): A pseudo-random number generator key. By
-                default, an internal key is used and split as needed. Has no effect if
-                the inference method is MCMC, where the ``post_warmup_state`` property
-                will be used to continue sampling.
+                default, an internal key is used and split as needed. Ignored if the
+                inference method is MCMC, where the ``post_warmup_state`` property will
+                be used to continue sampling.
             return_sites: Names of variables (sites) to return. If ``None``, samples
-                all latent sites. Has no effect if the inference method is MCMC.
+                all latent sites. Ignored if the inference method is MCMC.
             return_datatree: If ``True``, return a :external:class:`~xarray.DataTree`;
                 otherwise return a :class:`dict`.
             **kwargs: Additional arguments passed to the model. All array-like values
@@ -722,7 +741,7 @@ class ImpactModel(BaseModel):
         *,
         intervention: dict | None = None,
         rng_key: ArrayLike | None = None,
-        return_sites: tuple[str, ...] | None = None,
+        return_sites: str | Iterable[str] | None = None,
         return_datatree: bool = True,
         **kwargs: object,
     ) -> xr.DataTree | dict[str, npt.NDArray]:
@@ -773,7 +792,7 @@ class ImpactModel(BaseModel):
         *,
         intervention: dict | None = None,
         rng_key: ArrayLike | None = None,
-        return_sites: tuple[str, ...] | None = None,
+        return_sites: str | Iterable[str] | None = None,
         batch_size: int | None = None,
         output_dir: str | Path | None = None,
         progress: bool = True,
@@ -911,14 +930,14 @@ class ImpactModel(BaseModel):
         Args:
             X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
             y (ArrayLike): Output data with shape ``(n_samples_Y,)``.
-            num_steps: Number of steps for variational inference optimization. Has no
-                effect if the inference method is MCMC.
-            num_samples: The number of posterior samples to draw. Has no effect if the
+            num_steps: Number of steps for variational inference optimization. Ignored
+                if the inference method is MCMC.
+            num_samples: The number of posterior samples to draw. Ignored if the
                 inference method is MCMC.
             rng_key (ArrayLike | None): A pseudo-random number generator key. By
                 default, an internal key is used and split as needed.
-            progress: Whether to display a progress bar. Has no effect
-                if the inference method is MCMC.
+            progress: Whether to display a progress bar. Ignored if the inference method
+                is MCMC.
             **kwargs: Additional arguments passed to the model. All array-like values
                 are expected to be JAX arrays.
 
@@ -1175,7 +1194,7 @@ class ImpactModel(BaseModel):
         intervention: dict | None = None,
         rng_key: ArrayLike | None = None,
         in_sample: bool = True,
-        return_sites: tuple[str, ...] | None = None,
+        return_sites: str | Iterable[str] | None = None,
         return_datatree: bool = True,
         **kwargs: object,
     ) -> xr.DataTree | dict[str, npt.NDArray]:
@@ -1247,8 +1266,7 @@ class ImpactModel(BaseModel):
                 kernel,
                 rng_key=rng_key,
                 num_samples=self._num_samples,
-                return_sites=return_sites
-                or cast("KernelSpec", self._kernel_spec).return_sites,
+                return_sites=self._coerce_return_sites(return_sites),
                 samples=self.posterior,
                 model_kwargs=args_bound,
             ),
@@ -1273,7 +1291,7 @@ class ImpactModel(BaseModel):
         intervention: dict | None = None,
         rng_key: ArrayLike | None = None,
         in_sample: bool = True,
-        return_sites: tuple[str, ...] | None = None,
+        return_sites: str | Iterable[str] | None = None,
         batch_size: int | None = None,
         output_dir: str | Path | None = None,
         progress: bool = True,
@@ -1375,9 +1393,7 @@ class ImpactModel(BaseModel):
             rng_key, rng_subkey = random.split(rng_key)
             kernel = seed(do(self.kernel, data=intervention), rng_seed=rng_subkey)
 
-        return_sites = (
-            return_sites or cast("KernelSpec", self._kernel_spec).return_sites
-        )
+        return_sites = self._coerce_return_sites(return_sites)
 
         kwargs_array, kwargs_extra = _group_kwargs(kwargs)
         if self._fn_sample_posterior_predictive is None:

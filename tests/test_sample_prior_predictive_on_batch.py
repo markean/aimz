@@ -77,7 +77,7 @@ def test_sample_prior_predictive_on_batch_lm(
     X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
     im.fit_on_batch(X, y)
-    samples = im.sample_prior_predictive_on_batch(X=X, num_samples=99)
+    samples = im.sample_prior_predictive_on_batch(X=X, num_samples=99, return_sites="y")
 
     assert isinstance(samples, xr.DataTree)
     assert samples.prior_predictive["y"].values.shape == (1, 99, len(X))
@@ -86,6 +86,7 @@ def test_sample_prior_predictive_on_batch_lm(
         X=X,
         num_samples=99,
         return_datatree=False,
+        return_sites=["b", "y", "sigma"],
     )
 
     assert isinstance(samples_dict, dict)
