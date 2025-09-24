@@ -109,6 +109,12 @@ def test_predict_on_batch_lm_with_kwargs_array(
     X, y = synthetic_data
     im = ImpactModel(lm_with_kwargs_array, rng_key=random.key(42), inference=vi)
     im.fit(X=X, y=y, c=y, batch_size=3)
-    im.predict_on_batch(X=X, c=y)
-    # `.sample_posterior_predictive_on_batch()` is an alias for `.predict_on_batch()`
-    im.sample_posterior_predictive_on_batch(X=X, c=y, return_datatree=False)
+    im.predict_on_batch(X=X, c=y, return_sites="y")
+
+    # `.sample_posterior_predictive_on_batch()` is an alias for `.predict_on_batch()`.
+    im.sample_posterior_predictive_on_batch(
+        X=X,
+        c=y,
+        return_sites=["y"],
+        return_datatree=False,
+    )

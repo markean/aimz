@@ -14,6 +14,7 @@
 
 """Tests for the `.sample_prior_predictive()` method."""
 
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
@@ -65,3 +66,24 @@ def test_sample_prior_predictive_lm(
 
     assert isinstance(samples, xr.DataTree)
     assert samples.prior_predictive["y"].values.shape == (1, 99, len(X))
+
+    # Test with `return_sites`
+    with pytest.warns(UserWarning, match=msg), TemporaryDirectory() as tmp_dir:
+        assert im.sample_prior_predictive(
+            X=X,
+            num_samples=99,
+            batch_size=len(X) // 2,
+            return_sites="y",
+            output_dir=tmp_dir,
+        ).prior_predictive["y"].values.shape == (1, 99, len(X))
+
+    with pytest.warns(UserWarning, match=msg), TemporaryDirectory() as tmp_dir:
+        assert im.sample_prior_predictive(
+            X=X,
+            num_samples=99,
+            batch_size=len(X) // 2,
+            return_sites=["y"],
+            output_dir=tmp_dir,
+        ).prior_predictive["y"].values.shape == (1, 99, len(X))
+
+    im.cleanup()

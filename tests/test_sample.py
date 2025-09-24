@@ -14,6 +14,8 @@
 
 """Tests for the `.sample()` method."""
 
+from typing import TYPE_CHECKING
+
 import pytest
 from conftest import lm
 from jax import random
@@ -21,6 +23,9 @@ from jax.typing import ArrayLike
 from numpyro.infer import MCMC
 
 from aimz import ImpactModel
+
+if TYPE_CHECKING:
+    from numpyro.infer import SVI
 
 
 @pytest.mark.parametrize("mcmc", [lm], indirect=True)
@@ -34,6 +39,44 @@ def test_missing_param_output(
     im.fit_on_batch(X=X, y=y)
     with pytest.raises(TypeError):
         im.sample(rng_key=random.key(42), X=X)
+
+
+@pytest.mark.parametrize("vi", [lm], indirect=True)
+def test_sample_with_vi(
+    synthetic_data: tuple[ArrayLike, ArrayLike],
+    vi: "SVI",
+) -> None:
+    """Test the `.sample()` method of ImpactModel with SVI."""
+    X, y = synthetic_data
+    im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
+    im.fit_on_batch(X=X, y=y)
+
+    num_samples = 7
+    samples = im.sample(
+        num_samples=num_samples,
+        rng_key=random.key(42),
+        return_sites="b",
+        X=X,
+        y=y,
+    ).posterior
+
+    # Check shapes for all sampled sites
+    for var in samples.data_vars:
+        assert samples[var].values.shape[1] == num_samples, (
+            f"Incorrect number of samples for site {var}"
+        )
+
+    samples_dict = im.sample(
+        num_samples=num_samples,
+        rng_key=random.key(42),
+        return_sites=["w", "b", "sigma"],
+        return_datatree=False,
+        X=X,
+        y=y,
+    )
+
+    for k, v in samples_dict.items():
+        assert v.shape[0] == num_samples, f"Incorrect number of samples for site {k}"
 
 
 @pytest.mark.parametrize("mcmc", [lm], indirect=True)

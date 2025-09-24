@@ -14,6 +14,8 @@
 
 """Tests for the `.predict()` method."""
 
+from tempfile import TemporaryDirectory
+
 import numpyro.distributions as dist
 import pytest
 from conftest import latent_variable_model, lm
@@ -153,7 +155,23 @@ def test_predict_after_cleanup(
 
     assert temp_dir_before != temp_dir_after
 
-    # `.sample_posterior_predictive()` is an alias for `.predict()`
     im.cleanup()
-    with pytest.warns(UserWarning, match=msg):
-        im.sample_posterior_predictive(X=X, batch_size=len(X) // 2, progress=False)
+
+    # `.sample_posterior_predictive()` is an alias for `.predict()`.
+    # Test with `return_sites`.
+    with pytest.warns(UserWarning, match=msg), TemporaryDirectory() as tmp_dir:
+        im.sample_posterior_predictive(
+            X=X,
+            return_sites="y",
+            batch_size=len(X) // 2,
+            output_dir=tmp_dir,
+            progress=False,
+        )
+    with pytest.warns(UserWarning, match=msg), TemporaryDirectory() as tmp_dir:
+        im.sample_posterior_predictive(
+            X=X,
+            return_sites=["y"],
+            batch_size=len(X) // 2,
+            output_dir=tmp_dir,
+            progress=False,
+        )
