@@ -9,4 +9,5 @@ User Guide
    model_persistence
    cleanup
    mlflow
+   dataloader
    mcmc
