@@ -4,14 +4,39 @@ Frequently Asked Questions
 ==========================
 
 
-What is a `kernel`?
+What is a kernel?
 -------------------
 A kernel in aimz is a user-defined NumPyro_ model (a stochastic function or :class:`~collections.abc.Callable`) built with primitives like :external:func:`~numpyro.primitives.sample` and :external:func:`~numpyro.primitives.deterministic`.
 Its signature and body define the inputs and output (e.g., ``X``, ``y``, ...), encoding the probabilistic structure—priors, likelihood, and latent variables.
 
 
+How do I use different argument names than ``X`` and ``y``?
+-----------------------------------------------------------
+By default, aimz expects your kernel signature to include parameters named ``X`` (input) and ``y`` (output).
+If you use different names—e.g. ``features`` / ``target`` or ``covariates`` / ``outcome``—declare them when instantiating :class:`~aimz.ImpactModel`:
+
+.. code-block:: python
+
+	def kernel(features, extra, target=None):
+	    ...
+
+	im = ImpactModel(
+	    kernel,
+            ...,
+	    param_input="features",
+	    param_output="target",
+	)
+
+If you see an error like:
+
+``Kernel must accept 'X' and 'y' as argument(s). Modify the kernel signature or set `param_input` and `param_output` accordingly.``
+
+it means you neither matched the defaults nor overrode them.
+Fix it by renaming your arguments to ``X`` / ``y`` or supplying ``param_input`` / ``param_output`` as shown above.
+
+
 Do I need to know NumPyro_ to use aimz?
---------------------------------------
+---------------------------------------
 Yes.
 aimz builds on NumPyro_’s primitives and effect handlers.
 You should be comfortable writing a model function, defining a guide (for SVI) or configuring MCMC, and reading model traces.

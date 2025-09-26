@@ -39,8 +39,6 @@ Inference
    ImpactModel.predict_on_batch
    ImpactModel.predict
    ImpactModel.log_likelihood
-   ImpactModel.estimate_effect
-   ImpactModel.cleanup
 
 
 Explicit Sampling
@@ -54,3 +52,13 @@ Explicit Sampling
    ImpactModel.sample
    ImpactModel.sample_posterior_predictive_on_batch
    ImpactModel.sample_posterior_predictive
+
+
+Miscellaneous
+-------------
+
+.. autosummary::
+   :toctree: generated/
+
+   ImpactModel.estimate_effect
+   ImpactModel.cleanup
