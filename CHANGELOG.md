@@ -24,6 +24,7 @@ This exposes a lazily-built, cached structural specification of the user kernel 
 - {meth}`~aimz.ImpactModel.sample_prior_predictive_on_batch`, {meth}`~aimz.ImpactModel.sample_prior_predictive`, {meth}`~aimz.ImpactModel.sample`, {meth}`~aimz.ImpactModel.sample_posterior_predictive_on_batch`, {meth}`~aimz.ImpactModel.sample_posterior_predictive`, {meth}`~aimz.ImpactModel.predict_on_batch`, and {meth}`~aimz.ImpactModel.predict` can now accept a single `str` or an iterable of `str` values for the `return_sites` parameter ([#107](https://github.com/markean/aimz/issues/107)).
 - {meth}`~aimz.ImpactModel.sample_prior_predictive_on_batch` returns the default output site along with deterministic sites when `return_sites` is not specified, to be consistent with the behavior of other sampling methods ([#108](https://github.com/markean/aimz/issues/108)).
 - {meth}`~aimz.ImpactModel.estimate_effect` returns a `posterior` group node in the {class}`xarray.DataTree` object when posterior samples are available, to be consistent with other methods ([#110](https://github.com/markean/aimz/issues/110)).
+- Subdirectories under {attr}`~aimz.ImpactModel.temp_dir` now include microseconds in their names to avoid duplicates and file-exists errors ([#110](https://github.com/markean/aimz/issues/110)).
 
 ### Fixed
 

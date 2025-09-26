@@ -15,9 +15,9 @@ This root directory is stored in the :attr:`~aimz.ImpactModel.temp_dir` attribut
 Example Layout (implicit temp root)::
 
     /tmp/tmpz00u5kxk/       # model.temp_dir (root, reused until cleanup)
-        20250917T013040Z/
-        20250917T014538Z/
-        20250917T014955Z/
+        20250926T185250223698Z/
+        20250926T185359570134Z/
+        20250926T185419208087Z/
 
 If the user provides ``output_dir``, that directory becomes the root, and it will be created if it does not already exist.
 The same timestamped subdirectory pattern is used there (e.g., ``my_runs/20250917T013040Z``).

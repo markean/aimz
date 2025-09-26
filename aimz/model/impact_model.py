@@ -337,7 +337,7 @@ class ImpactModel(BaseModel):
             )
         output_dir = Path(output_dir).expanduser().resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
         output_subdir = output_dir / timestamp
         output_subdir.mkdir(parents=False, exist_ok=False)
 
