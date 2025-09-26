@@ -337,7 +337,7 @@ class ImpactModel(BaseModel):
             )
         output_dir = Path(output_dir).expanduser().resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
         output_subdir = output_dir / timestamp
         output_subdir.mkdir(parents=False, exist_ok=False)
 
@@ -1460,6 +1460,14 @@ class ImpactModel(BaseModel):
     ) -> xr.DataTree:
         """Estimate the effect of an intervention.
 
+        .. _NumPyro: https://num.pyro.ai/
+
+        This computes (intervention - baseline) for every variable in the shared
+        predictive group, preserving sampling (chain/draw) dimensions. When
+        interventions are used in prediction they are applied internally through
+        NumPyro_'s :external:class:`~numpyro.handlers.do` effect handler (graph surgery)
+        without requiring model rewrites.
+
         Args:
             output_baseline: Precomputed output for the baseline scenario.
             output_intervention: Precomputed output for the intervention scenario.
@@ -1473,7 +1481,8 @@ class ImpactModel(BaseModel):
                 ``output_intervention`` is already given.
 
         Returns:
-            The estimated impact of an intervention.
+            The estimated impact of an intervention. Posterior samples are included if
+            available.
 
         Raises:
             ValueError: If neither ``output_baseline`` nor ``args_baseline`` is
@@ -1508,6 +1517,20 @@ class ImpactModel(BaseModel):
 
         out = xr.DataTree(name="root")
         out[group] = dt_intervention[group] - dt_baseline[group]
+        if self.posterior:
+            out["posterior"] = _dict_to_datatree(self.posterior)
+        # Propagate an output directory attribute to the effect result.
+        # Precedence:
+        #   1) intervention output_dir (if present)
+        #   2) baseline output_dir (if present)
+        #   3) model temporary directory (if it exists)
+        output_dir_attr = (
+            dt_intervention.attrs.get("output_dir")
+            or dt_baseline.attrs.get("output_dir")
+            or (self.temp_dir if self.temp_dir is not None else None)
+        )
+        if output_dir_attr is not None:
+            out.attrs["output_dir"] = output_dir_attr
 
         return out
 

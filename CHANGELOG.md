@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `output_dir` attribute to the root and group nodes of {class}`xarray.DataTree` objects returned by {meth}`~aimz.ImpactModel.sample_prior_predictive`, {meth}`~aimz.ImpactModel.predict`, and {meth}`~aimz.ImpactModel.log_likelihood`, specifying the directory where results are saved ([#85](https://github.com/markean/aimz/issues/85)).
 - Introduced the public {class}`~aimz.model.KernelSpec` dataclass and the {attr}`~aimz.ImpactModel.kernel_spec` attribute on {class}`~aimz.ImpactModel`.
 This exposes a lazily-built, cached structural specification of the user kernel (fields: ``traced``, ``return_sites``, ``output_observed``) so training and predictive methods avoid redundant model tracing ([#98](https://github.com/markean/aimz/issues/98)).
+- When available, an `output_dir` attribute is added to the root node of {class}`xarray.DataTree` object returned by {meth}`~aimz.ImpactModel.estimate_effect`, specifying the directory where results are saved ([#110](https://github.com/markean/aimz/issues/110)).
 
 ### Changed
 
@@ -22,6 +23,8 @@ This exposes a lazily-built, cached structural specification of the user kernel 
 - {meth}`~aimz.ImpactModel.sample_prior_predictive_on_batch` and {meth}`~aimz.ImpactModel.sample_prior_predictive` now include posterior samples in the returned results if available ([#103](https://github.com/markean/aimz/issues/103)).
 - {meth}`~aimz.ImpactModel.sample_prior_predictive_on_batch`, {meth}`~aimz.ImpactModel.sample_prior_predictive`, {meth}`~aimz.ImpactModel.sample`, {meth}`~aimz.ImpactModel.sample_posterior_predictive_on_batch`, {meth}`~aimz.ImpactModel.sample_posterior_predictive`, {meth}`~aimz.ImpactModel.predict_on_batch`, and {meth}`~aimz.ImpactModel.predict` can now accept a single `str` or an iterable of `str` values for the `return_sites` parameter ([#107](https://github.com/markean/aimz/issues/107)).
 - {meth}`~aimz.ImpactModel.sample_prior_predictive_on_batch` returns the default output site along with deterministic sites when `return_sites` is not specified, to be consistent with the behavior of other sampling methods ([#108](https://github.com/markean/aimz/issues/108)).
+- {meth}`~aimz.ImpactModel.estimate_effect` returns a `posterior` group node in the {class}`xarray.DataTree` object when posterior samples are available, to be consistent with other methods ([#110](https://github.com/markean/aimz/issues/110)).
+- Subdirectories under {attr}`~aimz.ImpactModel.temp_dir` now include microseconds in their names to avoid duplicates and file-exists errors ([#110](https://github.com/markean/aimz/issues/110)).
 
 ### Fixed
 
