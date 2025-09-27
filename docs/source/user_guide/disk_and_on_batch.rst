@@ -1,5 +1,6 @@
 .. _Dask: https://www.dask.org/
 .. _ArviZ: https://python.arviz.org/
+.. _Zarr: https://zarr.readthedocs.io/
 
 Disk-Backed vs. On-Batch Methods
 ================================
@@ -12,7 +13,7 @@ Disk-Backed vs. On-Batch Methods
 
 This page explains and compares the two complementary execution styles provided by :class:`~aimz.ImpactModel`:
 
-* **Disk-backed** (default) methods iterate over the input in chunks, materialize results incrementally, and persist structured artifacts (Zarr‑backed :external:class:`xarray.DataTree` plus metadata) to a temporary or user-specified output directory.
+* **Disk-backed** (default) methods iterate over the input in chunks, materialize results incrementally, and persist structured artifacts (Zarr_-backed :external:class:`xarray.DataTree` plus metadata) to a temporary or user-specified output directory.
 * **On-batch** (``*_on_batch`` suffix) methods execute a single, fully in-memory pass and can optionally return a plain :class:`dict` instead of a :external:class:`xarray.DataTree`. The naming mirrors the Keras convention to signal an immediate, single-batch, memory-resident operation.
 
 
@@ -23,8 +24,8 @@ The non-``*_on_batch`` methods default to a disk-backed (chunked) execution mode
 * Posterior predictive and prior predictive tensors can scale as ``(#samples x #dims x #posterior_samples x ...)``.
   Even moderate increases in any axis (time, spatial units, parameter samples) can exceed host or accelerator RAM.
 * Using ``batch_size`` with chunked iteration limits peak memory and prevents out-of-memory errors.
-* Persisted Zarr arrays with metadata (coords, dims, attrs) create an artifact you can reopen without rerunning inference.
-* The :external:class:`xarray.DataTree` + Zarr format integrates with scientific Python tools such as Dask_ and ArviZ_.
+* Persisted Zarr_ arrays with metadata (coords, dims, attrs) create an artifact you can reopen without rerunning inference.
+* The :external:class:`xarray.DataTree` + Zarr_ format integrates with scientific Python tools such as Dask_ and ArviZ_.
 * Summaries (means, HDIs, residual PPC stats) can be computed lazily over chunked storage without first materializing dense arrays.
 * One API works for both small experiments and large-scale use cases.
 
@@ -33,7 +34,7 @@ Comparison
 ----------
 Disk-backed variants target larger datasets, enable chunked processing, multi-device parallelism, and stable artifact generation.
 These methods build internal data loaders, iterate in chunks, and decouple sampling from file I/O, enabling concurrent execution.
-Outputs consolidate into a single :external:class:`xarray.DataTree` backed by Zarr files for post-hoc analysis.
+Outputs consolidate into a single :external:class:`xarray.DataTree` backed by Zarr_ files for post-hoc analysis.
 On-batch variants, in contrast, favor minimal overhead, immediate return, and greater flexibility when posterior sample shapes are not shard-friendly.
 
 Feature Summary
@@ -139,7 +140,7 @@ The example below illustrates this case.
 
 Performance Tips
 ----------------
-* Tune ``batch_size`` appropriately; it also determines the chunk size for Zarr-backed arrays.
+* Tune ``batch_size`` appropriately; it also determines the chunk size for Zarr_-backed arrays.
 * Monitor disk usage, as chunk sizes scale with ``batch_size`` and ``num_samples``.
 * Reduce ``num_samples`` first for faster iteration.
 * Use on-batch methods in tests to minimize I/O overhead.

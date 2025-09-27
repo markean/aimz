@@ -1,3 +1,5 @@
+.. _Zarr: https://zarr.readthedocs.io/
+
 Output Directory Cleanup
 ========================
 
@@ -48,7 +50,7 @@ Accessing Output Directories
 Every disk-writing method returns an :external:class:`xarray.DataTree` containing the paths where results are stored as attributes:
 
 * ``tree.attrs["output_dir"]`` – the root directory (either the temporary root or the user-provided directory).
-* ``tree[<group>].attrs["output_dir"]`` – the timestamped subdirectory containing the Zarr data for that group.
+* ``tree[<group>].attrs["output_dir"]`` – the timestamped subdirectory containing the Zarr_ data for that group.
 
 The output below shows an example :external:class:`xarray.DataTree` illustrating the output directory paths.
 
