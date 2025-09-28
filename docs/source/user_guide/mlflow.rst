@@ -13,6 +13,10 @@ The integration offers two complementary layers:
 1. Autologging via :func:`~aimz.mlflow.autolog` that patches :meth:`~aimz.ImpactModel.fit` to record parameters, metrics, artifacts, and an MLflow Model.
 2. Low-level helpers (:func:`~aimz.mlflow.save_model`, :func:`~aimz.mlflow.log_model`, :func:`~aimz.mlflow.load_model`) that mirror the MLflow flavor contract and enable manual control.
 
+.. note::
+   MLflow is an optional dependency and is **not installed** with aimz.
+   Install it separately with ``pip install mlflow``.
+
 
 Auto Logging
 ------------

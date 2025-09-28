@@ -64,6 +64,15 @@ This is intentional to keep the library lightweight and avoid prescribing a spec
 Future recipes or example galleries may be provided separately, but the library itself does not include canonical model classes.
 
 
+What kinds of data can aimz handle?
+-----------------------------------
+Current functionality is optimized for tall tabular array inputs: one or more two-dimensional numeric arrays of shape ``(n, d)`` (NumPy / JAX), along with a one-dimensional output variable of shape ``(n,)``.
+Multiple named arrays are supported as long as they share the same leading dimension ``n``.
+Support for other modalities—including images, text, sequences with temporal axes, or ragged/nested structures—is on the roadmap.
+In some cases, these can already be adapted by reshaping to 2D during preprocessing and reversing the reshape inside the model.
+If native support for a specific structure is important for your use case, opening an issue helps prioritize it, and contributions are welcome.
+
+
 Can I use posterior samples generated elsewhere?
 ------------------------------------------------
 Yes—you do not need to train a model from scratch and sample posteriors.

@@ -9,24 +9,14 @@ aimz: Scalable probabilistic impact modeling
 `Issues <https://github.com/markean/aimz/issues>`__ |
 `Releases <https://github.com/markean/aimz/releases>`__
 
-**aimz** is a Python library for flexible and scalable probabilistic impact modeling to assess the effects of interventions on outcomes of interest.
-Designed to work with user-defined models with probabilistic primitives, the library builds on `NumPyro <https://num.pyro.ai/en/stable/>`_, `JAX <https://jax.readthedocs.io/en/latest/>`_, `Xarray <https://xarray.dev/>`_, and `Zarr <https://zarr.readthedocs.io/en/stable/>`_ to enable efficient inference workflows.
+aimz is a Python library for scalable probabilistic impact modeling with a streamlined interface for fitting, sampling, prediction, and effect estimation—minimal boilerplate, accelerated execution, and powered by `NumPyro <https://num.pyro.ai/en/stable/>`_, `JAX <https://jax.readthedocs.io/en/latest/>`_, `Xarray <https://xarray.dev/>`_, and `Zarr <https://zarr.readthedocs.io/en/stable/>`_.
+It features:
 
-Features
---------
+* Intuitive API combining the ease of use from ML frameworks with the flexibility of probabilistic modeling.
+* Accelerated computation via parallelism and distributed data.
+* Support for interventional causal inference for counterfactuals and causal effects.
+* MLflow integration for experiment tracking and model management.
 
-- An intuitive API that combines ease of use from ML frameworks with the flexibility of probabilistic modeling.
-- Scalable computation via parallelism and distributed data processing—no manual orchestration required.
-- Variational inference as the primary inference engine, supporting custom optimization strategies and results.
-- Support for interventional causal inference for modeling counterfactuals and causal relations.
-- MLflow integration for experiment tracking and model management.
-
-Workflow
---------
-
-1. Outline the model, considering the data generating process, latent variables, and causal relationships, if any.
-2. Translate the model into a **kernel** (i.e., a function) using NumPyro and JAX.
-3. Integrate the kernel into the provided API to train the model and perform inference.
 
 Navigation
 ----------
