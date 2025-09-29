@@ -18,9 +18,9 @@ bibliography: paper.bib
 
 `aimz` is a Python library for scalable probabilistic impact modeling, providing an intuitive interface for fitting Bayesian models, drawing posterior samples, generating large-scale posterior predictive simulations, and estimating interventional effects with minimal boilerplate.
 It combines the usability of general ML APIs with the flexibility of probabilistic programming through a single high-level object (`ImpactModel`).
-Built atop JAX [@jax2018github] and NumPyro [@phan2019composable], it supports intuitive kernel specification, minibatch SVI (or MCMC), JIT‑compiled parallel predictive streaming to chunked Zarr stores [@alistair_miles_2020_3773450] exposed as Xarray [@hoyer2017xarray] objects, and first-class intervention handling for effect estimation.
+Built atop JAX [@jax2018github] and NumPyro [@phan2019composable], it supports minibatch stochastic variational inference (SVI) or MCMC, JIT‑compiled parallel predictive streaming to chunked Zarr [@alistair_miles_2020_3773450] stores exposed through Xarray [@hoyer2017xarray], and first-class intervention handling for effect estimation.
 Integrated MLflow [@Zaharia_Accelerating_the_Machine_2018] support enables experiment tracking and model lineage.
-These design choices reduce bespoke glue code and enable reproducible, high-throughput Bayesian impact analyses on large datasets.
+These design choices reduce bespoke glue code and enable reproducible, high-throughput analyses on large datasets, while supporting rapid iteration and experimentation.
 
 # Statement of need
 
