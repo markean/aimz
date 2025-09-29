@@ -36,7 +36,7 @@ General machine learning libraries (e.g., scikit‑learn [@scikit-learn]) lack n
 The familiar "`fit` / `predict` / `sample`" interface further eases integration with machine learning tooling, emerging Model Context Protocol pipelines, and generative AI assistants that assume estimator-like semantics.
 This unification reduces redundant glue code and minimizes potential failure points in applications such as marketing mix modeling, policy evaluation, and attribution of program impacts.
 
-Existing impact or uplift modeling libraries (e.g., domain‑specific frameworks such as Meridian (Google), Robyn [@robyn], or PyMC-Marketing [@pymc-marketing]) typically standardize on a constrained family of time‑series or marketing response models and a fixed inference stack, making it difficult to deviate from their built-in assumptions without forking code or re-implementing infrastructure.
+Existing impact or uplift modeling libraries (e.g., domain‑specific frameworks such as Meridian [meridian_github], Robyn [@robyn], or PyMC-Marketing [@pymc-marketing]) typically standardize on a constrained family of time‑series or marketing response models and a fixed inference stack, making it difficult to deviate from their built-in assumptions without forking code or re-implementing infrastructure.
 `aimz` instead pursues generality—accepting arbitrary NumPyro model functions and multiple inference strategies—while still avoiding boilerplate through streamed predictive simulation, structured outputs, and intervention orchestration.
 By elevating scalable posterior predictive simulation and intervention effect estimation to first-class capabilities, `aimz` lowers the barrier between exploratory probabilistic modeling and production-grade Bayesian impact analysis.
 
