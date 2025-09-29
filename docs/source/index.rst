@@ -9,7 +9,7 @@ aimz: Scalable probabilistic impact modeling
 `Issues <https://github.com/markean/aimz/issues>`__ |
 `Releases <https://github.com/markean/aimz/releases>`__
 
-aimz is a Python library for scalable probabilistic impact modeling with a streamlined interface for fitting, sampling, prediction, and effect estimation—minimal boilerplate, accelerated execution, and powered by `NumPyro <https://num.pyro.ai/en/stable/>`_, `JAX <https://jax.readthedocs.io/en/latest/>`_, `Xarray <https://xarray.dev/>`_, and `Zarr <https://zarr.readthedocs.io/en/stable/>`_.
+aimz is a Python library for scalable probabilistic impact modeling, enabling assessment of intervention effects on outcomes with a streamlined interface for fitting, sampling, prediction, and effect estimation—minimal boilerplate, accelerated execution, and powered by `NumPyro <https://num.pyro.ai/en/stable/>`_, `JAX <https://jax.readthedocs.io/en/latest/>`_, `Xarray <https://xarray.dev/>`_, and `Zarr <https://zarr.readthedocs.io/en/stable/>`_.
 It features:
 
 * Intuitive API combining the ease of use from ML frameworks with the flexibility of probabilistic modeling.
