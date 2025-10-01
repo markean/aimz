@@ -123,8 +123,7 @@ Logging directly to an active MLflow run:
         mlflow.log_metric("training_time_sec", 120.5)
 
         # Log the model
-        # input_example should be a dict of named arrays
-        model_info = log_model(im, input_example={"X": X, "y": y, "z": z})
+        model_info = log_model(im)
 
 
     # Reload the model from the MLflow registry for inference
