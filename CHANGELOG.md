@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file and are best
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- Extended MLflow autologging to support the {meth}`~aimz.ImpactModel.fit_on_batch` method ([#119](https://github.com/markean/aimz/issues/119)).
+
 ## [v0.7.0](https://github.com/markean/aimz/releases/tag/v0.7.0) - 2025-09-29
 
 ### Added

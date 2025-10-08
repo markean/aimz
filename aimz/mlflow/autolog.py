@@ -57,12 +57,12 @@ def autolog(
     """Enable and configure autologging for aimz with MLflow.
 
     Autologging is performed when you call:
-        - :meth:`ImpactModel.fit() <aimz.ImpactModel.fit>`.
+        - :meth:`~aimz.ImpactModel.fit_on_batch`.
+        - :meth:`~aimz.ImpactModel.fit`.
 
     Logs the following:
-        - Selected arguments to :meth:`ImpactModel.fit() <aimz.ImpactModel.fit>`,
-          together with ``param_input``, ``param_output``, ``inference_method``, and
-          ``optimizer`` as parameters.
+        - Selected arguments to the methods, together with ``param_input``,
+          ``param_output``, ``inference_method``, and ``optimizer`` as parameters.
         - The final evidence lower bound (ELBO) loss as a metric.
         - The source code of the kernel function used in the model as a text artifact.
         - An MLflow Model containing the fitted estimator as an artifact.
@@ -103,7 +103,7 @@ def autolog(
         *args: object,
         **kwargs: object,
     ) -> ImpactModel:
-        """Patch for :meth:`~aimz.ImpactModel.fit` to log information.
+        """Patch for the fitting method to log information.
 
         Args:
             original (Callable): The original method.
@@ -114,13 +114,14 @@ def autolog(
         model_source = getsource(self.kernel)
         log_text(model_source, artifact_file="model.py")
 
-        unlogged = ["X", "y", "progress", "kwargs"]
+        unlogged = ["X", "y", "num_samples", "progress", "kwargs"]
         params = {
             "param_input": self.param_input,
             "param_output": self.param_output,
             "inference_method": type(self.inference).__name__,
-            "optimizer": type(self.inference.optim).__name__,
         }
+        if params["inference_method"] == "SVI":
+            params["optimizer"] = type(self.inference.optim).__name__
         log_params(params)
         log_fn_args_as_params(
             original,
@@ -132,8 +133,9 @@ def autolog(
         model = original(self, *args, **kwargs)
 
         log_param("num_samples", self._num_samples)
-        losses = cast("SVIRunResult", self.vi_result).losses
-        log_metric("elbo_loss", value=losses[-1])
+        if params["inference_method"] == "SVI":
+            losses = cast("SVIRunResult", self.vi_result).losses
+            log_metric("elbo_loss", value=losses[-1])
 
         if log_models:
             model_id = _initialize_logged_model("model", flavor=FLAVOR_NAME).model_id
@@ -178,8 +180,8 @@ def autolog(
                 )
             registered_model_name = get_autologging_config(
                 FLAVOR_NAME,
-                "registered_model_name",
-                None,
+                config_key="registered_model_name",
+                default_value=None,
             )
             log_model(
                 model,
@@ -188,9 +190,19 @@ def autolog(
                 input_example=input_example,
                 model_id=model_id,
             )
-            log_metric("elbo_loss", value=losses[-1], model_id=model_id)
+            if params["inference_method"] == "SVI":
+                log_metric("elbo_loss", value=losses[-1], model_id=model_id)
 
         return model
+
+    safe_patch(
+        FLAVOR_NAME,
+        destination=ImpactModel,
+        function_name="fit_on_batch",
+        patch_function=patch_fit,
+        manage_run=True,
+        extra_tags=extra_tags,
+    )
 
     safe_patch(
         FLAVOR_NAME,
