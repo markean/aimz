@@ -1,6 +1,6 @@
 # Installation
 
-**aimz** requires Python 3.11 or higher. It is available via [PyPI](https://pypi.org/project/aimz/) and [conda-forge](https://anaconda.org/conda-forge/aimz).
+aimz requires Python 3.11 or higher. It is available via [PyPI](https://pypi.org/project/aimz/) and [conda-forge](https://anaconda.org/conda-forge/aimz).
 
 ## Install with pip
 
@@ -10,7 +10,7 @@
   pip install -U aimz
   ```
 
-**GPU (NVIDIA, CUDA 12):**
+**GPU (NVIDIA, CUDA 13):**
 
   ```sh
   pip install -U "aimz[gpu]"
@@ -37,4 +37,3 @@ pip install aimz@git+https://github.com/markean/aimz.git@<release_tag>
 
 # GPU-enabled version from the main branch
 pip install aimz[gpu]@git+https://github.com/markean/aimz.git
-```
