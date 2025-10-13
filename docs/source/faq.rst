@@ -5,7 +5,7 @@ Frequently Asked Questions
 
 
 What is a kernel?
--------------------
+-----------------
 A kernel in aimz is a user-defined NumPyro_ model (a stochastic function or :class:`~collections.abc.Callable`) built with primitives like :external:func:`~numpyro.primitives.sample` and :external:func:`~numpyro.primitives.deterministic`.
 Its signature and body define the inputs and output (e.g., ``X``, ``y``, ...), encoding the probabilistic structure—priors, likelihood, and latent variables.
 
@@ -71,6 +71,13 @@ Multiple named arrays are supported as long as they share the same leading dimen
 Support for other modalities—including images, text, sequences with temporal axes, or ragged/nested structures—is on the roadmap.
 In some cases, these can already be adapted by reshaping to 2D during preprocessing and reversing the reshape inside the model.
 If native support for a specific structure is important for your use case, opening an issue helps prioritize it, and contributions are welcome.
+
+
+Can I use aimz for general-purpose Bayesian inference?
+------------------------------------------------------
+Yes.
+While aimz is designed to streamline probabilistic impact modeling workflows—such as intervention analysis and causal effect estimation—it also functions as a flexible Bayesian inference toolkit. 
+You can use aimz for a wide range of Bayesian modeling tasks supported by NumPyro, including regression, classification, uncertainty quantification, and predictive simulation, even if your application doesn’t involve interventions or causal analysis.
 
 
 Can I use posterior samples generated elsewhere?
