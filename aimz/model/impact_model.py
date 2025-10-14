@@ -170,9 +170,10 @@ class ImpactModel(BaseModel):
         """Return a representation of the ImpactModel instance."""
         out = [
             "<ImpactModel",
-            f"kernel_name={
-                getattr(self.kernel, '__name__', type(self.kernel).__name__)
-            };",
+            (
+                f"kernel_name="
+                f"{getattr(self.kernel, '__name__', type(self.kernel).__name__)};"
+            ),
             f"rng_key_data={random.key_data(self._rng_key)};",
             f"inference_method={self.inference.__class__.__name__};",
             f"param_input={self.param_input!r};",
