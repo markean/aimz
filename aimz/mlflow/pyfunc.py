@@ -14,6 +14,8 @@
 
 """MLflow pyfunc wrapper for aimz models."""
 
+from __future__ import annotations
+
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -29,14 +31,14 @@ if TYPE_CHECKING:
 class _ImpactModelWrapper(PyFuncModel):
     """MLflow PyFunc wrapper for ImpactModel."""
 
-    def __init__(self, model: "ImpactModel") -> None:
+    def __init__(self, model: ImpactModel) -> None:
         self.model = model
 
-    def get_raw_model(self) -> "ImpactModel":
+    def get_raw_model(self) -> ImpactModel:
         """Return the underlying ImpactModel instance."""
         return self.model
 
-    def predict(self, model_input: object, params: dict | None = None):
+    def predict(self, model_input: dict[str, object], params: dict | None = None):
         """Run predictions using the wrapped ImpactModel."""
         if isinstance(model_input, dict):
             return self.model.predict(**model_input, **(params or {}))
@@ -51,7 +53,7 @@ def _load_pyfunc(path: str) -> _ImpactModelWrapper:
     return _ImpactModelWrapper(_load_model(path))
 
 
-def _load_model(path: str) -> "ImpactModel":
+def _load_model(path: str) -> ImpactModel:
     """Load an ImpactModel instance from the specified path."""
     import cloudpickle
 

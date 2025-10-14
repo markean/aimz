@@ -14,8 +14,9 @@
 
 """MLflow model saving for aimz."""
 
+from __future__ import annotations
+
 import tempfile
-from collections.abc import Iterable
 from importlib.metadata import version
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -55,8 +56,9 @@ from mlflow.utils.model_utils import (
 from mlflow.utils.requirements_utils import _get_pinned_requirement
 
 if TYPE_CHECKING:
-    from aimz.model.impact_model import ImpactModel
+    from collections.abc import Iterable
 
+    from aimz.model.impact_model import ImpactModel
 FLAVOR_NAME = "aimz"
 
 
@@ -97,7 +99,7 @@ def get_default_pip_requirements(*, include_cloudpickle: bool = False) -> list[s
 
 @format_docstring(LOG_MODEL_PARAM_DOCS.format(package_name=FLAVOR_NAME))
 def save_model(
-    model: "ImpactModel",
+    model: ImpactModel,
     path: str | Path,
     conda_env: dict | None = None,
     code_paths: list | None = None,

@@ -14,14 +14,17 @@
 
 """Module for custom dataset for JAX arrays."""
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, cast
 
 import jax.numpy as jnp
 from jax import Array
-from jax.typing import ArrayLike
 
 if TYPE_CHECKING:
     from collections.abc import Sized
+
+    from jax.typing import ArrayLike
 
 
 class ArrayDataset:

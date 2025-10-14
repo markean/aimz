@@ -14,8 +14,9 @@
 
 """Module for handling output files."""
 
+from __future__ import annotations
+
 import logging
-from pathlib import Path
 from queue import Queue
 from sys import exc_info
 from threading import Thread
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
     from zarr import Array
 
@@ -76,7 +78,7 @@ def _writer(site: str, queue: Queue, group_path: Path, error_queue: Queue) -> No
 def _start_writer_threads(
     sites: tuple[str, ...],
     group_path: Path,
-    writer: "Callable[[str, Queue, Path, Queue], None]",
+    writer: Callable[[str, Queue, Path, Queue], None],
     queue_size: int,
 ) -> tuple[list[Thread], dict[str, Queue], Queue]:
     """Start writer threads and their corresponding queues for each site.

@@ -14,6 +14,8 @@
 
 """Module for initializing inputs and preprocessing arguments for data pipelines."""
 
+from __future__ import annotations
+
 import logging
 from typing import TYPE_CHECKING, NamedTuple, cast
 from warnings import warn
@@ -45,7 +47,7 @@ def _setup_inputs(
     batch_size: int | None,
     num_samples: int,
     shuffle: bool = False,
-    device: "Sharding | None" = None,
+    device: Sharding | None = None,
     **kwargs: object,
 ) -> tuple[ArrayLoader, NamedTuple]:
     """Prepare an dataloader and grouped keyword arguments.

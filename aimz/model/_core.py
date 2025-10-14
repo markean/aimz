@@ -14,6 +14,8 @@
 
 """Base class for impact model."""
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Self
 
@@ -32,7 +34,7 @@ class BaseModel(ABC):
 
     def __init__(
         self,
-        kernel: "Callable",
+        kernel: Callable,
         param_input: str = "X",
         param_output: str = "y",
     ) -> None:

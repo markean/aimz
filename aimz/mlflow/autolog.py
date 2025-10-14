@@ -35,7 +35,6 @@ from mlflow.utils.autologging_utils import (
 from sklearn.utils.validation import _is_arraylike
 
 if TYPE_CHECKING:
-    from jax.typing import ArrayLike
     from numpyro.infer.svi import SVIRunResult
 
 FLAVOR_NAME = "aimz"
@@ -151,13 +150,9 @@ def autolog(
                     }
                 else:
                     input_example = {
-                        "X": np.asarray(
-                            cast("ArrayLike", X)[:INPUT_EXAMPLE_SAMPLE_ROWS],
-                        ),
+                        "X": np.asarray(X)[:INPUT_EXAMPLE_SAMPLE_ROWS],
                         **{
-                            k: np.asarray(
-                                cast("ArrayLike", v)[:INPUT_EXAMPLE_SAMPLE_ROWS],
-                            )
+                            k: np.asarray(v)[:INPUT_EXAMPLE_SAMPLE_ROWS]
                             for k, v in kwargs.items()
                             if k != self.param_output and _is_arraylike(v)
                         },
