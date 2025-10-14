@@ -14,9 +14,10 @@
 
 """Impact model."""
 
+from __future__ import annotations
+
 import contextlib
 import logging
-from collections.abc import Callable, Iterable, Sized
 from datetime import UTC, datetime
 from inspect import signature
 from os import cpu_count
@@ -65,7 +66,6 @@ from aimz.utils._validation import (
     _validate_kernel_body,
     _validate_X_y_to_jax,
 )
-from aimz.utils.data import ArrayLoader
 from aimz.utils.data._input_setup import _setup_inputs
 from aimz.utils.data._sharding import (
     _create_sharded_log_likelihood,
@@ -73,7 +73,9 @@ from aimz.utils.data._sharding import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Iterable, Mapping, Sized
+
+    from aimz.utils.data import ArrayLoader
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +149,22 @@ class ImpactModel(BaseModel):
             default_backend(),
             num_devices,
         )
+
+    def __str__(self) -> str:
+        """Return a string summary of the ImpactModel instance."""
+        summary = [
+            "<ImpactModel>\n",
+            f"Kernel: {getattr(self.kernel, '__name__', type(self.kernel).__name__)}",
+            f"Input parameter: '{self.param_input}'",
+            f"Output parameter: '{self.param_output}'",
+            f"Inference method: {self.inference.__class__.__name__}",
+            f"Fitted: {getattr(self, '_is_fitted', False)}",
+        ]
+        outdir = getattr(self, "temp_dir", None)
+        if outdir:
+            summary.append(f"Output directory: {outdir}")
+
+        return "\n".join(summary)
 
     def __del__(self) -> None:
         """Clean up the temporary directory when the instance is deleted."""
@@ -247,7 +265,7 @@ class ImpactModel(BaseModel):
 
     def _build_kernel_spec(
         self,
-        args_bound: "Mapping[str, object]",
+        args_bound: Mapping[str, object],
         *,
         with_output: bool,
     ) -> None:
@@ -310,9 +328,8 @@ class ImpactModel(BaseModel):
             return cast("KernelSpec", self._kernel_spec).return_sites
         if isinstance(return_sites, str):
             return (return_sites,)
-        if not isinstance(return_sites, tuple):
-            return tuple(return_sites)
-        return return_sites
+
+        return tuple(str(s) for s in return_sites)
 
     def _create_output_subdir(self, output_dir: str | Path | None) -> tuple[Path, Path]:
         """Create a subdirectory for storing output.
@@ -721,7 +738,9 @@ class ImpactModel(BaseModel):
                     ),
                     rng_key=rng_key,
                     num_samples=num_samples,
-                    return_sites=return_sites,
+                    return_sites=self._coerce_return_sites(return_sites)
+                    if return_sites
+                    else None,
                     samples=None,
                     model_kwargs=None,
                 ),

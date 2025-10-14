@@ -76,7 +76,7 @@ If native support for a specific structure is important for your use case, openi
 Can I use aimz for general-purpose Bayesian inference?
 ------------------------------------------------------
 Yes.
-While aimz is designed to streamline probabilistic impact modeling workflows—such as intervention analysis and causal effect estimation—it also functions as a flexible Bayesian inference toolkit. 
+While aimz is designed to streamline probabilistic impact modeling workflows—such as intervention analysis and causal effect estimation—it also functions as a flexible Bayesian inference toolkit.
 You can use aimz for a wide range of Bayesian modeling tasks supported by NumPyro, including regression, classification, uncertainty quantification, and predictive simulation, even if your application doesn’t involve interventions or causal analysis.
 
 

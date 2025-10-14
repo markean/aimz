@@ -18,13 +18,14 @@ NOTE: This module is experimental and subject to change. It utilizes JAX's `shar
 to distribute computations across devices. Tested on CPU and GPU.
 """
 
+from __future__ import annotations
+
 from functools import partial
 from typing import TYPE_CHECKING
 
 from jax import Array, jit
 from jax.experimental.shard_map import shard_map
 from jax.sharding import PartitionSpec
-from jax.typing import ArrayLike
 from numpyro.infer import log_likelihood as log_lik
 
 from aimz.sampling._forward import _sample_forward
@@ -33,13 +34,14 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from jax.sharding import Mesh
+    from jax.typing import ArrayLike
 
 
 def _create_sharded_sampler(
-    mesh: "Mesh | None",
+    mesh: Mesh | None,
     n_kwargs_array: int,
     n_kwargs_extra: int,
-) -> "Callable":
+) -> Callable:
     """Create a sharded predictive sampling function.
 
     Args:
@@ -66,7 +68,7 @@ def _create_sharded_sampler(
     """
 
     def f(
-        kernel: "Callable",
+        kernel: Callable,
         num_samples: int,
         rng_key: ArrayLike,
         return_sites: tuple[str, ...],
@@ -136,10 +138,10 @@ def _create_sharded_sampler(
 
 
 def _create_sharded_log_likelihood(
-    mesh: "Mesh | None",
+    mesh: Mesh | None,
     n_kwargs_array: int,
     n_kwargs_extra: int,
-) -> "Callable":
+) -> Callable:
     """Create a sharded log-likelihood function.
 
     Args:
@@ -167,7 +169,7 @@ def _create_sharded_log_likelihood(
     """
 
     def f(
-        kernel: "Callable",
+        kernel: Callable,
         posterior_samples: dict,
         param_input: str,
         param_output: str,

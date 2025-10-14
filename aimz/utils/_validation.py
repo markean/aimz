@@ -14,12 +14,13 @@
 
 """Module for validating models and objects."""
 
+from __future__ import annotations
+
 from inspect import Parameter, getfullargspec, signature
 from typing import TYPE_CHECKING
 
 import jax.numpy as jnp
 from jax import Array
-from jax.typing import ArrayLike
 from sklearn.utils.validation import check_array, check_X_y
 
 from aimz._exceptions import KernelValidationError, NotFittedError
@@ -29,11 +30,12 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     import xarray as xr
+    from jax.typing import ArrayLike
 
     from aimz import ImpactModel
 
 
-def _check_is_fitted(model: "ImpactModel", msg: str | None = None) -> None:
+def _check_is_fitted(model: ImpactModel, msg: str | None = None) -> None:
     """Check if the model is fitted.
 
     Raises:
@@ -48,14 +50,14 @@ def _check_is_fitted(model: "ImpactModel", msg: str | None = None) -> None:
         raise NotFittedError(msg % {"name": type(model).__name__})
 
 
-def _is_fitted(model: "ImpactModel") -> bool:
+def _is_fitted(model: ImpactModel) -> bool:
     if hasattr(model, "_is_fitted"):
         return model.is_fitted()
 
     return any(v.endswith("_") and not v.startswith("__") for v in vars(model))
 
 
-def _validate_group(dt_baseline: "xr.DataTree", dt_intervention: "xr.DataTree") -> str:
+def _validate_group(dt_baseline: xr.DataTree, dt_intervention: xr.DataTree) -> str:
     """Validate the groups in ``dt_baseline`` and ``dt_intervention``.
 
     Args:
@@ -86,7 +88,7 @@ def _validate_group(dt_baseline: "xr.DataTree", dt_intervention: "xr.DataTree") 
 
 
 def _validate_kernel_signature(
-    kernel: "Callable",
+    kernel: Callable,
     param_input: str,
     param_output: str,
 ) -> None:
@@ -131,10 +133,10 @@ def _validate_kernel_signature(
 
 
 def _validate_kernel_body(
-    kernel: "Callable",
+    kernel: Callable,
     *,
     param_output: str,
-    model_trace: "OrderedDict[str, dict]",
+    model_trace: OrderedDict[str, dict],
     with_output: bool,
 ) -> None:
     """Validate the body of a kernel function.

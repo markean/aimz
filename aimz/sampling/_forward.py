@@ -14,24 +14,27 @@
 
 """Forward sampling implementations."""
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, Any
 
 from jax import Array, lax, random
-from jax.typing import ArrayLike
 from numpyro.handlers import mask, seed, substitute, trace
 
 if TYPE_CHECKING:
     from collections import OrderedDict
     from collections.abc import Callable, Mapping
 
+    from jax.typing import ArrayLike
+
 
 def _sample_forward(
-    model: "Callable",
+    model: Callable,
     num_samples: int,
     rng_key: ArrayLike,
     return_sites: tuple[str, ...] | None,
     samples: dict[str, Array] | None,
-    model_kwargs: "Mapping[str, object] | None",
+    model_kwargs: Mapping[str, object] | None,
 ) -> dict[str, Array]:
     """Generates forward samples from a model conditioned on parameter draws.
 
@@ -57,7 +60,7 @@ def _sample_forward(
     ) -> dict[str, Array]:
         rng_key, sample = sample_input
 
-        def _exclude_deterministic(msg: "OrderedDict[str, Any]") -> Array | None:
+        def _exclude_deterministic(msg: OrderedDict[str, Any]) -> Array | None:
             return sample.get(msg["name"]) if msg["type"] != "deterministic" else None
 
         masked_model = mask(model, mask=False)

@@ -19,20 +19,23 @@ padding to ensure the batch size is compatible with sharding across multiple XLA
 devices.
 """
 
-from collections.abc import Iterator
+from __future__ import annotations
+
 from math import ceil
 from typing import TYPE_CHECKING
 from warnings import warn
 
 import jax.numpy as jnp
-import numpy.typing as npt
 from jax import Array, device_put, local_device_count, random
-from jax.typing import ArrayLike
-
-from aimz.utils.data.array_dataset import ArrayDataset
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    import numpy.typing as npt
     from jax.sharding import Sharding
+    from jax.typing import ArrayLike
+
+    from aimz.utils.data.array_dataset import ArrayDataset
 
 
 class ArrayLoader:
@@ -45,7 +48,7 @@ class ArrayLoader:
         *,
         batch_size: int = 32,
         shuffle: bool = False,
-        device: "Sharding | None" = None,
+        device: Sharding | None = None,
     ) -> None:
         """Initialize an ArrayLoader instance.
 

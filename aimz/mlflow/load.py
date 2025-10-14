@@ -14,6 +14,8 @@
 
 """MLflow model loading for aimz."""
 
+from __future__ import annotations
+
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -31,7 +33,7 @@ if TYPE_CHECKING:
 FLAVOR_NAME = "aimz"
 
 
-def load_model(model_uri: str, dst_path: str | None = None) -> "ImpactModel":
+def load_model(model_uri: str, dst_path: str | None = None) -> ImpactModel:
     """Load an aimz model from a local file or a run.
 
     Args:
