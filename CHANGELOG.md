@@ -5,11 +5,13 @@ All notable changes to this project will be documented in this file and are best
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [v0.8.0](https://github.com/markean/aimz/releases/tag/v0.8.0) - 2025-10-14
 
 ### Added
 
 - Extended MLflow autologging to support the {meth}`~aimz.ImpactModel.fit_on_batch` method ([#119](https://github.com/markean/aimz/issues/119)).
+- Added __str__ and __repr__ methods to the {class}~aimz.ImpactModel ([#118](https://github.com/markean/aimz/issues/118)).
+- {class}`~aimz.model.KernelSpec` now includes a `sample_sites` attribute listing all stochastic sample sites in the model kernel ([#125](https://github.com/markean/aimz/issues/125)).
 
 ## [v0.7.0](https://github.com/markean/aimz/releases/tag/v0.7.0) - 2025-09-29
 

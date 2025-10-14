@@ -27,9 +27,11 @@ class KernelSpec:
     Attributes:
         traced:
             ``True`` once at least one successful trace has been performed.
+        sample_sites:
+            Names of latent (stochastic) sample sites encountered during tracing.
         return_sites:
-            Default return site names. Always includes the output first, followed by any
-            deterministic sites. Latent sample sites are excluded.
+            Names of default return sites. Always includes the output first, followed by
+            any deterministic sites. Latent sample sites are excluded.
         output_observed:
             ``True`` if the output site was observed in the validating trace, used to
             distinguish prior-only from observed traces.
@@ -41,5 +43,6 @@ class KernelSpec:
     """
 
     traced: bool
+    sample_sites: tuple[str, ...]
     return_sites: tuple[str, ...]
     output_observed: bool
