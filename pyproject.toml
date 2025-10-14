@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aimz"
-version = "0.8.0.dev0"
+version = "0.8.0"
 description = "Scalable probabilistic impact modeling"
 readme = "README.md"
 license = "Apache-2.0"
@@ -32,8 +32,8 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-dev = ["pre-commit>=4.3", "pytest>=8.4", "pytest-cov>=7", "ruff>=0.13"]
-gpu = ["jax[cuda12]>=0.7"]
+dev = ["pre-commit>=4.3", "pytest>=8.4", "pytest-cov>=7", "ruff>=0.14"]
+gpu = ["jax[cuda13]>=0.7"]
 mlflow = ["mlflow>=3"]
 docs = [
     "sphinx>=8.2",
@@ -54,13 +54,9 @@ documentation = "https://aimz.readthedocs.io/"
 [tool.coverage.run]
 omit = ["aimz/mlflow/*"]
 
-[tool.uv]
-native-tls = true
-
 [tool.ruff]
 line-length = 88
 indent-width = 4
-target-version = "py311"
 
 [tool.ruff.lint]
 select = ["ALL"]
@@ -104,3 +100,6 @@ ban-relative-imports = "all"
 [tool.setuptools.packages.find]
 include = ["aimz*"]
 namespaces = false
+
+[tool.uv]
+native-tls = true
