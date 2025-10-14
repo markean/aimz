@@ -151,20 +151,39 @@ class ImpactModel(BaseModel):
         )
 
     def __str__(self) -> str:
-        """Return a string summary of the ImpactModel instance."""
-        summary = [
+        """Return a summary of the ImpactModel instance."""
+        out = [
             "<ImpactModel>\n",
             f"Kernel: {getattr(self.kernel, '__name__', type(self.kernel).__name__)}",
+            f"Inference method: {self.inference.__class__.__name__}",
             f"Input parameter: '{self.param_input}'",
             f"Output parameter: '{self.param_output}'",
-            f"Inference method: {self.inference.__class__.__name__}",
             f"Fitted: {getattr(self, '_is_fitted', False)}",
         ]
         outdir = getattr(self, "temp_dir", None)
         if outdir:
-            summary.append(f"Output directory: {outdir}")
+            out.append(f"Output directory: {outdir}")
 
-        return "\n".join(summary)
+        return "\n".join(out)
+
+    def __repr__(self) -> str:
+        """Return a representation of the ImpactModel instance."""
+        out = [
+            "<ImpactModel",
+            f"kernel_name={
+                getattr(self.kernel, '__name__', type(self.kernel).__name__)
+            };",
+            f"rng_key_data={random.key_data(self._rng_key)};",
+            f"inference_method={self.inference.__class__.__name__};",
+            f"param_input={self.param_input!r};",
+            f"param_output={self.param_output!r};",
+            f"kernel_spec={self.kernel_spec!r};",
+            f"fitted={getattr(self, '_is_fitted', False)};",
+            f"device={self._device};",
+            f"temp_dir={getattr(self, 'temp_dir', None)!r}>",
+        ]
+
+        return " ".join(out)
 
     def __del__(self) -> None:
         """Clean up the temporary directory when the instance is deleted."""
@@ -299,15 +318,15 @@ class ImpactModel(BaseModel):
             model_trace=model_trace,
             with_output=with_output,
         )
+        sample_sites = tuple(k for k, v in model_trace.items() if v["type"] == "sample")
         return_sites = (
             self.param_output,
-            *tuple(
-                k for k, site in model_trace.items() if site["type"] == "deterministic"
-            ),
+            *tuple(k for k, v in model_trace.items() if v["type"] == "deterministic"),
         )
         output_observed = bool(with_output)
         self._kernel_spec = KernelSpec(
             traced=True,
+            sample_sites=sample_sites,
             return_sites=return_sites,
             output_observed=output_observed,
         )
@@ -1199,6 +1218,7 @@ class ImpactModel(BaseModel):
         if self._kernel_spec is None:
             self._kernel_spec = KernelSpec(
                 traced=False,
+                sample_sites=tuple(cast("dict[str, Array]", self._posterior).keys()),
                 return_sites=(self.param_output,),
                 output_observed=False,
             )

@@ -149,6 +149,7 @@ def test_predict_after_cleanup(
         im.predict(X=X, batch_size=len(X) // 2, progress=False)
     temp_dir_before = im.temp_dir
     str(im)
+    repr(im)
     im.cleanup()
     with pytest.warns(UserWarning, match=msg):
         im.predict(X=X, batch_size=len(X) // 2, progress=False)

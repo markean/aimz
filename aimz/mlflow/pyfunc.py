@@ -38,7 +38,7 @@ class _ImpactModelWrapper(PyFuncModel):
         """Return the underlying ImpactModel instance."""
         return self.model
 
-    def predict(self, model_input: dict[str, object], params: dict | None = None):
+    def predict(self, model_input: object, params: dict | None = None):
         """Run predictions using the wrapped ImpactModel."""
         if isinstance(model_input, dict):
             return self.model.predict(**model_input, **(params or {}))
