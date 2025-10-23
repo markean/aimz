@@ -20,7 +20,8 @@ import sys
 from importlib import metadata
 from pathlib import Path
 
-import mlflow
+# Prevent Sphinx autodoc from failing when inspecting MLflow autologging decorators
+from mlflow.utils.autologging_utils import autologging_integration
 
 import aimz
 
@@ -57,6 +58,7 @@ extensions = [
 ]
 templates_path = ["_templates"]
 exclude_patterns = ["**.pkl", "**.ipynb_checkpoints"]
+autodoc_mock_imports = ["mlflow.utils.autologging_utils.autologging_integration"]
 autodoc_typehints = "description"
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
