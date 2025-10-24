@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file and are best
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.8.1](https://github.com/markean/aimz/releases/tag/v0.8.1) - 2025-10-23
+
+### Changed
+
+- The minimum required versions are: Dask 2025.7, JAX 0.8, and Xarray 2025.7.
+- Replaced deprecated {mod}`jax.experimental.shard_map.shard_map` with {func}`jax.shard_map` to ensure compatibility with JAX 0.8 and newer versions ([#128](https://github.com/markean/aimz/issues/128)).
+- Logging exception messages are displayed before the writer thread is shut down, providing a more immediate response for {meth}`~aimz.ImpactModel.predict` and {meth}`~aimz.ImpactModel.log_likelihood`, especially when interrupted by the keyboard ([#130](https://github.com/markean/aimz/issues/130)).
+
 ## [v0.8.0](https://github.com/markean/aimz/releases/tag/v0.8.0) - 2025-10-14
 
 ### Added
