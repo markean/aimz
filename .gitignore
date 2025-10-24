@@ -140,3 +140,6 @@ tmp/
 # MLflow
 mlruns/
 mlartifacts/
+
+# Docker
+docker/
