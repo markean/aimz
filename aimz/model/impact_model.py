@@ -485,11 +485,11 @@ class ImpactModel(BaseModel):
             pbar.set_description("Sampling complete, writing in progress...")
             _shutdown_writer_threads(threads, queues)
         except:
-            _shutdown_writer_threads(threads, queues)
             logger.exception(
                 "Exception encountered. Cleaning up output directory: %s",
                 output_dir,
             )
+            _shutdown_writer_threads(threads, queues)
             rmtree(output_dir, ignore_errors=True)
             raise
         finally:
@@ -927,11 +927,11 @@ class ImpactModel(BaseModel):
             )
             if rng_key is None:
                 self._rng_key, rng_key = random.split(self._rng_key)
-            self._vi_state = self.inference.init(rng_key, **batch)
+            self._vi_state = cast("SVI", self.inference).init(rng_key, **batch)
         if self._fn_vi_update is None:
             _, kwargs_extra = _group_kwargs(kwargs)
             self._fn_vi_update = jit(
-                self.inference.update,
+                cast("SVI", self.inference).update,
                 static_argnames=tuple(kwargs_extra._fields),
             )
 
@@ -1002,7 +1002,7 @@ class ImpactModel(BaseModel):
         if isinstance(self.inference, SVI):
             self._num_samples = num_samples
             logger.info("Performing variational inference optimization...")
-            self.vi_result = self.inference.run(
+            self.vi_result: SVIRunResult = self.inference.run(
                 rng_subkey,
                 num_steps=num_steps,
                 progress_bar=progress,
@@ -1147,7 +1147,7 @@ class ImpactModel(BaseModel):
             state=self._vi_state,
             losses=jnp.asarray(losses),
         )
-        if np.any(np.isnan(self.vi_result.losses)):
+        if np.any(np.isnan(cast("SVIRunResult", self.vi_result).losses)):
             msg = "Loss contains NaN or Inf, indicating numerical instability."
             warn(msg, category=RuntimeWarning, stacklevel=2)
 
@@ -1156,7 +1156,10 @@ class ImpactModel(BaseModel):
         logger.info("Posterior sampling...")
         rng_key, rng_subkey = random.split(rng_key)
         self._posterior = _sample_forward(
-            substitute(self.inference.guide, data=self.vi_result.params),
+            substitute(
+                self.inference.guide,
+                data=cast("SVIRunResult", self.vi_result).params,
+            ),
             rng_key=rng_subkey,
             num_samples=self._num_samples,
             return_sites=None,
@@ -1219,7 +1222,7 @@ class ImpactModel(BaseModel):
         if self._kernel_spec is None:
             self._kernel_spec = KernelSpec(
                 traced=False,
-                sample_sites=tuple(cast("dict[str, Array]", self._posterior).keys()),
+                sample_sites=tuple(self._posterior.keys()),
                 return_sites=(self.param_output,),
                 output_observed=False,
             )
@@ -1696,11 +1699,11 @@ class ImpactModel(BaseModel):
             pbar.set_description("Computation complete, writing in progress...")
             _shutdown_writer_threads(threads, queues=queues)
         except:
-            _shutdown_writer_threads(threads, queues=queues)
             logger.exception(
                 "Exception encountered. Cleaning up output directory: %s",
                 output_subdir,
             )
+            _shutdown_writer_threads(threads, queues=queues)
             rmtree(output_subdir, ignore_errors=True)
             raise
         finally:
