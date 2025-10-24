@@ -12,19 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Module for creating functions for sharding.
-
-NOTE: This module is experimental and subject to change. It utilizes JAX's `shard_map()`
-to distribute computations across devices. Tested on CPU and GPU.
-"""
+"""Module for creating functions for sharding."""
 
 from __future__ import annotations
 
 from functools import partial
 from typing import TYPE_CHECKING
 
-from jax import Array, jit
-from jax.experimental.shard_map import shard_map
+from jax import Array, jit, shard_map
 from jax.sharding import PartitionSpec
 from numpyro.infer import log_likelihood as log_lik
 
@@ -132,7 +127,6 @@ def _create_sharded_sampler(
                 ),
             ),
             out_specs=PartitionSpec(None, axis),
-            check_rep=False,
         )(f),
     )
 
@@ -227,6 +221,5 @@ def _create_sharded_log_likelihood(
                 ),
             ),
             out_specs=PartitionSpec(None, axis),
-            check_rep=False,
         )(f),
     )
