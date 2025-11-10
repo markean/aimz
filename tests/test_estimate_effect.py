@@ -18,7 +18,6 @@ from pathlib import Path
 
 import jax.numpy as jnp
 import pytest
-from conftest import latent_variable_model, lm
 from jax import random
 from jax.typing import ArrayLike
 from numpyro.infer import SVI, Trace_ELBO
@@ -27,6 +26,7 @@ from numpyro.optim import Adam
 
 from aimz import ImpactModel
 from aimz._exceptions import NotFittedError
+from tests.conftest import latent_variable_model, lm
 
 
 def test_model_not_fitted() -> None:

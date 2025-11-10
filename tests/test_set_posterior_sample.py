@@ -18,7 +18,6 @@ from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
-from conftest import lm
 from jax import numpy as jnp
 from jax import random
 from jax.typing import ArrayLike
@@ -27,6 +26,7 @@ from numpyro.infer.svi import SVIRunResult
 
 from aimz import ImpactModel
 from aimz.utils._validation import _is_fitted
+from tests.conftest import lm
 
 if TYPE_CHECKING:
     from numpyro.infer import SVI

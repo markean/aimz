@@ -17,13 +17,13 @@
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from conftest import lm
 from jax import random
 from jax.typing import ArrayLike
 from numpyro.infer import SVI
 
 from aimz import ImpactModel
 from aimz.utils.data import ArrayDataset, ArrayLoader
+from tests.conftest import lm
 
 
 class TestArrayDataset:
