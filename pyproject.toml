@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aimz"
-version = "0.8.1"
+version = "0.8.2.dev0"
 description = "Scalable probabilistic impact modeling"
 readme = "README.md"
 license = "Apache-2.0"
@@ -32,7 +32,7 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-dev = ["pre-commit>=4.3", "pytest>=8.4", "pytest-cov>=7", "ruff>=0.14"]
+dev = ["pre-commit>=4.3", "pytest>=9", "pytest-cov>=7", "ruff>=0.14"]
 gpu = ["jax[cuda13]>=0.7"]
 mlflow = ["mlflow>=3"]
 docs = [
@@ -71,11 +71,10 @@ per-file-ignores = { "aimz/model/_core.py" = [
     "PLR0913", # too-many-arguments
     "PLC0415", # import-outside-top-level
 ], "docs*" = [
-    "INP001", # implicit-namespace-package
+    # "INP001", # implicit-namespace-package
     "A001",   # builtin-variable-shadowing
     "F401",   # unused-import
 ], "tests*" = [
-    "INP001", # implicit-namespace-package
     "ARG001", # unused-function-argument
     "S101",   # assert
 ], "*.ipynb" = [
