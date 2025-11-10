@@ -17,7 +17,6 @@
 import jax.numpy as jnp
 import numpyro.distributions as dist
 import pytest
-from conftest import lm
 from jax import random
 from jax.typing import ArrayLike
 from numpyro import deterministic, sample
@@ -29,6 +28,7 @@ from sklearn.exceptions import DataConversionWarning
 from aimz import ImpactModel
 from aimz._exceptions import KernelValidationError
 from aimz.utils._validation import _is_fitted
+from tests.conftest import lm
 
 
 class TestKernelSignatureValidation:

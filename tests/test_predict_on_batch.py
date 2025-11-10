@@ -16,7 +16,6 @@
 
 import numpyro.distributions as dist
 import pytest
-from conftest import lm, lm_with_kwargs_array
 from jax import random
 from jax.typing import ArrayLike
 from numpyro import sample
@@ -26,6 +25,7 @@ from numpyro.optim import Adam
 
 from aimz import ImpactModel
 from aimz._exceptions import NotFittedError
+from tests.conftest import lm, lm_with_kwargs_array
 
 
 def test_model_not_fitted() -> None:

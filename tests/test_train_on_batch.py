@@ -15,12 +15,12 @@
 """Tests for the `.train_on_batch()` method."""
 
 import pytest
-from conftest import lm_with_kwargs_array
 from jax import random
 from jax.typing import ArrayLike
 from numpyro.infer import SVI
 
 from aimz import ImpactModel
+from tests.conftest import lm_with_kwargs_array
 
 
 @pytest.mark.parametrize("vi", [lm_with_kwargs_array], indirect=True)

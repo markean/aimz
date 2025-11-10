@@ -15,7 +15,6 @@
 """Tests for the `.fit_on_batch()` method."""
 
 import pytest
-from conftest import lm
 from jax import random
 from jax.typing import ArrayLike
 from numpyro.infer import MCMC, SVI, Trace_ELBO
@@ -24,6 +23,7 @@ from numpyro.optim import Adam
 
 from aimz import ImpactModel
 from aimz.utils._validation import _is_fitted
+from tests.conftest import lm
 
 
 def test_fit_on_batch_nan_warning(synthetic_data: tuple[ArrayLike, ArrayLike]) -> None:

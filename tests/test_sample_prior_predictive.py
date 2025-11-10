@@ -19,11 +19,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 import xarray as xr
-from conftest import lm
 from jax import random
 from jax.typing import ArrayLike
 
 from aimz import ImpactModel
+from tests.conftest import lm
 
 if TYPE_CHECKING:
     from numpyro.infer import SVI

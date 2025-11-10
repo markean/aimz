@@ -18,7 +18,6 @@ import jax.numpy as jnp
 import numpyro.distributions as dist
 import pytest
 import xarray as xr
-from conftest import lm
 from jax import random
 from jax.typing import ArrayLike
 from numpyro import sample
@@ -28,6 +27,7 @@ from numpyro.optim import Adam
 
 from aimz import ImpactModel
 from aimz._exceptions import KernelValidationError
+from tests.conftest import lm
 
 
 def test_kernel_without_output(synthetic_data: tuple[ArrayLike, ArrayLike]) -> None:
