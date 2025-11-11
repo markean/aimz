@@ -30,7 +30,7 @@ wheels = [
 
 [[package]]
 name = "aimz"
-version = "0.8.2.dev0"
+version = "0.9.0.dev0"
 source = { editable = "." }
 dependencies = [
     { name = "dask" },
