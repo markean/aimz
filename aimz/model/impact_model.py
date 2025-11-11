@@ -26,6 +26,7 @@ from shutil import rmtree
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Self, cast
 from warnings import warn
+from weakref import WeakSet
 
 import jax.numpy as jnp
 import numpy as np
@@ -81,7 +82,9 @@ logger = logging.getLogger(__name__)
 
 
 class ImpactModel(BaseModel):
-    """A class for impact modeling."""
+    """Impact modeling interface: fit, sample, predict, and estimate effects."""
+
+    _models = WeakSet()
 
     def __init__(
         self,
@@ -92,7 +95,7 @@ class ImpactModel(BaseModel):
         param_input: str = "X",
         param_output: str = "y",
     ) -> None:
-        """Initialize an ImpactModel instance.
+        """Initialize an :class:`~aimz.ImpactModel` instance.
 
         Args:
             kernel: A probabilistic model with NumPyro primitives.
@@ -128,6 +131,9 @@ class ImpactModel(BaseModel):
         self._posterior: dict[str, Array] | None = None
         self._init_runtime_attrs()
 
+        # Register this instance
+        ImpactModel._models.add(self)
+
     def _init_runtime_attrs(self) -> None:
         """Initialize runtime attributes."""
         self._fn_vi_update: Callable | None = None
@@ -151,7 +157,7 @@ class ImpactModel(BaseModel):
         )
 
     def __str__(self) -> str:
-        """Return a summary of the ImpactModel instance."""
+        """Return a summary of the :class:`~aimz.ImpactModel` instance."""
         out = [
             "<ImpactModel>\n",
             f"Kernel: {getattr(self.kernel, '__name__', type(self.kernel).__name__)}",
@@ -167,7 +173,7 @@ class ImpactModel(BaseModel):
         return "\n".join(out)
 
     def __repr__(self) -> str:
-        """Return a representation of the ImpactModel instance."""
+        """Return a representation of the :class:`~aimz.ImpactModel` instance."""
         out = [
             "<ImpactModel",
             (
@@ -953,7 +959,7 @@ class ImpactModel(BaseModel):
         """Fit the impact model to the provided batch of data.
 
         This method behaves differently depending on the inference method specified at
-        initialization of the ImpactModel instance:
+        th initialization:
 
         - SVI
             Runs variational inference on the provided batch by invoking the
@@ -1733,8 +1739,23 @@ class ImpactModel(BaseModel):
         directory. While the temporary directory is typically removed automatically
         during garbage collection, this behavior is not guaranteed. Therefore, calling
         this method explicitly is recommended to ensure timely resource release.
+
+        See Also:
+            :meth:`~aimz.ImpactModel.cleanup_models` — clean temporary directories for
+            all tracked model instances.
         """
         if hasattr(self, "_temp_dir") and self._temp_dir is not None:
             logger.info("Temporary directory cleaned up at: %s", self._temp_dir.name)
             self._temp_dir.cleanup()
             self._temp_dir = None
+
+    @classmethod
+    def cleanup_models(cls) -> None:
+        """Clean up temporary directories for all :class:`~aimz.ImpactModel` instances.
+
+        See Also:
+            :meth:`~aimz.ImpactModel.cleanup` — clean the temporary directory for a
+            single instance.
+        """
+        for model in cls._models:
+            model.cleanup()

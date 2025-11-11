@@ -62,3 +62,4 @@ Miscellaneous
 
    ImpactModel.estimate_effect
    ImpactModel.cleanup
+   ImpactModel.cleanup_models

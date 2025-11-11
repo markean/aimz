@@ -5,7 +5,7 @@ Output Directory Cleanup
 
 Many high‑level methods of :class:`~aimz.ImpactModel` stream results to disk (e.g., posterior predictive samples, predictions) to support large datasets and memory efficiency.
 Each of these methods accepts an ``output_dir`` parameter (see :doc:`disk_and_on_batch` for broader I/O behavior of them).
-This page focuses on managing the temporary directory created when the user does not supply ``output_dir`` and on the :meth:`~aimz.ImpactModel.cleanup` method that removes it.
+This page focuses on managing the temporary directory created when the user does not supply ``output_dir`` and on the :meth:`~aimz.ImpactModel.cleanup` method, as well as the :meth:`~aimz.ImpactModel.cleanup_models` class method, which removes temporary directories for all live model instances.
 
 
 Creation Logic
@@ -118,13 +118,35 @@ The output below shows an example :external:class:`xarray.DataTree` illustrating
     Users can still inspect the structure and metadata of the :external:class:`xarray.DataTree`, but the original disk-backed values are no longer available.
 
 
+Cleaning Multiple Models
+------------------------
+When a process creates multiple :class:`~aimz.ImpactModel` instances, it can be useful to clean up all their temporary directories in a single call.
+The class method :meth:`~aimz.ImpactModel.cleanup_models` iterates over all live model instances and calls their :meth:`~aimz.ImpactModel.cleanup` method.
+For example, this can be used as a pipeline hook after a run to clean up all temporary directories without tracking individual model instances.
+
+Example::
+
+    from aimz.model import ImpactModel
+
+    # Create multiple instances and write to temporary directories
+    im1 = ImpactModel(...).fit(...).predict(...)
+    im2 = ImpactModel(...).fit(...).predict(...)
+
+    # Clean temporary directories for all active instances
+    ImpactModel.cleanup_models()
+
+    print(im1.temp_dir)  # None
+    print(im2.temp_dir)  # None
+
+
 Typical Usage Pattern
 ---------------------
-A typical workflow is to run these methods without specifying ``output_dir`` (using a temporary root), optionally access the results via the :attr:`~aimz.ImpactModel.temp_dir` attribute or the returned :external:class:`xarray.DataTree`, and then free disk space with :meth:`~aimz.ImpactModel.cleanup`.
+A typical workflow is to run these methods without specifying ``output_dir`` (using a temporary root), optionally access the results via the :attr:`~aimz.ImpactModel.temp_dir` attribute or the returned :external:class:`xarray.DataTree`, and then free disk space with :meth:`~aimz.ImpactModel.cleanup` or :meth:`~aimz.ImpactModel.cleanup_models`.
 
 Tips for safe use:
 
-* Call :meth:`~aimz.ImpactModel.cleanup` at the end of a notebook or in a ``finally`` block.
-* Copy any results you want to keep before :meth:`~aimz.ImpactModel.cleanup`.
+* Use :meth:`~aimz.ImpactModel.cleanup` at the end of a notebook or in a ``finally`` block.
+* Use :meth:`~aimz.ImpactModel.cleanup_models` to remove temporary directories for all live model instances at once.
+* Copy any results you want to keep before :meth:`~aimz.ImpactModel.cleanup` or :meth:`~aimz.ImpactModel.cleanup_models`.
 * In tests, check that temporary directories are removed to avoid disk bloat.
 * Avoid leaving long sessions with un-cleaned temporary directories.
