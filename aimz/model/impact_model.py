@@ -493,7 +493,6 @@ class ImpactModel(BaseModel):
                     queues[site].put(
                         (arr[:, None] if arr.ndim == 1 else arr)[:, : -n_pad or None],
                     )
-
                 if not error_queue.empty():
                     _, exc, tb = error_queue.get()
                     raise exc.with_traceback(tb)
@@ -501,7 +500,7 @@ class ImpactModel(BaseModel):
             pbar.set_description("Sampling complete, writing in progress...")
             _shutdown_writer_threads(threads, queues)
         except:
-            logger.exception(
+            logger.debug(
                 "Exception encountered. Cleaning up output directory: %s",
                 output_dir,
             )
@@ -1715,7 +1714,7 @@ class ImpactModel(BaseModel):
             pbar.set_description("Computation complete, writing in progress...")
             _shutdown_writer_threads(threads, queues=queues)
         except:
-            logger.exception(
+            logger.debug(
                 "Exception encountered. Cleaning up output directory: %s",
                 output_subdir,
             )

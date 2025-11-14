@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The output subdirectory naming convention has changed from using only a timestamp to the pattern `<timestamp>_<caller_name>/`, where `<caller_name>` is the name of the method that triggered the write operation ([#138](https://github.com/markean/aimz/issues/138)).
+- Lowered the logging level for exceptions during temporary directory cleanup from `exception` to `debug` to reduce console noise.
 
 ## [v0.8.1](https://github.com/markean/aimz/releases/tag/v0.8.1) - 2025-10-23
 
