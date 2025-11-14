@@ -12,14 +12,15 @@ Creation Logic
 --------------
 When a disk‑writing method is called with ``output_dir=None`` (the default), the model creates a process‑scoped temporary root directory (via :class:`tempfile.TemporaryDirectory`) the first time such a call occurs.
 Each invocation then writes to a timestamped subdirectory under that root, ensuring that earlier results are never overwritten.
+Subdirectories follow the pattern ``<caller_name>_<UTC-timestamp>/``, where ``<caller_name>`` is the name of the method that triggered the write operation.
 This root directory is stored in the :attr:`~aimz.ImpactModel.temp_dir` attribute and reused for subsequent calls until the user invoke :meth:`~aimz.ImpactModel.cleanup`.
 
 Example Layout (implicit temp root)::
 
     /tmp/tmpz00u5kxk/       # model.temp_dir (root, reused until cleanup)
-        20250926T185250223698Z/
-        20250926T185359570134Z/
-        20250926T185419208087Z/
+        sample_prior_predictive_20250926T185250223698Z/
+        log_likelihood_20250926T185359570134Z/
+        predict_20250926T185419208087Z/
 
 If the user provides ``output_dir``, that directory becomes the root, and it will be created if it does not already exist.
 The same timestamped subdirectory pattern is used there (e.g., ``my_runs/20250917T013040Z``).
