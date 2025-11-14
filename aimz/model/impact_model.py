@@ -384,14 +384,14 @@ class ImpactModel(BaseModel):
         output_dir = Path(output_dir).expanduser().resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Use the outermost method of this instance in the call stack as prefix
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+        # Use the outermost method of this instance in the call stack as suffix
         caller = None
         for frame in stack():
             if frame.frame.f_locals.get("self") is not self:
                 break
             caller = frame.function
-        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
-        output_subdir = output_dir / f"{caller}_{timestamp}"
+        output_subdir = output_dir / f"{timestamp}_{caller}"
         output_subdir.mkdir(parents=False, exist_ok=False)
 
         return output_dir, output_subdir

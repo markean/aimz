@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The output subdirectory naming convention has changed from using only a timestamp to the pattern `<caller_name>_<timestamp>/`, where `<caller_name>` is the name of the method that triggered the write operation ([#138](https://github.com/markean/aimz/issues/138)).
+- The output subdirectory naming convention has changed from using only a timestamp to the pattern `<timestamp>_<caller_name>/`, where `<caller_name>` is the name of the method that triggered the write operation ([#138](https://github.com/markean/aimz/issues/138)).
 
 ## [v0.8.1](https://github.com/markean/aimz/releases/tag/v0.8.1) - 2025-10-23
 
