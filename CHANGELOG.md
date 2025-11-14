@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added the class method {meth}`~aimz.ImpactModel.cleanup_models` to clean up temporary directories for all active model instances ([#136](https://github.com/markean/aimz/issues/136)).
 
+### Changed
+
+- The output subdirectory naming convention has changed from using only a timestamp to the pattern `<caller_name>_<timestamp>/`, where `<caller_name>` is the name of the method that triggered the write operation ([#138](https://github.com/markean/aimz/issues/138)).
+
 ## [v0.8.1](https://github.com/markean/aimz/releases/tag/v0.8.1) - 2025-10-23
 
 ### Changed

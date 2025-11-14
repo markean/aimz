@@ -19,7 +19,7 @@ from __future__ import annotations
 import contextlib
 import logging
 from datetime import UTC, datetime
-from inspect import signature
+from inspect import signature, stack
 from os import cpu_count
 from pathlib import Path
 from shutil import rmtree
@@ -357,14 +357,17 @@ class ImpactModel(BaseModel):
 
         return tuple(str(s) for s in return_sites)
 
-    def _create_output_subdir(self, output_dir: str | Path | None) -> tuple[Path, Path]:
+    def _create_output_subdir(
+        self,
+        output_dir: str | Path | None,
+    ) -> tuple[Path, Path]:
         """Create a subdirectory for storing output.
 
         This function is called for its side effect: it creates a subdirectory within
         the specified output directory with a timestamp.
 
         Args:
-            output_dir: The directory where the output subdirectory will be created.
+            output_dir: Base directory where the output subdirectory will be created.
 
         Returns:
             The paths to the output directory and the created subdirectory.
@@ -380,8 +383,15 @@ class ImpactModel(BaseModel):
             )
         output_dir = Path(output_dir).expanduser().resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Use the outermost method of this instance in the call stack as prefix
+        caller = None
+        for frame in stack():
+            if frame.frame.f_locals.get("self") is not self:
+                break
+            caller = frame.function
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
-        output_subdir = output_dir / timestamp
+        output_subdir = output_dir / f"{caller}_{timestamp}"
         output_subdir.mkdir(parents=False, exist_ok=False)
 
         return output_dir, output_subdir
