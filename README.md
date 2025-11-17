@@ -27,6 +27,20 @@ aimz is a Python library for scalable probabilistic impact modeling, enabling as
 - Support for interventional causal inference for counterfactuals and causal effects.
 - MLflow integration for experiment tracking and model management.
 
+## Installation
+
+Install aimz using either `pip` or `conda`:
+
+```sh
+pip install -U aimz
+```
+
+```sh
+conda install -c conda-forge aimz
+```
+
+For additional details, see the full [installation guide](https://aimz.readthedocs.io/stable/getting_started/installation.html).
+
 ## Usage
 
 ```python
