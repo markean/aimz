@@ -114,10 +114,10 @@ def _create_sharded_sampler(
             mesh=mesh,
             in_specs=(
                 None,  # kernel
-                None,  # posterior_samples
-                None,  # rng_key
                 None,  # num_samples
+                PartitionSpec(),  # rng_key
                 None,  # return_sites
+                PartitionSpec(),  # samples
                 None,  # param_input
                 None,  # kwargs_key
                 PartitionSpec(axis),  # X
