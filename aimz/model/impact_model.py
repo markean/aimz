@@ -42,7 +42,7 @@ from jax import (
     make_mesh,
     random,
 )
-from jax.sharding import Mesh, NamedSharding, PartitionSpec
+from jax.sharding import AxisType, Mesh, NamedSharding, PartitionSpec
 from jax.typing import ArrayLike
 from numpyro.handlers import do, seed, substitute, trace
 from numpyro.infer import MCMC, SVI
@@ -144,8 +144,12 @@ class ImpactModel(BaseModel):
         self._device: NamedSharding | None
         num_devices = local_device_count()
         if num_devices > 1:
-            self._mesh = make_mesh((num_devices,), ("obs",))
-            self._device = NamedSharding(self._mesh, PartitionSpec("obs"))
+            self._mesh = make_mesh(
+                (num_devices,),
+                axis_names=("obs",),
+                axis_types=(AxisType.Explicit,),
+            )
+            self._device = NamedSharding(self._mesh, spec=PartitionSpec("obs"))
         else:
             self._mesh = None
             self._device = None
@@ -440,7 +444,7 @@ class ImpactModel(BaseModel):
         if self._device and self._mesh:
             subkeys = device_put(
                 subkeys,
-                NamedSharding(self._mesh, PartitionSpec()),
+                NamedSharding(self._mesh, spec=PartitionSpec()),
             )
 
         zarr_group = open_group(output_dir, mode="w")
@@ -666,8 +670,8 @@ class ImpactModel(BaseModel):
         if self._fn_sample_prior_predictive is None:
             self._fn_sample_prior_predictive = _create_sharded_sampler(
                 self._mesh,
-                len(kwargs_array),
-                len(kwargs_extra),
+                n_kwargs_array=len(kwargs_array),
+                n_kwargs_extra=len(kwargs_extra),
             )
 
         output_dir, output_subdir = self._create_output_subdir(output_dir)
@@ -1457,8 +1461,8 @@ class ImpactModel(BaseModel):
         if self._fn_sample_posterior_predictive is None:
             self._fn_sample_posterior_predictive = _create_sharded_sampler(
                 self._mesh,
-                len(kwargs_array),
-                len(kwargs_extra),
+                n_kwargs_array=len(kwargs_array),
+                n_kwargs_extra=len(kwargs_extra),
             )
 
         output_dir, output_subdir = self._create_output_subdir(output_dir)
