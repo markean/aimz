@@ -127,6 +127,7 @@ def _create_sharded_sampler(
                 ),
             ),
             out_specs=PartitionSpec(None, axis),
+            check_vma=False,
         )(f),
     )
 
