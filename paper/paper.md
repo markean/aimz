@@ -28,17 +28,24 @@ These design choices reduce bespoke glue code and enable reproducible, high-thro
 
 # Statement of need
 
-Applied analytics workflows often require: (1) fitting probabilistic models to large scale datasets, (2) generating posterior and posterior predictive samples for calibrated uncertainty, and (3) estimating intervention effects under explicit structural modifications.
-While core probabilistic programming frameworks (e.g., NumPyro, PyMC [@pymc2023], Stan [@carpenter2017stan]) offer mature inference algorithms, recurring engineering tasks—such as streaming large predictive draws to disk, structuring outputs, coordinating intervention scenarios, managing device resources, and logging experiments—are typically reimplemented in an ad hoc manner.
-General machine learning libraries (e.g., scikit‑learn [@scikit-learn]) lack native Bayesian sampling or causal intervention semantics, while many causal inference toolkits emphasize causal graph discovery or fixed-form treatment effect routines rather than scalable sampling workflows.
+Standard Bayesian workflows often encounter significant engineering friction when transitioning from model specification to large-scale impact evaluation.
+While core probabilistic programming frameworks offer mature inference algorithms, they lack native infrastructure for the repetitive engineering tasks essential to production-grade impact analysis: streaming predictive draws without exceeding system memory, managing device-aware sharding for simulation, and coordinating complex interventional scenarios.
+General machine learning libraries lack the calibrated uncertainty quantification provided by Bayesian sampling, while many causal inference toolkits focus on graph discovery rather than high-throughput predictive workflows.
+`aimz` addresses these gaps by consolidating model tracing, sharded predictive sampling, and experiment lineage into a single estimator-like object.
+This reduces the bespoke engineering effort required to connect flexible statistical research with high-throughput data pipelines, supporting reliable and reproducible probabilistic analyses at scale.
 
-`aimz` consolidates these infrastructural concerns within a single object (`ImpactModel`) that provides: probabilistic model tracing and argument binding; SVI or MCMC with automatic posterior sample management; JIT‑compiled, sharded posterior predictive sampling with concurrent streaming to Zarr stores surfaced as Xarray objects; structured intervention ("do-operation") application; and optional MLflow integration for experiment tracking.
-The familiar "`fit` / `predict` / `sample`" interface further eases integration with machine learning tooling, emerging Model Context Protocol pipelines, and AI agents that work with simple estimator-like semantics.
-This unification reduces redundant glue code and minimizes potential failure points in applications such as marketing mix modeling, policy evaluation, and attribution of program impacts.
+# State of the field
 
-Existing impact or uplift modeling libraries (e.g., domain‑specific frameworks such as Meridian [@meridian_github], Robyn [@robyn], or PyMC-Marketing [@pymc-marketing]) typically standardize on a constrained family of time‑series or marketing response models and a fixed inference stack, making it difficult to deviate from their built-in assumptions without forking code or re-implementing infrastructure.
-`aimz` instead pursues generality—accepting arbitrary NumPyro model functions and multiple inference strategies—while still avoiding boilerplate through streamed predictive simulation, structured outputs, and intervention orchestration.
-By elevating scalable posterior predictive simulation and intervention effect estimation to first-class capabilities, `aimz` lowers the barrier between exploratory probabilistic modeling and production-grade Bayesian impact analysis.
+The landscape of Bayesian software is largely divided between low-level flexibility and high-level rigidity.
+Core probabilistic programming languages like NumPyro, PyMC [@pymc2023], and Stan [@carpenter2017stan] provide the flexible primitives necessary for custom research but require users to manually handle scaling, parallelization, and other performance considerations.
+Conversely, domain-specific frameworks like Meridian [@meridian_github], Robyn [@robyn], or PyMC-Marketing [@pymc-marketing] can offer robust end-to-end pipelines but are specialized for marketing mix modeling.
+These tools frequently enforce fixed model architectures (e.g., specific adstock or saturation transformations) and opaque internal logic that are difficult to adapt for broader scientific research, such as evaluating clinical care gaps---where individual-level discrepancies between recommended best practices and actual care require custom hierarchical specifications and structural modifications.
+
+`aimz` is designed to target a middle ground by providing Bayesian infrastructure in an estimator-like form.
+It does not prescribe a specific model form; instead, it provides a scalable execution layer for user-defined models.
+While libraries like CausalPy [@causalpy_github] provide sophisticated, high-level interfaces for a variety of quasi-experimental designs, they are typically optimized for exploratory analysis and causal identification.
+`aimz` distinguishes itself by focusing on the high-throughput engineering needed to efficiently handle large-scale probabilistic simulations and persist results as structured, reusable artifacts.
+This makes `aimz` uniquely suited for production-grade Bayesian workflows where reproducibility, experiment lineage, and the parallelized simulation of custom interventions are critical requirements.
 
 # Software design
 
