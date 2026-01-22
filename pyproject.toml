@@ -36,12 +36,12 @@ classifiers = [
 [project.optional-dependencies]
 dev = ["pre-commit>=4.3", "pytest>=9", "pytest-cov>=7", "ruff>=0.14"]
 gpu = ["jax[cuda13]>=0.8"]
-mlflow = ["mlflow>=3"]
+mlflow = ["mlflow>=3.5"]
 docs = [
     "arviz-plots[matplotlib]>=0.6",
     "flax>=0.12",
     "jupyter-sphinx>=0.5",
-    "mlflow>=3",
+    "mlflow>=3.5",
     "myst-parser>=5",
     "pydata-sphinx-theme>=0.16",
     "sphinx>=8.2",
