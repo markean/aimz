@@ -25,13 +25,11 @@ if TYPE_CHECKING:
     from collections import OrderedDict
     from collections.abc import Callable, Mapping
 
-    from jax.typing import ArrayLike
-
 
 def _sample_forward(
     model: Callable,
     num_samples: int,
-    rng_key: ArrayLike,
+    rng_key: Array,
     return_sites: tuple[str, ...] | None,
     samples: dict[str, Array] | None,
     model_kwargs: Mapping[str, object] | None,
@@ -44,7 +42,7 @@ def _sample_forward(
     Args:
         model: A probabilistic model with NumPyro primitives.
         num_samples: The number of samples to draw.
-        rng_key (ArrayLike): A pseudo-random number generator key.
+        rng_key: A pseudo-random number generator key.
         return_sites: Names of variables (sites) to return.
         samples: A dictionary of samples to condition on, where each array has shape
             ``(num_samples, ...)``.

@@ -33,7 +33,6 @@ if TYPE_CHECKING:
 
     import numpy.typing as npt
     from jax.sharding import Sharding
-    from jax.typing import ArrayLike
 
     from aimz.utils.data.array_dataset import ArrayDataset
 
@@ -44,7 +43,7 @@ class ArrayLoader:
     def __init__(
         self,
         dataset: ArrayDataset,
-        rng_key: ArrayLike,
+        rng_key: Array,
         *,
         batch_size: int = 32,
         shuffle: bool = False,
@@ -54,7 +53,7 @@ class ArrayLoader:
 
         Args:
             dataset: The dataset to load.
-            rng_key (ArrayLike): A pseudo-random number generator key.
+            rng_key: A pseudo-random number generator key.
             batch_size: The number of samples per batch.
             shuffle: Whether to shuffle the dataset before batching.
             device: The device or sharding specification to which the data should be
@@ -127,11 +126,16 @@ class ArrayLoader:
                 batch = {
                     k: self.pad_array(arr[batch_idx], n_pad=n_pad)
                     for k, arr in self.dataset.arrays.items()
+                    if arr is not None
                 }
                 batch = {k: device_put(v, self.device) for k, v in batch.items()}
             else:
                 n_pad = 0
-                batch = {k: arr[batch_idx] for k, arr in self.dataset.arrays.items()}
+                batch = {
+                    k: arr[batch_idx]
+                    for k, arr in self.dataset.arrays.items()
+                    if arr is not None
+                }
             yield batch, n_pad
 
     def __len__(self) -> int:
