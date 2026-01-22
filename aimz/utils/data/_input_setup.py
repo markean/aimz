@@ -29,6 +29,7 @@ from aimz.utils.data import ArrayDataset, ArrayLoader
 if TYPE_CHECKING:
     from collections.abc import Sized
 
+    from jax import Array
     from jax.sharding import Sharding
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,7 @@ def _setup_inputs(
     *,
     X: ArrayLike | ArrayLoader,
     y: ArrayLike | None,
-    rng_key: ArrayLike,
+    rng_key: Array,
     batch_size: int | None,
     num_samples: int,
     shuffle: bool = False,
@@ -59,7 +60,7 @@ def _setup_inputs(
             ``rng_key``, ``batch_size`` and ``shuffle`` are ignored.
         y (ArrayLike | None): Output data with shape ``(n_samples_Y,)``. Must be
             ``None`` if ``X`` is a data loader.
-        rng_key (ArrayLike): A pseudo-random number generator key.
+        rng_key: A pseudo-random number generator key.
         batch_size: The size of batches for data loading.
         num_samples: Number of samples to draw, which affects the size of batches.
         shuffle: Whether to shuffle the dataset before batching.
@@ -100,7 +101,7 @@ def _setup_inputs(
             )
             warn(msg, category=UserWarning, stacklevel=2)
         loader = ArrayLoader(
-            ArrayDataset(X=cast("ArrayLike", X), y=y, **kwargs_array._asdict()),
+            ArrayDataset(X=X, y=y, **kwargs_array._asdict()),
             rng_key=rng_key,
             batch_size=batch_size,
             shuffle=shuffle,

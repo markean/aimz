@@ -89,7 +89,7 @@ class ImpactModel(BaseModel):
     def __init__(
         self,
         kernel: Callable,
-        rng_key: ArrayLike,
+        rng_key: Array,
         inference: SVI | MCMC,
         *,
         param_input: str = "X",
@@ -99,7 +99,7 @@ class ImpactModel(BaseModel):
 
         Args:
             kernel: A probabilistic model with NumPyro primitives.
-            rng_key (ArrayLike): A pseudo-random number generator key.
+            rng_key: A pseudo-random number generator key.
             inference: An inference method supported by NumPyro, such as an instance of
                 :external:class:`~numpyro.infer.svi.SVI` or
                 :external:class:`~numpyro.infer.mcmc.MCMC`.
@@ -240,7 +240,7 @@ class ImpactModel(BaseModel):
         return self._kernel_spec
 
     @property
-    def rng_key(self) -> ArrayLike:
+    def rng_key(self) -> Array:
         """Pseudo-random number generator key."""
         return self._rng_key
 
@@ -403,7 +403,7 @@ class ImpactModel(BaseModel):
     def _sample_and_write(
         self,
         num_samples: int,
-        rng_key: ArrayLike,
+        rng_key: Array,
         return_sites: tuple[str, ...],
         output_dir: Path,
         kernel: Callable,
@@ -519,7 +519,7 @@ class ImpactModel(BaseModel):
         X: ArrayLike,
         *,
         num_samples: int = 1000,
-        rng_key: ArrayLike | None = None,
+        rng_key: Array | None = None,
         return_sites: str | Iterable[str] | None = None,
         return_datatree: bool = True,
         **kwargs: object,
@@ -529,8 +529,8 @@ class ImpactModel(BaseModel):
         Args:
             X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
             num_samples: The number of samples to draw.
-            rng_key (ArrayLike | None): A pseudo-random number generator key. By
-                default, an internal key is used and split as needed.
+            rng_key: A pseudo-random number generator key. By default, an internal key
+                is used and split as needed.
             return_sites: Names of variables (sites) to return. If ``None``, samples
                 :attr:`~aimz.ImpactModel.param_output` and deterministic sites.
             return_datatree: If ``True``, return a :external:class:`~xarray.DataTree`;
@@ -585,7 +585,7 @@ class ImpactModel(BaseModel):
         X: ArrayLike,
         *,
         num_samples: int = 1000,
-        rng_key: ArrayLike | None = None,
+        rng_key: Array | None = None,
         return_sites: str | Iterable[str] | None = None,
         batch_size: int | None = None,
         output_dir: str | Path | None = None,
@@ -600,8 +600,8 @@ class ImpactModel(BaseModel):
         Args:
             X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
             num_samples: The number of samples to draw.
-            rng_key (ArrayLike | None): A pseudo-random number generator key. By
-                default, an internal key is used and split as needed.
+            rng_key: A pseudo-random number generator key. By default, an internal key
+                is used and split as needed.
             return_sites: Names of variables (sites) to return. If ``None``, samples
                 :attr:`~aimz.ImpactModel.param_output` and deterministic sites.
             batch_size: The batch size for data loading during prior predictive
@@ -725,7 +725,7 @@ class ImpactModel(BaseModel):
         self,
         *,
         num_samples: int = 1000,
-        rng_key: ArrayLike | None = None,
+        rng_key: Array | None = None,
         return_sites: str | Iterable[str] | None = None,
         return_datatree: bool = True,
         **kwargs: object,
@@ -734,10 +734,10 @@ class ImpactModel(BaseModel):
 
         Args:
             num_samples: The number of posterior samples to draw.
-            rng_key (ArrayLike | None): A pseudo-random number generator key. By
-                default, an internal key is used and split as needed. Ignored if the
-                inference method is MCMC, where the ``post_warmup_state`` property will
-                be used to continue sampling.
+            rng_key: A pseudo-random number generator key. By default, an internal key
+                is used and split as needed. Ignored if the inference method is MCMC,
+                where the ``post_warmup_state`` property will be used to continue
+                sampling.
             return_sites: Names of variables (sites) to return. If ``None``, samples
                 all latent sites. Ignored if the inference method is MCMC.
             return_datatree: If ``True``, return a :external:class:`~xarray.DataTree`;
@@ -798,7 +798,7 @@ class ImpactModel(BaseModel):
         X: ArrayLike,
         *,
         intervention: dict | None = None,
-        rng_key: ArrayLike | None = None,
+        rng_key: Array | None = None,
         return_sites: str | Iterable[str] | None = None,
         return_datatree: bool = True,
         **kwargs: object,
@@ -815,8 +815,8 @@ class ImpactModel(BaseModel):
                 intervention values. Interventions enable counterfactual analysis by
                 modifying the specified sample sites during prediction (posterior
                 predictive sampling).
-            rng_key (ArrayLike | None): A pseudo-random number generator key. By
-                default, an internal key is used and split as needed.
+            rng_key: A pseudo-random number generator key. By default, an internal key
+                is used and split as needed.
             return_sites: Names of variables (sites) to return. If ``None``, samples
                 :attr:`~aimz.ImpactModel.param_output` and deterministic sites.
             return_datatree: If ``True``, return a :external:class:`~xarray.DataTree`;
@@ -849,7 +849,7 @@ class ImpactModel(BaseModel):
         X: ArrayLike | ArrayLoader,
         *,
         intervention: dict | None = None,
-        rng_key: ArrayLike | None = None,
+        rng_key: Array | None = None,
         return_sites: str | Iterable[str] | None = None,
         batch_size: int | None = None,
         output_dir: str | Path | None = None,
@@ -869,8 +869,8 @@ class ImpactModel(BaseModel):
                 intervention values. Interventions enable counterfactual analysis by
                 modifying the specified sample sites during prediction (posterior
                 predictive sampling).
-            rng_key (ArrayLike | None): A pseudo-random number generator key. By
-                default, an internal key is used and split as needed.
+            rng_key: A pseudo-random number generator key. By default, an internal key
+                is used and split as needed.
             return_sites: Names of variables (sites) to return. If ``None``, samples
                 :attr:`~aimz.ImpactModel.param_output` and deterministic sites.
             batch_size: The batch size for data loading during posterior predictive
@@ -913,7 +913,7 @@ class ImpactModel(BaseModel):
         self,
         X: ArrayLike,
         y: ArrayLike,
-        rng_key: ArrayLike | None = None,
+        rng_key: Array | None = None,
         **kwargs: object,
     ) -> tuple[SVIState, Array]:
         """Run a single VI step on the given batch of data.
@@ -921,9 +921,9 @@ class ImpactModel(BaseModel):
         Args:
             X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
             y (ArrayLike): Output data with shape ``(n_samples_Y,)``.
-            rng_key (ArrayLike | None): A pseudo-random number generator key. By
-                default, an internal key is used and split as needed. The key is only
-                used for initialization if the internal SVI state is not yet set.
+            rng_key: A pseudo-random number generator key. By default, an internal key
+                is used and split as needed. The key is only used for initialization if
+                the internal SVI state is not yet set.
             **kwargs: Additional arguments passed to the model. All array-like values
                 are expected to be JAX arrays.
 
@@ -965,7 +965,7 @@ class ImpactModel(BaseModel):
         *,
         num_steps: int = 10000,
         num_samples: int = 1000,
-        rng_key: ArrayLike | None = None,
+        rng_key: Array | None = None,
         progress: bool = True,
         **kwargs: object,
     ) -> Self:
@@ -992,8 +992,8 @@ class ImpactModel(BaseModel):
                 if the inference method is MCMC.
             num_samples: The number of posterior samples to draw. Ignored if the
                 inference method is MCMC.
-            rng_key (ArrayLike | None): A pseudo-random number generator key. By
-                default, an internal key is used and split as needed.
+            rng_key: A pseudo-random number generator key. By default, an internal key
+                is used and split as needed.
             progress: Whether to display a progress bar. Ignored if the inference method
                 is MCMC.
             **kwargs: Additional arguments passed to the model. All array-like values
@@ -1063,7 +1063,7 @@ class ImpactModel(BaseModel):
         y: ArrayLike | None = None,
         *,
         num_samples: int = 1000,
-        rng_key: ArrayLike | None = None,
+        rng_key: Array | None = None,
         progress: bool = True,
         batch_size: int | None = None,
         epochs: int = 1,
@@ -1084,8 +1084,8 @@ class ImpactModel(BaseModel):
             y (ArrayLike | None): Output data with shape ``(n_samples_Y,)``. Must be
                 ``None`` if ``X`` is a data loader.
             num_samples: The number of posterior samples to draw.
-            rng_key (ArrayLike | None): A pseudo-random number generator key. By
-                default, an internal key is used and split as needed.
+            rng_key: A pseudo-random number generator key. By default, an internal key
+                is used and split as needed.
             progress: Whether to display a progress bar.
             batch_size: The number of data points processed at each step of variational
                 inference. If ``None``, the entire dataset is used as a single batch in
@@ -1254,7 +1254,7 @@ class ImpactModel(BaseModel):
         X: ArrayLike,
         *,
         intervention: dict | None = None,
-        rng_key: ArrayLike | None = None,
+        rng_key: Array | None = None,
         in_sample: bool = True,
         return_sites: str | Iterable[str] | None = None,
         return_datatree: bool = True,
@@ -1280,8 +1280,8 @@ class ImpactModel(BaseModel):
                 intervention values. Interventions enable counterfactual analysis by
                 modifying the specified sample sites during prediction (posterior
                 predictive sampling).
-            rng_key (ArrayLike | None): A pseudo-random number generator key. By
-                default, an internal key is used and split as needed.
+            rng_key: A pseudo-random number generator key. By default, an internal key
+                is used and split as needed.
             in_sample: Specifies the group where posterior predictive samples are stored
                 in the returned output. If ``True``, samples are stored in the
                 ``posterior_predictive`` group, indicating they were generated based on
@@ -1351,7 +1351,7 @@ class ImpactModel(BaseModel):
         X: ArrayLike | ArrayLoader,
         *,
         intervention: dict | None = None,
-        rng_key: ArrayLike | None = None,
+        rng_key: Array | None = None,
         in_sample: bool = True,
         return_sites: str | Iterable[str] | None = None,
         batch_size: int | None = None,
@@ -1375,8 +1375,8 @@ class ImpactModel(BaseModel):
                 intervention values. Interventions enable counterfactual analysis by
                 modifying the specified sample sites during prediction (posterior
                 predictive sampling).
-            rng_key (ArrayLike | None): A pseudo-random number generator key. By
-                default, an internal key is used and split as needed.
+            rng_key: A pseudo-random number generator key. By default, an internal key
+                is used and split as needed.
             in_sample: Specifies the group where posterior predictive samples are stored
                 in the returned output. If ``True``, samples are stored in the
                 ``posterior_predictive`` group, indicating they were generated based on

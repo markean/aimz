@@ -29,7 +29,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from jax.sharding import Mesh
-    from jax.typing import ArrayLike
 
 
 def _create_sharded_sampler(
@@ -48,7 +47,7 @@ def _create_sharded_sampler(
 
     Returns:
         A sharded function that takes the following arguments:
-            - rng_key (ArrayLike): A pseudo-random number generator key.
+            - rng_key: A pseudo-random number generator key.
             - kernel (Callable): A probabilistic model with NumPyro primitives.
             - samples (dict): A dictionary of samples to condition on.
             - batch_shape (tuple[int]): The shape of the batch dimension, specifically
@@ -65,7 +64,7 @@ def _create_sharded_sampler(
     def f(
         kernel: Callable,
         num_samples: int,
-        rng_key: ArrayLike,
+        rng_key: Array,
         return_sites: tuple[str, ...],
         samples: dict[str, Array],
         param_input: str,

@@ -24,19 +24,23 @@ from jax import Array
 if TYPE_CHECKING:
     from collections.abc import Sized
 
-    from jax.typing import ArrayLike
+    import numpy.typing as npt
 
 
 class ArrayDataset:
     """ArrayDataset class for JAX arrays."""
 
-    def __init__(self, *, to_jax: bool = True, **arrays: ArrayLike | None) -> None:
+    def __init__(
+        self,
+        *,
+        to_jax: bool = True,
+        **arrays: Array | npt.NDArray | None,
+    ) -> None:
         """Initialize an ArrayDataset instance.
 
         Args:
             to_jax: Whether to convert the input arrays to JAX arrays.
-            **arrays (ArrayLike): One or more JAX arrays or compatible array-like
-                objects.
+            **arrays: One or more JAX arrays or compatible array-like objects.
 
         Raises:
             ValueError: If no arrays are provided or if the arrays do not have the same
@@ -73,4 +77,4 @@ class ArrayDataset:
         Returns:
             A tuple containing the elements from each array at the specified index.
         """
-        return {k: v[idx] for k, v in self.arrays.items()}
+        return {k: v[idx] for k, v in self.arrays.items() if v is not None}
