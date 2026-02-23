@@ -20,11 +20,15 @@ bibliography: paper.bib
 
 # Summary
 
-`aimz` is a Python library for scalable probabilistic impact modeling, enabling assessment of intervention effects on outcomes while providing an intuitive interface for fitting Bayesian models, drawing posterior samples, generating large-scale posterior predictive simulations, and estimating interventional effects with minimal boilerplate.
+`aimz` is a Python library for probabilistic impact modeling, a method for estimating how actions or interventions affect outcomes while capturing uncertainty.
+It provides an intuitive interface for fitting Bayesian models, drawing posterior samples, generating large-scale posterior predictive simulations, and estimating interventional effects with minimal boilerplate.
+Researchers and analysts can explore “what-if” scenarios to understand potential effects under different decisions or interventions, generating predictions that reflect the full range of possible outcomes.
+`aimz` supports advanced inference methods with efficient, reproducible workflows, making it easy to run large-scale simulations and serialize structured outputs.
+These design choices reduce bespoke glue code, enable high-throughput analyses, and support rapid iteration and experimentation.
+
 It combines the usability of general machine learning APIs with the flexibility of probabilistic programming through a single high-level object (`ImpactModel`).
 Built atop JAX [@jax2018github] and NumPyro [@phan2019composable], it supports (minibatch) stochastic variational inference (SVI) and Markov chain Monte Carlo sampling, just-in-time (JIT)-compiled parallel predictive streaming to chunked Zarr [@alistair_miles_2020_3773450] stores exposed through Xarray [@hoyer2017xarray], and first-class intervention handling for effect estimation.
-Integrated MLflow [@Zaharia_Accelerating_the_Machine_2018] support enables experiment tracking and model lineage.
-These design choices reduce bespoke glue code and enable reproducible, high-throughput analyses on large datasets, while supporting rapid iteration and experimentation.
+Integrated MLflow [@zaharia2018accelerating] support enables experiment tracking and model lineage.
 
 # Statement of need
 
@@ -44,13 +48,16 @@ These tools frequently enforce fixed model architectures (e.g., specific adstock
 `aimz` is designed to target a middle ground by providing Bayesian infrastructure in an estimator-like form.
 It does not prescribe a specific model form; instead, it provides a scalable execution layer for user-defined models.
 While libraries like CausalPy [@causalpy_github] provide sophisticated, high-level interfaces for a variety of quasi-experimental designs, they are typically optimized for exploratory analysis and causal identification.
-`aimz` distinguishes itself by focusing on the high-throughput engineering needed to efficiently handle large-scale probabilistic simulations and persist results as structured, reusable artifacts.
+`aimz` distinguishes itself by focusing on high-throughput engineering for large-scale probabilistic simulations and on structured, reusable artifact management.
 This makes `aimz` uniquely suited for production-grade Bayesian workflows where reproducibility, experiment lineage, and the parallelized simulation of custom interventions are critical requirements.
 
 # Software design
 
 `aimz` is designed to support scalable Bayesian analyses in applied settings, allowing users to iterate quickly across model specifications, inference settings, and intervention scenarios, as well as to handle large datasets and produce reproducible artifacts.
-The library is built on NumPyro to leverage its modeling flexibility and JAX’s accelerator-native ecosystem and composable program transformations (e.g., JIT, vectorization, and sharded execution), which are well suited to impact modeling workflows where posterior predictive simulation and scenario evaluation often dominate overall runtime relative to model fitting.
+It combines the usability of general machine learning APIs with the flexibility of probabilistic programming through a single high-level object (`ImpactModel`).
+Built atop JAX [@jax2018github] and NumPyro [@phan2019composable], `aimz` leverages modeling flexibility, accelerator-native execution, and composable program transformations such as vectorization and sharded execution.
+It supports (minibatch) stochastic variational inference (SVI) and Markov chain Monte Carlo sampling, just-in-time–compiled parallel predictive streaming to chunked Zarr [@alistair_miles_2020_3773450] stores exposed through Xarray [@hoyer2017xarray], and first-class intervention handling for effect estimation.
+Integrated MLflow [@zaharia2018accelerating] support enables experiment tracking and model lineage.
 
 `aimz` prioritizes performance as a key consideration.
 Predictive sampling and effect estimation are organized around JIT-accelerated execution, data-parallel sharding, and streaming results to disk-backed, chunked storage, enabling sustained throughput for large simulation workloads without requiring all draws to be retained in memory.
