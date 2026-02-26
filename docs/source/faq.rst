@@ -38,7 +38,7 @@ Fix it by renaming your arguments to ``X`` / ``y`` or supplying ``param_input`` 
 Do I need to know NumPyro_ to use aimz?
 ---------------------------------------
 Yes.
-aimz builds on NumPyro_’s primitives and effect handlers.
+The aimz package builds on NumPyro_’s primitives and effect handlers.
 You should be comfortable writing a model function, defining a guide (for SVI) or configuring MCMC, and reading model traces.
 The library focuses on orchestration, not abstracting away core probabilistic modeling concepts.
 
@@ -46,15 +46,96 @@ The library focuses on orchestration, not abstracting away core probabilistic mo
 Can I use aimz with any NumPyro_ model?
 ---------------------------------------
 No.
-Most conventional SVI / MCMC models with global latents and plate-based structure work, but there are limitations:
+Most conventional models with global latents and a plate-based structure work out of the box.
+The core requirement is that every sample site in the model must have a **static shape** that does not change with the data.
 
-* Use of the control‑flow primitive: :external:func:`~numpyro.contrib.control_flow.scan` (or deeply nested dynamic control flow) – only partial support.
-* Complex per‑example local latent structure (e.g., very large / nested plates) – only partial support.
-* Models that rely on shapes incompatible with sharded / batched execution may require refactoring.
+On multi-device systems, :meth:`~aimz.ImpactModel.predict` uses `data parallelism <https://jax.readthedocs.io/en/latest/distributed_data_loading.html#data-parallelism>`_: the input data is sharded across devices along axis 0 (the observation dimension), while posterior samples are **replicated** on every device.
+The forward sampler used internally also requires every traced site to have a fixed shape across all sample iterations.
 
-If a model traces successfully once but fails in batched prediction, try the
-``*_on_batch`` variants or simplify local latent structure.
-We plan to broaden coverage—if you hit an unsupported pattern (ideally with a minimal reproducible example), please open an issue or submit a PR.
+Several modeling patterns can violate this requirement.
+The two most common are:
+
+* **Local latent variables**
+
+  A :external:func:`~numpyro.primitives.sample` call inside a :external:class:`~numpyro.primitives.plate` without ``obs=`` produces a posterior whose shape grows with the plate size (e.g., ``(num_samples, n_obs)``).
+  Because ``n_obs`` can differ between training and prediction, the replicated-posterior contract breaks.
+
+* **The** :external:func:`~numpyro.contrib.control_flow.scan` **primitive**
+
+  :external:func:`~numpyro.contrib.control_flow.scan` is commonly used for sequential or autoregressive models (e.g., state-space models, time-series forecasting).
+  The number of sites it creates typically grows with the sequence length, making the trace shape dynamic for the same reason.
+
+When this incompatibility is detected, :meth:`~aimz.ImpactModel.predict` issues a warning and automatically falls back to :meth:`~aimz.ImpactModel.predict_on_batch`, which processes data in a single batch without sharding.
+However, if the posterior shapes are fundamentally incompatible with the new input, the forward pass will still fail with a shape mismatch.
+
+Note that a model with nested plates whose :external:func:`~numpyro.primitives.sample` sites are all observed (``obs=``) or whose latent shapes are fixed remains compatible.
+In contrast, a model with a single plate containing one unobserved :external:func:`~numpyro.primitives.sample` site triggers the fallback.
+The following examples illustrate the compatibility with :meth:`~aimz.ImpactModel.predict`:
+
+.. code-block:: python
+
+    import numpyro.distributions as dist
+    from numpyro import plate, sample
+
+    X, y = ...
+
+
+    # Compatible with .predict(): all latents are global
+    def kernel(X, y=None):
+        ...
+        alpha = sample("alpha", dist.Normal())
+        beta = sample("beta", dist.Normal().expand([X.shape[1]]))
+        with plate("obs", X.shape[0]):
+            mu = alpha + X @ beta
+            sample("y", dist.Normal(mu), obs=y)
+
+
+    # Falls back to .predict_on_batch(): `mu` is a local latent
+    # with posterior shape (num_samples, X.shape[0])
+    def kernel(X, y=None):
+        ...
+        with plate("obs", X.shape[0]):
+            mu = sample("mu", dist.Normal())
+            sample("y", dist.Normal(mu), obs=y)
+
+If you encounter an unsupported pattern—ideally with a minimal reproducible example—please `open an issue <https://github.com/markean/aimz/issues/new>`_ or submit a PR.
+We plan to broaden coverage based on user needs.
+
+Non-static site shapes
+^^^^^^^^^^^^^^^^^^^^^^
+On multi-device systems, :meth:`~aimz.ImpactModel.predict` relies on `data parallelism <https://jax.readthedocs.io/en/latest/distributed_data_loading.html#data-parallelism>`_: the input data is sharded across devices along axis 0 (the observation dimension), while all other parameters of the model, including posterior samples, are replicated across all devices.
+This requires that posterior sample sites have a global shape, meaning their shape is static and does not depend on data.
+
+A common case where this requirement is violated is models with local latents, where the posterior sample shape grows linearly with the number of observations, resulting in shape ``(num_samples, n_obs)``.
+As both the memory footprint and parameter dimensionality grow with the dataset, such models become inherently difficult to scale and distribute.
+The following examples illustrate the compatibility with :meth:`~aimz.ImpactModel.predict`.
+
+.. code-block:: python
+
+    import numpyro.distributions as dist
+    from numpyro import plate, sample
+
+    X, y = ...
+
+
+    # Compatible with .predict(): all latents are global
+    def kernel(X, y=None):
+        ...
+        alpha = sample("alpha", dist.Normal())
+        beta = sample("beta", dist.Normal().expand([X.shape[1]]))
+        with plate("obs", X.shape[0]):
+            mu = alpha + X @ beta
+            sample("y", dist.Normal(mu), obs=y)
+
+
+    # Incompatible with .predict(): `mu` is a local latent
+    # with posterior shape (num_samples, X.shape[0])
+    def kernel(X, y=None):
+        ...
+        with plate("obs", X.shape[0]):
+            mu = sample("mu", dist.Normal())
+            sample("y", dist.Normal(mu), obs=y)
+
 
 
 Does aimz ship built-in model templates?
