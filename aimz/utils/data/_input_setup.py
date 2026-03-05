@@ -101,7 +101,7 @@ def _setup_inputs(
             )
             warn(msg, category=UserWarning, stacklevel=2)
         loader = ArrayLoader(
-            ArrayDataset(X=X, y=y, **kwargs_array._asdict()),
+            ArrayDataset(X=X, y=y, to_jax=False, **kwargs_array._asdict()),
             rng_key=rng_key,
             batch_size=batch_size,
             shuffle=shuffle,
