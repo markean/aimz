@@ -18,14 +18,21 @@
 
 ## Overview
 
-aimz is a Python library for scalable probabilistic impact modeling, enabling assessment of intervention effects on outcomes with a streamlined interface for fitting, sampling, prediction, and effect estimation—minimal boilerplate, accelerated execution, and powered by [NumPyro](https://num.pyro.ai/en/stable/), [JAX](https://jax.readthedocs.io/en/latest/), [Xarray](https://xarray.dev/), and [Zarr](https://zarr.readthedocs.io/en/stable/).
+aimz is a Python library for scalable probabilistic impact modeling—estimating how interventions affect outcomes while quantifying uncertainty. It provides an intuitive interface for fitting Bayesian models, drawing posterior samples, generating large-scale posterior predictive simulations, and estimating intervention effects with minimal boilerplate.
 
-## Features
+## Key capabilities
 
-- Intuitive API combining the ease of use from ML frameworks with the flexibility of probabilistic modeling.
-- Accelerated computation via parallelism and distributed data.
-- Support for interventional causal inference for counterfactuals and causal effects.
-- MLflow integration for experiment tracking and model management.
+- **Flexible model specification:**
+Built on [NumPyro](https://num.pyro.ai/en/stable/) and [JAX](https://jax.readthedocs.io/en/latest/), bring a NumPyro model as a "kernel"—aimz does not enforce a fixed architecture.
+- **Stochastic variational inference and MCMC:** Supports both SVI (including minibatch) and MCMC sampling through NumPyro's inference algorithms.
+- **Scalable predictive sampling:**
+JIT-compiled, sharded sampling streams results to chunked [Zarr](https://zarr.readthedocs.io/en/stable/) stores, enabling large-scale posterior predictive simulations.
+- **Structured outputs:**
+Predictions, samples, and effect estimates are materialized as [Xarray](https://xarray.dev/) objects backed by Zarr, integrating cleanly with the scientific Python ecosystem.
+- **Intervention handling:**
+Specify interventions declaratively and estimate effects from posterior predictive distributions.
+- **Experiment tracking:**
+[MLflow](https://mlflow.org/) integration for logging runs, parameters, metrics, and model artifacts with full lineage.
 
 ## Installation
 
@@ -41,19 +48,19 @@ conda install -c conda-forge aimz
 
 For additional details, see the full [installation guide](https://aimz.readthedocs.io/stable/getting_started/installation.html).
 
-## Usage
+## Quick start
 
 ```python
 from aimz import ImpactModel
 
-# Define probabilistic model (kernel) using Numpyro primitives
+# Define a probabilistic model (kernel) using NumPyro primitives
 def model(X, y=None):
     ...
 
 # Load or prepare data
 X, y = ...
 
-# Initialize ImpactModel
+# Initialize ImpactModel with SVI or MCMC inference
 im = ImpactModel(
     model,
     rng_key=...,      # e.g., jax.random.key(0)
@@ -63,8 +70,13 @@ im = ImpactModel(
 # Fit model and draw posterior samples
 im.fit(X, y)
 
-# Make predictions or posterior predictive samples
+# Generate posterior predictive samples
 dt = im.predict(X)
+
+# Estimate intervention effects
+dt_baseline = im.predict(X)
+dt_intervention = im.predict(X, intervention={"treatment": 1.0})
+effect = im.estimate_effect(dt_baseline, dt_intervention)
 ```
 
 ## Contributing
