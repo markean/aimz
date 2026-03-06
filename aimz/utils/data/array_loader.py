@@ -26,7 +26,8 @@ from typing import TYPE_CHECKING
 from warnings import warn
 
 import jax.numpy as jnp
-from jax import Array, default_device, device_put, devices, local_device_count, random
+import numpy as np
+from jax import Array, device_put, local_device_count, random
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -70,8 +71,7 @@ class ArrayLoader:
             raise ValueError(msg)
         self.batch_size = batch_size
         self.shuffle = shuffle
-        with default_device(devices("cpu")[0]):
-            self.indices = jnp.arange(len(self.dataset))
+        self.indices = np.arange(len(self.dataset))
         if isinstance(rng_key, Array) and rng_key.dtype == jnp.uint32:
             msg = "Legacy `uint32` PRNGKey detected; converting to a typed key array."
             warn(msg, category=UserWarning, stacklevel=2)
@@ -118,8 +118,7 @@ class ArrayLoader:
         indices = self.indices
         if self.shuffle:
             self.rng_key, subkey = random.split(self.rng_key)
-            with default_device(self.indices.device):
-                indices = random.permutation(subkey, len(self.dataset))
+            indices = np.asarray(random.permutation(subkey, len(self.dataset)))
         for start in range(0, len(self.dataset), self.batch_size):
             end = start + self.batch_size
             batch_idx = indices[start:end]
