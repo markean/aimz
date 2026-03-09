@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Fixed auto-computed `batch_size` rounding down to zero on multi-device setups when `MAX_ELEMENTS // num_samples` is smaller than the number of devices ([#172](https://github.com/markean/aimz/issues/172)).
+- {meth}`~aimz.utils.data.ArrayLoader.pad_array` now pads with NumPy when given NumPy arrays, avoiding premature device transfers, and skips padding entirely when `n_pad` is zero ([#174](https://github.com/markean/aimz/issues/174)).
 
 ## [v0.9.1](https://github.com/markean/aimz/releases/tag/v0.9.1) - 2025-12-08
 
