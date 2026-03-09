@@ -17,7 +17,7 @@
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from jax import random
+from jax import Array, random
 from jax.typing import ArrayLike
 from numpyro.infer import SVI
 
@@ -51,6 +51,18 @@ class TestArrayDataset:
         assert actual.keys() == desired.keys()
         for k in actual:
             np.testing.assert_array_equal(actual[k], desired[k])
+
+    def test_jax_conversion(self) -> None:
+        """Check that arrays are converted to JAX arrays when `to_jax=True`."""
+        X = np.array([[1, 2, 3], [4, 5, 6]])
+        y = np.array([1, 2])
+        dataset = ArrayDataset(X=X, y=y, to_jax=True)
+        actual = next(iter(dataset))
+        desired = {"X": jnp.array([1, 2, 3]), "y": jnp.array(1)}
+        assert actual.keys() == desired.keys()
+        for k in actual:
+            assert isinstance(actual[k], Array)
+            assert jnp.array_equal(actual[k], desired[k])
 
 
 class TestArrayLoader:
