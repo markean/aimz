@@ -84,8 +84,11 @@ def _setup_inputs(
             if len(X) * num_samples < MAX_ELEMENTS:
                 batch_size = len(X)
             else:
+                # Cap batch size to stay within the memory budget, round down to the
+                # nearest multiple of `num_devices`, and ensure at least `num_devices`
+                # to avoid a zero-sized batch.
                 batch_size = MAX_ELEMENTS // num_samples
-                batch_size -= batch_size % num_devices
+                batch_size = max(batch_size - batch_size % num_devices, num_devices)
             logger.info(
                 "Using batch_size=%d. Specify explicitly to better control memory "
                 "usage.",

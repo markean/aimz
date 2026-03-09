@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - {class}`~aimz.utils.data.ArrayDataset` now employs NumPy-based indexing in {class}`~aimz.utils.data.ArrayLoader` instead of triggering JAX tracing on each batch ([#168](https://github.com/markean/aimz/issues/168)).
 - Changed the default value of `to_jax` in {class}`~aimz.utils.data.ArrayDataset` from `True` to `False` to avoid redundant conversion ([#170](https://github.com/markean/aimz/issues/170)).
 
+### Fixed
+
+- Fixed auto-computed `batch_size` rounding down to zero on multi-device setups when `MAX_ELEMENTS // num_samples` is smaller than the number of devices ([#172](https://github.com/markean/aimz/issues/172)).
+
 ## [v0.9.1](https://github.com/markean/aimz/releases/tag/v0.9.1) - 2025-12-08
 
 ### Fixed
