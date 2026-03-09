@@ -73,6 +73,7 @@ To illustrate these properties in practice, we benchmark `aimz`'s `predict` meth
 The benchmark model is a Bayesian neural network with 100 input features, two hidden layers of 128 units each, and a binary outcome, fitted via SVI prior to the benchmark, replicating a scenario in which the model is already trained with no cold-start overhead.
 For each dataset size $n \in \{10\text{K},\; 100\text{K},\; 1\text{M},\; 10\text{M},\; 100\text{M}\}$, reflecting the range from static exploratory analysis to real-time production-scale inference, `aimz` draws 1,000 posterior predictive samples and writes them to a chunked Zarr store backed by Amazon EFS.
 Each configuration is repeated across five independent runs.
+
 The table below reports the mean wall-clock time and mean peak incremental resident set size (RSS), a measure of the additional physical memory consumed by the process during the call.
 For comparison, NumPyro's `Predictive` class, which materializes the full $(1{,}000 \times n)$ output array in device memory, is included where it can run to completion.
 Both benchmarks use only the public API of each library without custom modifications.
