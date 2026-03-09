@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, NamedTuple, cast
+from typing import TYPE_CHECKING, NamedTuple
 from warnings import warn
 
 from jax.typing import ArrayLike
@@ -27,8 +27,6 @@ from aimz.utils._kwargs import _group_kwargs
 from aimz.utils.data import ArrayDataset, ArrayLoader
 
 if TYPE_CHECKING:
-    from collections.abc import Sized
-
     from jax import Array
     from jax.sharding import Sharding
 
@@ -83,8 +81,8 @@ def _setup_inputs(
             X, y = check_X_y(X, y, force_writeable=True, y_numeric=True)
         num_devices = device.num_devices if device else 1
         if batch_size is None:
-            if len(cast("Sized", X)) * num_samples < MAX_ELEMENTS:
-                batch_size = len(cast("Sized", X))
+            if len(X) * num_samples < MAX_ELEMENTS:
+                batch_size = len(X)
             else:
                 batch_size = MAX_ELEMENTS // num_samples
                 batch_size -= batch_size % num_devices
@@ -101,7 +99,7 @@ def _setup_inputs(
             )
             warn(msg, category=UserWarning, stacklevel=2)
         loader = ArrayLoader(
-            ArrayDataset(X=X, y=y, to_jax=False, **kwargs_array._asdict()),
+            ArrayDataset(X=X, y=y, **kwargs_array._asdict()),
             rng_key=rng_key,
             batch_size=batch_size,
             shuffle=shuffle,

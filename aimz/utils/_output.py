@@ -45,7 +45,7 @@ def _writer(site: str, queue: Queue, group_path: Path, error_queue: Queue) -> No
     Args:
         site: The name of the sample site.
         queue: The queue to retrieve posterior predictive samples from.
-        group_path: The path to the Zarr group where data will be written.
+        group_path: The path of the Zarr group.
         error_queue: The queue to collect errors raised by the writer thread.
     """
     group = open_group(group_path, mode="r+")

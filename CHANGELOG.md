@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file and are best
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- {class}`~aimz.utils.data.ArrayDataset` now employs NumPy-based indexing in {class}`~aimz.utils.data.ArrayLoader` instead of triggering JAX tracing on each batch ([#168](https://github.com/markean/aimz/issues/168)).
+- Changed the default value of `to_jax` in {class}`~aimz.utils.data.ArrayDataset` from `True` to `False` to avoid redundant conversion ([#170](https://github.com/markean/aimz/issues/170)).
+
 ## [v0.9.1](https://github.com/markean/aimz/releases/tag/v0.9.1) - 2025-12-08
 
 ### Fixed
