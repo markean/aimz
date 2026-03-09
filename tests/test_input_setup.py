@@ -15,7 +15,7 @@
 """Tests for :func:`~aimz.utils.data._input_setup._setup_inputs`."""
 
 import jax.numpy as jnp
-from jax import device_count, make_mesh, random
+from jax import local_device_count, make_mesh, random
 from jax.sharding import AxisType, NamedSharding, PartitionSpec
 
 from aimz.utils.data._input_setup import MAX_ELEMENTS, _setup_inputs
@@ -23,7 +23,7 @@ from aimz.utils.data._input_setup import MAX_ELEMENTS, _setup_inputs
 
 def test_batch_size_capped_when_exceeding_threshold() -> None:
     """Auto batch size is capped and aligned to num_devices."""
-    num_devices = device_count()
+    num_devices = local_device_count()
     mesh = make_mesh(
         (num_devices,),
         axis_names=("obs",),
