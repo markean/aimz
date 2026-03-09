@@ -42,10 +42,10 @@ class TestArrayDataset:
             ArrayDataset(X=X, y=y)
 
     def test_no_jax_conversion(self) -> None:
-        """Check that arrays remain NumPy arrays when `to_jax=False` is specified."""
+        """Check that arrays remain NumPy arrays by default."""
         X = np.array([[1, 2, 3], [4, 5, 6]])
         y = np.array([1, 2])
-        dataset = ArrayDataset(X=X, y=y, to_jax=False)
+        dataset = ArrayDataset(X=X, y=y)
         actual = next(iter(dataset))
         desired = {"X": np.array([1, 2, 3]), "y": np.array(1)}
         assert actual.keys() == desired.keys()

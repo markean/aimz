@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Module for custom dataset for JAX arrays."""
+"""Module for :class:`~aimz.utils.data.ArrayDataset`."""
 
 from __future__ import annotations
 
@@ -28,23 +28,25 @@ if TYPE_CHECKING:
 
 
 class ArrayDataset:
-    """ArrayDataset class for JAX arrays."""
+    """Dataset for named arrays."""
 
     def __init__(
         self,
         *,
-        to_jax: bool = True,
+        to_jax: bool = False,
         **arrays: Array | npt.NDArray | None,
     ) -> None:
         """Initialize an ArrayDataset instance.
 
         Args:
             to_jax: Whether to convert the input arrays to JAX arrays.
-            **arrays: One or more JAX arrays or compatible array-like objects.
+            **arrays: Named JAX arrays, NumPy arrays, or ``None``. At least one
+                non-``None`` array must be provided. All non-``None`` arrays must have
+                the same length.
 
         Raises:
-            ValueError: If no arrays are provided or if the arrays do not have the same
-                length.
+            ValueError: If no non-``None`` arrays are provided or if the arrays do not
+                have the same length.
         """
         arrays = {k: v for k, v in arrays.items() if v is not None}
         if not arrays:
@@ -75,6 +77,6 @@ class ArrayDataset:
             idx: Index of the item to retrieve.
 
         Returns:
-            A tuple containing the elements from each array at the specified index.
+            A dictionary mapping array names to their elements at the specified index.
         """
         return {k: v[idx] for k, v in self.arrays.items() if v is not None}
