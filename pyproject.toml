@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aimz"
-version = "0.9.2.dev0"
+version = "0.10.0.dev0"
 description = "Scalable probabilistic impact modeling"
 readme = "README.md"
 license = "Apache-2.0"
@@ -16,7 +16,7 @@ maintainers = [{ name = "Eunseop Kim", email = "markean@pm.me" }]
 requires-python = ">=3.11"
 dependencies = [
     "dask>=2025.7",
-    "jax>=0.8",
+    "jax>=0.9",
     "numpyro>=0.19.0",
     "scikit-learn>=1.6.1",
     "xarray>=2025.7",
@@ -34,8 +34,8 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-dev = ["pre-commit>=4.3", "pytest>=9", "pytest-cov>=7", "ruff>=0.14"]
-gpu = ["jax[cuda13]>=0.8"]
+dev = ["pre-commit>=4.5", "pytest>=9", "pytest-cov>=7", "ruff>=0.15"]
+gpu = ["jax[cuda13]>=0.9"]
 mlflow = ["mlflow>=3.5"]
 docs = [
     "arviz-plots[matplotlib]>=0.6",
@@ -59,6 +59,7 @@ omit = ["aimz/mlflow/*"]
 [tool.ruff]
 line-length = 88
 indent-width = 4
+extend-exclude = []
 
 [tool.ruff.lint]
 select = ["ALL"]
@@ -78,6 +79,8 @@ per-file-ignores = { "aimz/model/_core.py" = [
 ], "tests*" = [
     "ARG001", # unused-function-argument
     "S101",   # assert
+], "paper*" = [
+    "INP001", # implicit-namespace-package
 ], "*.ipynb" = [
     "ERA001", # commented-out-code
     "T201",   # print
