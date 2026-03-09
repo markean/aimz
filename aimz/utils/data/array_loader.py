@@ -12,12 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Module for custom data loader with padding logic for JAX arrays.
-
-This module defines a custom ArrayLoader that processes batches of data and applies
-padding to ensure the batch size is compatible with sharding across multiple XLA
-devices.
-"""
+"""Module for :class:`~aimz.utils.data.ArrayLoader`."""
 
 from __future__ import annotations
 
@@ -39,7 +34,7 @@ if TYPE_CHECKING:
 
 
 class ArrayLoader:
-    """ArrayLoader class for JAX arrays."""
+    """Data loader for batching and padding arrays."""
 
     def __init__(
         self,
@@ -80,7 +75,12 @@ class ArrayLoader:
         self._num_devices = local_device_count()
         self.device = device
 
-    def pad_array(self, x: Array | npt.NDArray, n_pad: int, axis: int = 0) -> Array:
+    def pad_array(
+        self,
+        x: Array | npt.NDArray,
+        n_pad: int,
+        axis: int = 0,
+    ) -> Array | npt.NDArray:
         """Pad an array to ensure compatibility with sharding.
 
         Args:
@@ -97,16 +97,21 @@ class ArrayLoader:
         """
         if x.ndim == 1:
             if axis == 0:
-                return jnp.pad(x, pad_width=(0, n_pad), mode="edge")
-            msg = "Padding 1D arrays is only supported along axis 0."
-            raise ValueError(msg)
+                pad_width = (0, n_pad)
+            else:
+                msg = "Padding 1D arrays is only supported along axis 0."
+                raise ValueError(msg)
+        else:
+            # Initialize all axes with no padding
+            pad_width = [(0, 0)] * x.ndim
+            # Apply padding to the specified axis
+            pad_width[axis] = (0, n_pad)
 
-        # Initialize all axes with no padding
-        pad_width: list[tuple[int, int]] = [(0, 0)] * x.ndim
-        # Apply padding to the specified axis
-        pad_width[axis] = (0, n_pad)
+        if isinstance(x, Array):
+            return jnp.pad(x, pad_width=pad_width, mode="edge")
 
-        return jnp.pad(x, pad_width=pad_width, mode="edge")
+        # Pad using NumPy (prevents whole-dataset transfers to GPU)
+        return np.pad(x, pad_width=pad_width, mode="edge")
 
     def __iter__(self) -> Iterator[tuple[dict[str, Array], int]]:
         """Iterate over the dataset in batches.
@@ -124,11 +129,18 @@ class ArrayLoader:
             batch_idx = indices[start:end]
             if self.device is not None:
                 n_pad = (-len(batch_idx)) % self._num_devices
-                batch = {
-                    k: self.pad_array(arr[batch_idx], n_pad=n_pad)
-                    for k, arr in self.dataset.arrays.items()
-                    if arr is not None
-                }
+                if n_pad > 0:
+                    batch = {
+                        k: self.pad_array(arr[batch_idx], n_pad=n_pad)
+                        for k, arr in self.dataset.arrays.items()
+                        if arr is not None
+                    }
+                else:
+                    batch = {
+                        k: arr[batch_idx]
+                        for k, arr in self.dataset.arrays.items()
+                        if arr is not None
+                    }
                 batch = {k: device_put(v, self.device) for k, v in batch.items()}
             else:
                 n_pad = 0
