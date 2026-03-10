@@ -37,7 +37,7 @@ This reduces the bespoke engineering effort required to connect flexible statist
 # State of the field
 
 The landscape of Bayesian software is largely divided between low-level flexibility and high-level rigidity.
-Core probabilistic programming languages like NumPyro, PyMC [@pymc2023], and Stan [@carpenter2017stan] provide the flexible primitives necessary for custom research but require users to manually handle scaling, parallelization, and other performance considerations.
+Core probabilistic programming languages like NumPyro [@phan2019composable], PyMC [@pymc2023], and Stan [@carpenter2017stan] provide the flexible primitives necessary for custom research but require users to manually handle scaling, parallelization, and other performance considerations.
 Conversely, domain-specific frameworks like Meridian [@meridian_github], Robyn [@robyn], PyMC-Marketing [@pymc-marketing], or Prophet [@prophet] can offer robust end-to-end pipelines but are specialized for particular domains such as marketing mix modeling or time series forecasting.
 These tools frequently enforce fixed model architectures (e.g., specific adstock transformations or trend decompositions) and opaque internal logic that are difficult to adapt for research problems requiring custom hierarchical specifications or structural modifications beyond what the framework provides.
 
@@ -50,7 +50,7 @@ This makes `aimz` suited for production-grade Bayesian workflows where reproduci
 `aimz` is designed to support scalable Bayesian analyses in applied settings, allowing users to iterate quickly across model specifications, inference settings, and intervention scenarios, as well as to handle large datasets and produce reproducible artifacts.
 It combines the usability of general machine learning APIs with the flexibility of probabilistic programming through a single high-level object (`ImpactModel`).
 An `ImpactModel` wraps a user-defined NumPyro model function — its *kernel* — together with an inference strategy and a JAX random key, and exposes methods for fitting, prediction, and scenario comparison that manage batching, sharding, and artifact serialization internally.
-Built atop JAX [@jax2018github] and NumPyro [@phan2019composable], `aimz` leverages modeling flexibility, accelerator-native execution, and composable program transformations such as vectorization and sharded execution.
+Built atop JAX [@jax2018github] and NumPyro, `aimz` leverages modeling flexibility, accelerator-native execution, and composable program transformations such as vectorization and sharded execution.
 It supports (minibatch) stochastic variational inference (SVI) and Markov chain Monte Carlo sampling, just-in-time–compiled parallel predictive streaming to chunked Zarr [@alistair_miles_2020_3773450] stores exposed through Xarray [@hoyer2017xarray], and first-class intervention handling for effect estimation.
 Integrated MLflow [@zaharia2018accelerating] support enables experiment tracking and model lineage.
 
