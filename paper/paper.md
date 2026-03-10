@@ -30,7 +30,7 @@ These design choices reduce bespoke glue code, enable high-throughput analyses, 
 
 Standard Bayesian workflows often encounter significant engineering friction when transitioning from model specification to large-scale predictive simulation and impact evaluation.
 While core probabilistic programming frameworks offer mature inference algorithms, they lack native infrastructure for the repetitive engineering tasks essential to production-grade analysis: streaming predictive draws without exceeding system memory, managing device-aware sharding for simulation, and coordinating complex interventional scenarios.
-General machine learning libraries provide scalable prediction pipelines but lack the calibrated uncertainty quantification provided by Bayesian sampling.
+General machine learning libraries provide scalable prediction pipelines but lack the calibrated uncertainty quantification provided by Bayesian inference.
 `aimz` addresses these gaps by consolidating model tracing, sharded predictive sampling, and experiment lineage into a single estimator-like object.
 This reduces the bespoke engineering effort required to connect flexible statistical research with high-throughput data pipelines, supporting reliable and reproducible probabilistic analyses at scale.
 
