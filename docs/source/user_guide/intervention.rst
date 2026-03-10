@@ -99,6 +99,12 @@ Mixed (precomputed baseline, lazy intervention)::
 The returned :class:`~xarray.DataTree` captures the elementwise difference for every variable present in the predictive group.
 Any subsequent summary (e.g. mean, intervals) can be computed using Xarray, ArviZ, or standard NumPy / JAX utilities.
 
+.. note::
+
+   :meth:`~aimz.ImpactModel.estimate_effect` computes the posterior predictive contrast between two scenarios under structural interventions, propagating full posterior uncertainty through the difference.  
+   Whether this contrast admits a causal interpretation depends on the structural assumptions encoded in the model (the kernel): causal identification is a property of the model specification, not the estimation procedure.  
+   When the user-defined model encodes appropriate causal assumptions—such as conditioning on confounders and specifying correct functional relationships—this contrast corresponds to a causal effect estimate.  
+
 
 Example: Causal Network with Confounder
 ---------------------------------------
@@ -198,8 +204,9 @@ Once trained, we perform a counterfactual analysis to isolate the effect of `Z` 
 
 .. note::
 
-    Local latent variable requires :meth:`~aimz.ImpactModel.predict_on_batch` here.
-    Prefer :meth:`~aimz.ImpactModel.predict` whenever it is compatible with the model.
+    This model contains a local latent variable, which requires :meth:`~aimz.ImpactModel.predict_on_batch` here.  
+    Prefer :meth:`~aimz.ImpactModel.predict` whenever it is compatible with the model.  
+    See :ref:`model compatibility <faq-model-compatibility>` for details.
 
 Comparing these two distributions allows us to estimate the effect of `Z` on `Y`, adjusted for the influence of `C`.
 
