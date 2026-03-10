@@ -94,7 +94,7 @@ For cases where the full output fits comfortably in memory, `aimz` also provides
 The scripts and configuration details used to produce these results are available in the repository's `paper/benchmark/` directory.
 
 In practice, `aimz` has supported internal analytics workflows within Eli Lilly and Company that require scalable posterior and posterior predictive sampling, consistent output structures, and experiment traceability.
-In this setting, the library has reduced duplicated “glue” code for streaming predictive draws, coordinating intervention scenarios, and tracking model lineage, thereby improving iteration speed and reproducibility across analyses.
+In this setting, the library has reduced duplicated glue code for streaming predictive draws, coordinating intervention scenarios, and tracking model lineage, thereby improving iteration speed and reproducibility across analyses.
 Its stable estimator-like interface and structured, reproducible outputs also make it well suited for integration with AI-enabled workflows, where agentic tools can leverage standardized artifacts for downstream tasks.
 
 Beyond immediate use, `aimz` is designed as reusable research infrastructure: it exposes arbitrary NumPyro model functions through a stable estimator-like interface and standardizes artifacts (samples, predictions, and effect estimates) in formats that integrate cleanly with the broader scientific Python ecosystem (e.g., Xarray/Zarr) and with experiment tracking via MLflow.
