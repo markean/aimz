@@ -71,12 +71,12 @@ def test_estimate_effect_argument_validation(
 
     dt_intervention = im.predict_on_batch(X, intervention={"z": jnp.zeros_like(y)})
 
-    impact = im.estimate_effect(
+    effect = im.estimate_effect(
         output_baseline=dt_baseline,
         output_intervention=dt_intervention,
     )
 
-    assert impact.posterior_predictive["y"].mean(dim=["chain", "draw"]).shape == (
+    assert effect.posterior_predictive["y"].mean(dim=["chain", "draw"]).shape == (
         len(y),
     )
 
@@ -96,7 +96,7 @@ def test_estimate_effect_output_dir_lazy_args(
         r" \(\d+\)\."
     )
     with pytest.warns(UserWarning, match=msg):
-        impact = im.estimate_effect(
+        effect = im.estimate_effect(
             args_baseline={
                 "X": X,
                 "batch_size": len(X),
@@ -109,5 +109,25 @@ def test_estimate_effect_output_dir_lazy_args(
         )
 
     # Confirm the temporary output directory propagated to effect result
-    assert impact.attrs.get("output_dir") == str(Path(im.temp_dir).resolve())
+    assert effect.attrs.get("output_dir") == str(Path(im.temp_dir).resolve())
     im.cleanup()
+
+
+@pytest.mark.parametrize("vi", [lm], indirect=True)
+def test_estimate_effect_on_batch(
+    synthetic_data: tuple[ArrayLike, ArrayLike],
+    vi: SVI,
+) -> None:
+    """Ensure `on_batch=True` uses `predict_on_batch` and produces valid results."""
+    X, y = synthetic_data
+    im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
+    im.fit(X=X, y=y, batch_size=len(X))
+
+    effect = im.estimate_effect(
+        args_baseline={"X": X},
+        args_intervention={"X": X, "intervention": {"sigma": 10.0}},
+        on_batch=True,
+    )
+
+    # `on_batch=True` should not create an `output_dir` attribute
+    assert "output_dir" not in effect.attrs

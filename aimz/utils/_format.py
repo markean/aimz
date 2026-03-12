@@ -15,9 +15,11 @@
 """Module for formatting and handling model outputs."""
 
 import datetime
+from collections.abc import Mapping
 from importlib.metadata import version
 
 import numpy as np
+import numpy.typing as npt
 import xarray as xr
 from jax import Array
 
@@ -34,7 +36,7 @@ def _make_attrs() -> dict[str, str]:
     }
 
 
-def _dict_to_datatree(data: dict[str, Array]) -> xr.DataTree:
+def _dict_to_datatree(data: Mapping[str, Array | npt.NDArray]) -> xr.DataTree:
     """Convert a dictionary of arrays to an xarray DataTree.
 
     Each key in the dictionary becomes a variable in the Dataset, and its associated

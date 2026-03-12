@@ -59,6 +59,14 @@ extensions = [
 templates_path = ["_templates"]
 exclude_patterns = ["**.pkl", "**.ipynb_checkpoints"]
 autodoc_mock_imports = ["mlflow.utils.autologging_utils.autologging_integration"]
+rst_epilog = """
+.. _ArviZ: https://python.arviz.org/
+.. _cloudpickle: https://github.com/cloudpipe/cloudpickle
+.. _Dask: https://www.dask.org/
+.. _MLflow: https://mlflow.org/
+.. _NumPyro: https://num.pyro.ai/
+.. _Zarr: https://zarr.readthedocs.io/
+"""
 autodoc_typehints = "description"
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),

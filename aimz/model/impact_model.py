@@ -98,10 +98,10 @@ class ImpactModel(BaseModel):
         """Initialize an :class:`~aimz.ImpactModel` instance.
 
         Args:
-            kernel: A probabilistic model with NumPyro primitives.
+            kernel: A probabilistic model with `NumPyro`_ primitives.
             rng_key: A pseudo-random number generator key.
-            inference: An inference method supported by NumPyro, such as an instance of
-                :external:class:`~numpyro.infer.svi.SVI` or
+            inference: An inference method supported by `NumPyro`_, such as an instance
+                of :external:class:`~numpyro.infer.svi.SVI` or
                 :external:class:`~numpyro.infer.mcmc.MCMC`.
             param_input: Name of the parameter in the ``kernel`` for the main input
                 data.
@@ -125,7 +125,7 @@ class ImpactModel(BaseModel):
                 "Expected `SVI` or `MCMC` from `numpyro.infer`."
             )
             raise TypeError(msg)
-        self.inference = inference
+        self._inference = inference
         self._vi_result: SVIRunResult | None = None
         self._vi_state = None
         self._posterior: dict[str, Array] | None = None
@@ -230,19 +230,19 @@ class ImpactModel(BaseModel):
         self._init_runtime_attrs()
 
     @property
+    def inference(self) -> SVI | MCMC:
+        """The underlying `NumPyro`_ inference object."""
+        return self._inference
+
+    @property
     def kernel(self) -> Callable:
-        """A probabilistic model with NumPyro primitives."""
+        """A probabilistic model with `NumPyro`_ primitives."""
         return self._kernel
 
     @property
     def kernel_spec(self) -> KernelSpec | None:
         """The cached :class:`~aimz.model.KernelSpec` or ``None`` if not yet built."""
         return self._kernel_spec
-
-    @property
-    def rng_key(self) -> Array:
-        """Pseudo-random number generator key."""
-        return self._rng_key
 
     @property
     def param_input(self) -> str:
@@ -253,6 +253,21 @@ class ImpactModel(BaseModel):
     def param_output(self) -> str:
         """Parameter name in :attr:`~aimz.ImpactModel.kernel` for the output data."""
         return self._param_output
+
+    @property
+    def posterior(self) -> dict[str, Array] | None:
+        """Posterior samples by variable name, or ``None`` if not set."""
+        return self._posterior
+
+    @property
+    def rng_key(self) -> Array:
+        """Pseudo-random number generator key."""
+        return self._rng_key
+
+    @property
+    def temp_dir(self) -> str | None:
+        """Temporary directory path, or ``None`` if not set."""
+        return self._temp_dir.name if self._temp_dir else None
 
     @property
     def vi_result(self) -> SVIRunResult | None:
@@ -282,16 +297,6 @@ class ImpactModel(BaseModel):
         self._is_fitted = True
 
         self._vi_result = vi_result
-
-    @property
-    def posterior(self) -> dict[str, Array] | None:
-        """Posterior samples by variable name, or ``None`` if not set."""
-        return self._posterior
-
-    @property
-    def temp_dir(self) -> str | None:
-        """Temporary directory path, or ``None`` if not set."""
-        return self._temp_dir.name if self._temp_dir else None
 
     def _build_kernel_spec(
         self,
@@ -424,7 +429,7 @@ class ImpactModel(BaseModel):
             rng_key: Pseudo-random number generator key.
             return_sites: Names of variables (sites) to return.
             output_dir: Directory where outputs will be saved.
-            kernel: Probabilistic model with NumPyro primitives.
+            kernel: Probabilistic model with `NumPyro`_ primitives.
             sampler: Function performing predictive sampling; must accept the same
                 signature as this function.
             samples: Arrays to condition predictions on.
@@ -977,13 +982,13 @@ class ImpactModel(BaseModel):
         - SVI
             Runs variational inference on the provided batch by invoking the
             :external:meth:`~numpyro.infer.svi.SVI.run` method of the
-            :external:class:`~numpyro.infer.svi.SVI` instance from NumPyro to
+            :external:class:`~numpyro.infer.svi.SVI` instance from `NumPyro`_ to
             estimate the posterior distribution, then draws samples from it.
 
         - MCMC
             Runs posterior sampling by invoking the
             :external:meth:`~numpyro.infer.mcmc.MCMC.run` method of the
-            :external:class:`~numpyro.infer.mcmc.MCMC` instance from NumPyro.
+            :external:class:`~numpyro.infer.mcmc.MCMC` instance from `NumPyro`_.
 
         Args:
             X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
@@ -1107,7 +1112,7 @@ class ImpactModel(BaseModel):
             This method continues training from the existing SVI state if available.
             To start training from scratch, create a new model instance. It does not
             check whether the model or guide is written to support subsampling semantics
-            (e.g., using NumPyro's :external:func:`~numpyro.primitives.subsample` or
+            (e.g., using `NumPyro`_'s :external:func:`~numpyro.primitives.subsample` or
             similar constructs).
         """
         if isinstance(self.inference, MCMC):
@@ -1205,8 +1210,9 @@ class ImpactModel(BaseModel):
         :meth:`~aimz.ImpactModel.fit` or :meth:`~aimz.ImpactModel.fit_on_batch`.
 
         It is primarily intended for workflows where posterior sampling is performed
-        manually—for example, using NumPyro's :external:class:`~numpyro.infer.svi.SVI`
-        (or :external:class:`~numpyro.infer.mcmc.MCMC`) with the
+        manually—for example, using `NumPyro`_'s
+        :external:class:`~numpyro.infer.svi.SVI` (or
+        :external:class:`~numpyro.infer.mcmc.MCMC`) with the
         :external:class:`~numpyro.infer.util.Predictive` API—and the resulting
         posterior samples are injected into the model for further use.
 
@@ -1519,28 +1525,32 @@ class ImpactModel(BaseModel):
         output_intervention: xr.DataTree | None = None,
         args_baseline: dict | None = None,
         args_intervention: dict | None = None,
+        *,
+        on_batch: bool = False,
     ) -> xr.DataTree:
         """Estimate the effect of an intervention.
-
-        .. _NumPyro: https://num.pyro.ai/
 
         This computes (intervention - baseline) for every variable in the shared
         predictive group, preserving sampling (chain/draw) dimensions. When
         interventions are used in prediction they are applied internally through
-        NumPyro_'s :external:class:`~numpyro.handlers.do` effect handler (graph surgery)
-        without requiring model rewrites.
+        `NumPyro`_'s :external:class:`~numpyro.handlers.do` effect handler (graph
+        surgery) without requiring model rewrites.
 
         Args:
             output_baseline: Precomputed output for the baseline scenario.
             output_intervention: Precomputed output for the intervention scenario.
             args_baseline: Input arguments for the baseline scenario. Passed to the
-                :meth:`~aimz.ImpactModel.predict` to compute predictions if
-                ``output_baseline`` is not provided. Ignored if ``output_baseline`` is
-                already given.
+                prediction method to compute predictions if ``output_baseline`` is not
+                provided. Ignored if ``output_baseline`` is already given.
             args_intervention: Input arguments for the intervention scenario. Passed to
-                the :meth:`~aimz.ImpactModel.predict` to compute predictions if
+                the prediction method to compute predictions if
                 ``output_intervention`` is not provided. Ignored if
                 ``output_intervention`` is already given.
+            on_batch: If ``True``, use
+                :meth:`~aimz.ImpactModel.predict_on_batch` instead of
+                :meth:`~aimz.ImpactModel.predict` when computing predictions from
+                ``args_baseline`` or ``args_intervention``. Ignored when precomputed
+                outputs are provided.
 
         Returns:
             The estimated impact of an intervention. Posterior samples are included if
@@ -1557,10 +1567,12 @@ class ImpactModel(BaseModel):
         """
         _check_is_fitted(self)
 
+        _predict = self.predict_on_batch if on_batch else self.predict
+
         if output_baseline:
             dt_baseline = output_baseline
         elif args_baseline:
-            dt_baseline = self.predict(**args_baseline)
+            dt_baseline = _predict(**args_baseline)
         else:
             msg = "Either `output_baseline` or `args_baseline` must be provided."
             raise ValueError(msg)
@@ -1568,12 +1580,27 @@ class ImpactModel(BaseModel):
         if output_intervention:
             dt_intervention = output_intervention
         elif args_intervention:
-            dt_intervention = self.predict(**args_intervention)
+            dt_intervention = _predict(**args_intervention)
         else:
             msg = (
                 "Either `output_intervention` or `args_intervention` must be provided."
             )
             raise ValueError(msg)
+
+        if isinstance(dt_baseline, dict):
+            in_sample = args_baseline.get("in_sample", True) if args_baseline else True
+            group = "posterior_predictive" if in_sample else "predictions"
+            wrapper = xr.DataTree(name="root")
+            wrapper[group] = _dict_to_datatree(dt_baseline)
+            dt_baseline = wrapper
+        if isinstance(dt_intervention, dict):
+            in_sample = (
+                args_intervention.get("in_sample", True) if args_intervention else True
+            )
+            group = "posterior_predictive" if in_sample else "predictions"
+            wrapper = xr.DataTree(name="root")
+            wrapper[group] = _dict_to_datatree(dt_intervention)
+            dt_intervention = wrapper
 
         group = _validate_group(dt_baseline, dt_intervention)
 
