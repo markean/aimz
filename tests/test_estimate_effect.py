@@ -131,3 +131,32 @@ def test_estimate_effect_on_batch(
 
     # `on_batch=True` should not create an `output_dir` attribute
     assert "output_dir" not in effect.attrs
+
+
+@pytest.mark.parametrize("vi", [lm], indirect=True)
+@pytest.mark.parametrize("in_sample", [True, False])
+def test_estimate_effect_on_batch_dict(
+    synthetic_data: tuple[ArrayLike, ArrayLike],
+    vi: SVI,
+    *,
+    in_sample: bool,
+) -> None:
+    """Dict results from `predict_on_batch` are wrapped in the correct group."""
+    X, y = synthetic_data
+    im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
+    im.fit(X=X, y=y, batch_size=len(X))
+
+    expected_group = "posterior_predictive" if in_sample else "predictions"
+
+    effect = im.estimate_effect(
+        args_baseline={"X": X, "return_datatree": False, "in_sample": in_sample},
+        args_intervention={
+            "X": X,
+            "intervention": {"sigma": 10.0},
+            "return_datatree": False,
+            "in_sample": in_sample,
+        },
+        on_batch=True,
+    )
+
+    assert expected_group in effect.children
