@@ -1,5 +1,3 @@
-.. _NumPyro: https://num.pyro.ai/
-
 Interventions & Effect Estimation
 =================================
 This guide covers two closely related functionalities:
@@ -65,14 +63,14 @@ retaining leading ``draw`` / ``chain`` dimensions.
 
 Eager (precomputed scenarios)::
 
-    impact = im.estimate_effect(
+    effect = im.estimate_effect(
         output_baseline=baseline,
         output_intervention=modified,
     )
 
 Lazy (defer prediction)::
 
-    impact = im.estimate_effect(
+    effect = im.estimate_effect(
         args_baseline={
             "X": X,
             "intervention": {"z": Z},
@@ -87,7 +85,7 @@ Lazy (defer prediction)::
 
 Mixed (precomputed baseline, lazy intervention)::
 
-    impact = im.estimate_effect(
+    effect = im.estimate_effect(
         output_baseline=baseline,
         args_intervention={
             "X": X,
@@ -101,9 +99,9 @@ Any subsequent summary (e.g. mean, intervals) can be computed using Xarray, Arvi
 
 .. note::
 
-   :meth:`~aimz.ImpactModel.estimate_effect` computes the posterior predictive contrast between two scenarios under structural interventions, propagating full posterior uncertainty through the difference.  
-   Whether this contrast admits a causal interpretation depends on the structural assumptions encoded in the model (the kernel): causal identification is a property of the model specification, not the estimation procedure.  
-   When the user-defined model encodes appropriate causal assumptions—such as conditioning on confounders and specifying correct functional relationships—this contrast corresponds to a causal effect estimate.  
+   :meth:`~aimz.ImpactModel.estimate_effect` computes the posterior predictive contrast between two scenarios under structural interventions, propagating full posterior uncertainty through the difference.
+   Whether this contrast admits a causal interpretation depends on the structural assumptions encoded in the model (the kernel): causal identification is a property of the model specification, not the estimation procedure.
+   When the user-defined model encodes appropriate causal assumptions—such as conditioning on confounders and specifying correct functional relationships—this contrast corresponds to a causal effect estimate.
 
 
 Example: Causal Network with Confounder
@@ -204,8 +202,8 @@ Once trained, we perform a counterfactual analysis to isolate the effect of `Z` 
 
 .. note::
 
-    This model contains a local latent variable, which requires :meth:`~aimz.ImpactModel.predict_on_batch` here.  
-    Prefer :meth:`~aimz.ImpactModel.predict` whenever it is compatible with the model.  
+    This model contains a local latent variable, which requires :meth:`~aimz.ImpactModel.predict_on_batch` here.
+    Prefer :meth:`~aimz.ImpactModel.predict` whenever it is compatible with the model.
     See :ref:`model compatibility <faq-model-compatibility>` for details.
 
 Comparing these two distributions allows us to estimate the effect of `Z` on `Y`, adjusted for the influence of `C`.
@@ -234,13 +232,13 @@ Comparing these two distributions allows us to estimate the effect of `Z` on `Y`
     )
 
     # Estimate effect of intervening on Z while conditioning on C
-    impact = im.estimate_effect(
+    effect = im.estimate_effect(
         output_baseline=dt_factual,
         output_intervention=dt_counterfactual,
     )
-    impact
+    effect
 
 .. jupyter-execute::
     :hide-code:
 
-    impact
+    effect

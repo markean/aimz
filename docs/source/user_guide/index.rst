@@ -4,6 +4,7 @@ User Guide
 .. toctree::
    :maxdepth: 1
 
+   installation
    disk_and_on_batch
    sampling
    cleanup

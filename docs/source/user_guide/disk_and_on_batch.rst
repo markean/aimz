@@ -1,7 +1,3 @@
-.. _Dask: https://www.dask.org/
-.. _ArviZ: https://python.arviz.org/
-.. _Zarr: https://zarr.readthedocs.io/
-
 Disk-Backed vs. On-Batch Methods
 ================================
 

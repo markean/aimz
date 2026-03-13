@@ -1,6 +1,3 @@
-.. _MLflow: https://mlflow.org/
-.. _cloudpickle: https://pypi.org/project/cloudpickle/
-
 MLflow Integration
 ==================
 
