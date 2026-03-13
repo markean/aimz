@@ -1,12 +1,10 @@
-.. _NumPyro: https://num.pyro.ai/
-
 Frequently Asked Questions
 ==========================
 
 
 What is a kernel?
 -----------------
-A kernel in aimz is a user-defined NumPyro_ model (a stochastic function or :class:`~collections.abc.Callable`) built with primitives like :external:func:`~numpyro.primitives.sample` and :external:func:`~numpyro.primitives.deterministic`.
+A kernel in aimz is a user-defined `NumPyro`_ model (a stochastic function or :class:`~collections.abc.Callable`) built with primitives like :external:func:`~numpyro.primitives.sample` and :external:func:`~numpyro.primitives.deterministic`.
 Its signature and body define the inputs and output (e.g., ``X``, ``y``, ...), encoding the probabilistic structure—priors, likelihood, and latent variables.
 
 
@@ -38,14 +36,14 @@ Fix it by renaming your arguments to ``X`` / ``y`` or supplying ``param_input`` 
 Do I need to know NumPyro_ to use aimz?
 ---------------------------------------
 Yes.
-The aimz package builds on NumPyro_’s primitives and effect handlers.
+The aimz package builds on `NumPyro`_’s primitives and effect handlers.
 You should be comfortable writing a model function, defining a guide (for SVI) or configuring MCMC, and reading model traces.
 The library focuses on orchestration, not abstracting away core probabilistic modeling concepts.
 
 
 .. _faq-model-compatibility:
 
-Can I use aimz with any NumPyro_ model?
+Can I use aimz with any `NumPyro`_ model?
 ---------------------------------------
 No.
 Most conventional models with global latents and a plate-based structure work out of the box.
@@ -124,7 +122,7 @@ Can I use aimz for general-purpose Bayesian inference?
 ------------------------------------------------------
 Yes.
 While aimz is designed to streamline probabilistic impact modeling workflows—such as intervention analysis and causal effect estimation—it also functions as a flexible Bayesian inference toolkit.
-You can use aimz for a wide range of Bayesian modeling tasks supported by NumPyro, including regression, classification, uncertainty quantification, and predictive simulation, even if your application doesn’t involve interventions or causal analysis.
+You can use aimz for a wide range of Bayesian modeling tasks supported by `NumPyro`_, including regression, classification, uncertainty quantification, and predictive simulation, even if your application doesn’t involve interventions or causal analysis.
 
 
 Can I use posterior samples generated elsewhere?

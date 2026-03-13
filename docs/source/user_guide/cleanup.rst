@@ -1,5 +1,3 @@
-.. _Zarr: https://zarr.readthedocs.io/
-
 Output Directory Cleanup
 ========================
 

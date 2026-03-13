@@ -15,14 +15,15 @@ Attributes
 .. autosummary::
    :toctree: generated/
 
+   ImpactModel.inference
    ImpactModel.kernel
    ImpactModel.kernel_spec
-   ImpactModel.rng_key
    ImpactModel.param_input
    ImpactModel.param_output
-   ImpactModel.vi_result
    ImpactModel.posterior
+   ImpactModel.rng_key
    ImpactModel.temp_dir
+   ImpactModel.vi_result
 
 
 Inference

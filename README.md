@@ -24,7 +24,6 @@ aimz is a Python library for scalable probabilistic impact modeling—estimating
 
 - **Flexible model specification:**
 Built on [NumPyro](https://num.pyro.ai/en/stable/) and [JAX](https://jax.readthedocs.io/en/latest/), bring a NumPyro model as a "kernel"—aimz does not enforce a fixed architecture.
-- **Stochastic variational inference and MCMC:** Supports both SVI (including minibatch) and MCMC sampling through NumPyro's inference algorithms.
 - **Scalable predictive sampling:**
 JIT-compiled, sharded sampling streams results to chunked [Zarr](https://zarr.readthedocs.io/en/stable/) stores, enabling large-scale posterior predictive simulations.
 - **Structured outputs:**

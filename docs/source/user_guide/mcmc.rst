@@ -77,7 +77,7 @@ Posterior predictive sampling can be performed using the :meth:`~aimz.ImpactMode
 Using External MCMC Samples
 ---------------------------
 
-Users can run MCMC sampling directly using NumPyro and then insert the posterior samples into an :class:`~aimz.ImpactModel` instance using the :meth:`~aimz.ImpactModel.set_posterior_sample` method for downstream analysis.
+Users can run MCMC sampling directly using `NumPyro`_ and then insert the posterior samples into an :class:`~aimz.ImpactModel` instance using the :meth:`~aimz.ImpactModel.set_posterior_sample` method for downstream analysis.
 For example:
 
 .. jupyter-execute::
