@@ -4,7 +4,7 @@
 ![Run Pytest](https://github.com/markean/aimz/actions/workflows/coverage.yaml/badge.svg)
 [![PyPI](https://img.shields.io/pypi/v/aimz)](https://pypi.org/project/aimz/)
 [![Conda](https://img.shields.io/conda/vn/conda-forge/aimz.svg)](https://anaconda.org/conda-forge/aimz)
-[![Python](https://img.shields.io/pypi/pyversions/aimz.svg)](https://pypi.org/project/aimz/)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://pypi.org/project/aimz/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![codecov](https://codecov.io/gh/markean/aimz/graph/badge.svg?token=34OH7KQBXE)](https://codecov.io/gh/markean/aimz)

@@ -74,7 +74,7 @@ requires-dist = [
     { name = "arviz-base", marker = "python_full_version >= '3.12' and extra == 'docs'", specifier = ">=1" },
     { name = "arviz-plots", marker = "python_full_version >= '3.12' and extra == 'docs'", specifier = ">=1" },
     { name = "arviz-stats", marker = "python_full_version >= '3.12' and extra == 'docs'", specifier = ">=1" },
-    { name = "dask", specifier = ">=2025.7" },
+    { name = "dask", specifier = ">=2025.10" },
     { name = "flax", marker = "extra == 'docs'", specifier = ">=0.12" },
     { name = "jax", specifier = ">=0.9" },
     { name = "jax", extras = ["cuda13"], marker = "extra == 'gpu'", specifier = ">=0.9" },
@@ -82,7 +82,7 @@ requires-dist = [
     { name = "mlflow", marker = "extra == 'docs'", specifier = ">=3.5" },
     { name = "mlflow", marker = "extra == 'mlflow'", specifier = ">=3.5" },
     { name = "myst-parser", marker = "extra == 'docs'", specifier = ">=5" },
-    { name = "numpyro", specifier = ">=0.19.0" },
+    { name = "numpyro", specifier = ">=0.20.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.5" },
     { name = "pydata-sphinx-theme", marker = "extra == 'docs'", specifier = ">=0.16" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9" },
@@ -92,7 +92,7 @@ requires-dist = [
     { name = "sphinx", marker = "extra == 'docs'", specifier = ">=9" },
     { name = "sphinx-copybutton", marker = "extra == 'docs'", specifier = ">=0.5" },
     { name = "sphinx-design", marker = "extra == 'docs'", specifier = ">=0.7" },
-    { name = "xarray", specifier = ">=2025.7" },
+    { name = "xarray", specifier = ">=2025.10" },
     { name = "zarr", specifier = ">=3,<4" },
 ]
 provides-extras = ["dev", "gpu", "mlflow", "docs"]
@@ -721,7 +721,7 @@ wheels = [
 
 [[package]]
 name = "dask"
-version = "2025.9.1"
+version = "2026.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -733,9 +733,9 @@ dependencies = [
     { name = "pyyaml" },
     { name = "toolz" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/52/87/87af914aaf5bfaa0ee8b9da060a836477d8cc49fe4978637da8b6a47d8a3/dask-2025.9.1.tar.gz", hash = "sha256:718df73e1fd3d7e2b8546e0f04ce08e1ed7f9aa3da1eecd0c1f44c8b6d52f7e0", size = 10973663, upload-time = "2025-09-16T10:54:59.452Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d7/2a/5d8cc1579590af86576dde890254440e478c7174b93a02095ecfc2e6ba38/dask-2026.3.0.tar.gz", hash = "sha256:f7d96c8274e8a900d217c1ff6ea8d1bbf0b4c2c21e74a409644498d925eb8f85", size = 11000710, upload-time = "2026-03-18T07:10:14.945Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/25/60/3fcd548bed6d25016933e4b2984c9b82e4c1e760380e03d4100b1b4726e0/dask-2025.9.1-py3-none-any.whl", hash = "sha256:2a8a7dc933caaea2f47745a65a6ec93d9e616e12aab53b4f03ee161d31939110", size = 1479274, upload-time = "2025-09-16T10:54:46.159Z" },
+    { url = "https://files.pythonhosted.org/packages/4a/f3/00bb1e867fba351e2d784170955713bee200c43ea306c59f30bd7e748192/dask-2026.3.0-py3-none-any.whl", hash = "sha256:be614b9242b0b38288060fb2d7696125946469c98a1c30e174883fd199e0428d", size = 1485630, upload-time = "2026-03-18T07:10:12.832Z" },
 ]
 
 [[package]]
@@ -2145,7 +2145,7 @@ wheels = [
 
 [[package]]
 name = "numpyro"
-version = "0.19.0"
+version = "0.20.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jax" },
@@ -2154,9 +2154,9 @@ dependencies = [
     { name = "numpy" },
     { name = "tqdm" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/02/7c/5d1b55401b023b58f792483c71690315d4d5cd1653fd3631fa5bcbd68601/numpyro-0.19.0.tar.gz", hash = "sha256:bbf5b772a6ba8b7a79448fa6787afb069e5eb2dff8295078c3ec04d3e6276742", size = 404421, upload-time = "2025-08-05T10:26:33.055Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5d/b1/c02a4f949481b5fb27ba96f55211500270d0a71cd919b23e2022dfedf8b4/numpyro-0.20.1.tar.gz", hash = "sha256:36fa0f81c8e095d2307c37346e9f8f8a5798f663ce8bd3823a372f5b1374ebeb", size = 427310, upload-time = "2026-03-25T00:20:23.226Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/88/31/9b5da5995988437756bc3f1eead2e314d8916259875c6924cb41692f2b41/numpyro-0.19.0-py3-none-any.whl", hash = "sha256:1063a2c131a0785719e13c8e55f1b82e41850d814df149418097531f4dbdeda8", size = 370906, upload-time = "2025-08-05T10:26:31.35Z" },
+    { url = "https://files.pythonhosted.org/packages/85/1d/f76ac13d49a7558a4530b002165e76c110e42a81f114708671098b157d8a/numpyro-0.20.1-py3-none-any.whl", hash = "sha256:ffed17023cf5b7992e6463ef35fa3140161d8ff13db5cded431f033285665fa9", size = 388003, upload-time = "2026-03-25T00:20:21.336Z" },
 ]
 
 [[package]]
@@ -3910,16 +3910,16 @@ wheels = [
 
 [[package]]
 name = "xarray"
-version = "2025.9.0"
+version = "2026.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
     { name = "packaging" },
     { name = "pandas" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4e/0b/bbb76e05c8e2099baf90e259c29cafe6a525524b1d1da8bfbc39577c043e/xarray-2025.9.0.tar.gz", hash = "sha256:7dd6816fe0062c49c5e9370dd483843bc13e5ed80a47a9ff10baff2b51e070fb", size = 3040318, upload-time = "2025-09-04T04:20:26.296Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0f/03/e3353b72e518574b32993989d8f696277bf878e9d508c7dd22e86c0dab5b/xarray-2026.2.0.tar.gz", hash = "sha256:978b6acb018770554f8fd964af4eb02f9bcc165d4085dbb7326190d92aa74bcf", size = 3111388, upload-time = "2026-02-13T22:20:50.18Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8d/f0/73c24457c941b8b08f7d090853e40f4b2cdde88b5da721f3f28e98df77c9/xarray-2025.9.0-py3-none-any.whl", hash = "sha256:79f0e25fb39571f612526ee998ee5404d8725a1db3951aabffdb287388885df0", size = 1349595, upload-time = "2025-09-04T04:20:24.36Z" },
+    { url = "https://files.pythonhosted.org/packages/99/92/545eb2ca17fc0e05456728d7e4378bfee48d66433ae3b7e71948e46826fb/xarray-2026.2.0-py3-none-any.whl", hash = "sha256:e927d7d716ea71dea78a13417970850a640447d8dd2ceeb65c5687f6373837c9", size = 1405358, upload-time = "2026-02-13T22:20:47.847Z" },
 ]
 
 [[package]]

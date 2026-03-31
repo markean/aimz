@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support for Python 3.14.
 - {meth}`~aimz.ImpactModel.estimate_effect` now accepts an `on_batch` keyword argument.
 When ``True``, predictions are dispatched through {meth}`~aimz.ImpactModel.predict_on_batch` and any raw `dict` results are automatically converted to {class}`xarray.DataTree` ([#180](https://github.com/markean/aimz/issues/180)).
 
