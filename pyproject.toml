@@ -16,14 +16,14 @@ maintainers = [{ name = "Eunseop Kim", email = "markean@pm.me" }]
 requires-python = ">=3.11"
 dependencies = [
     "dask>=2025.10",
-    "jax>=0.9",
+    "jax>=0.9,<0.10",
     "numpyro>=0.20.0",
     "scikit-learn>=1.6.1",
     "xarray>=2025.10",
     "zarr>=3,<4",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering",
     'Programming Language :: Python :: 3',
