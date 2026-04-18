@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [v0.10.0](https://github.com/markean/aimz/releases/tag/v0.10.0) - 2025-04-17
+
 ### Added
 
 - Added support for Python 3.14.
