@@ -23,7 +23,6 @@ to compute treatment effects.
     import matplotlib.ticker as mtick
     import numpy as np
     import numpyro.distributions as dist
-    import numpyro.distributions.distribution
     import pandas as pd
     from jax import Array, random
     from numpyro import deterministic, factor, plate, sample

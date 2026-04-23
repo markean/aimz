@@ -20,6 +20,9 @@ import sys
 from importlib import metadata
 from pathlib import Path
 
+# numpyro 0.20.1: ensure submodule registered for factor()
+import numpyro.distributions.distribution
+
 # Prevent Sphinx autodoc from failing when inspecting MLflow autologging decorators
 from mlflow.utils.autologging_utils import autologging_integration
 
