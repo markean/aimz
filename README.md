@@ -8,6 +8,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![codecov](https://codecov.io/gh/markean/aimz/graph/badge.svg?token=34OH7KQBXE)](https://codecov.io/gh/markean/aimz)
+[![JOSS](https://joss.theoj.org/papers/10.21105/joss.09738/status.svg)](https://doi.org/10.21105/joss.09738)
 [![DOI](https://zenodo.org/badge/1009062911.svg)](https://doi.org/10.5281/zenodo.16101876)
 
 [**Installation**](https://aimz.readthedocs.io/stable/getting_started/installation.html) |
@@ -81,3 +82,22 @@ effect = im.estimate_effect(dt_baseline, dt_intervention)
 ## Contributing
 
 See the [Contributing Guide](https://aimz.readthedocs.io/latest/development/contributing.html) to get started.
+
+## Citation
+
+If you use aimz in your work, please cite the accompanying paper in the [Journal of Open Source Software](https://joss.theoj.org/papers/10.21105/joss.09738):
+
+```bibtex
+@article{Kim2026,
+  title        = {aimz: Scalable probabilistic impact modeling},
+  author       = {Kim, Eunseop},
+  year         = 2026,
+  journal      = {Journal of Open Source Software},
+  publisher    = {The Open Journal},
+  volume       = 11,
+  number       = 120,
+  pages        = 9738,
+  doi          = {10.21105/joss.09738},
+  url          = {https://doi.org/10.21105/joss.09738}
+}
+```
