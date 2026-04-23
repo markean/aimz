@@ -1,0 +1,26 @@
+cff-version: "1.2.0"
+authors:
+  - family-names: Kim
+    given-names: Eunseop
+    orcid: "https://orcid.org/0009-0000-2138-788X"
+doi: 10.5281/zenodo.19638071
+message: If you use this software, please cite our article in the Journal of
+  Open Source Software.
+preferred-citation:
+  authors:
+    - family-names: Kim
+      given-names: Eunseop
+      orcid: "https://orcid.org/0009-0000-2138-788X"
+  date-published: 2026-04-23
+  doi: 10.21105/joss.09738
+  issn: 2475-9066
+  issue: 120
+  journal: Journal of Open Source Software
+  publisher:
+    name: Open Journals
+  start: 9738
+  title: "aimz: Scalable probabilistic impact modeling"
+  type: article
+  url: "https://joss.theoj.org/papers/10.21105/joss.09738"
+  volume: 11
+title: "aimz: Scalable probabilistic impact modeling"
