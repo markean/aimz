@@ -15,8 +15,7 @@
 """Tests for the `.cleanup_models()` method."""
 
 import pytest
-from jax import random
-from jax.typing import ArrayLike
+from jax import Array, random
 from numpyro.infer import SVI
 
 from aimz import ImpactModel
@@ -25,7 +24,7 @@ from tests.conftest import lm
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
 def test_predict_after_cleanup(
-    synthetic_data: tuple[ArrayLike, ArrayLike],
+    synthetic_data: tuple[Array, Array],
     vi: SVI,
 ) -> None:
     """Ensure class-level cleanup removes temporary directories for all instances."""

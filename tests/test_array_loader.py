@@ -18,7 +18,6 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from jax import Array, random
-from jax.typing import ArrayLike
 from numpyro.infer import SVI
 
 from aimz import ImpactModel
@@ -104,7 +103,7 @@ class TestArrayLoader:
     @pytest.mark.parametrize("vi", [lm], indirect=True)
     def test_fit_dataloader_y_not_none_error(
         self,
-        synthetic_data: tuple[ArrayLike, ArrayLike],
+        synthetic_data: tuple[Array, Array],
         vi: SVI,
     ) -> None:
         """Passing a data loader as `X` and a non-None `y` raises an error."""
@@ -121,7 +120,7 @@ class TestArrayLoader:
     @pytest.mark.parametrize("vi", [lm], indirect=True)
     def test_fit_consistency_with_array_and_dataloader(
         self,
-        synthetic_data: tuple[ArrayLike, ArrayLike],
+        synthetic_data: tuple[Array, Array],
         vi: SVI,
     ) -> None:
         """Calling `.fit()` with arrays or a data loader can yield identical results."""

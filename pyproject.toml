@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aimz"
-version = "0.10.0"
+version = "0.11.0.dev0"
 description = "Scalable probabilistic impact modeling"
 readme = "README.md"
 license = "Apache-2.0"
@@ -108,4 +108,4 @@ include = ["aimz*"]
 namespaces = false
 
 [tool.uv]
-native-tls = true
+system-certs = true

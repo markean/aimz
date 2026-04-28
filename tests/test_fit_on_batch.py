@@ -15,8 +15,7 @@
 """Tests for the `.fit_on_batch()` method."""
 
 import pytest
-from jax import random
-from jax.typing import ArrayLike
+from jax import Array, random
 from numpyro.infer import MCMC, SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
 from numpyro.optim import Adam
@@ -26,7 +25,7 @@ from aimz.utils._validation import _is_fitted
 from tests.conftest import lm
 
 
-def test_fit_on_batch_nan_warning(synthetic_data: tuple[ArrayLike, ArrayLike]) -> None:
+def test_fit_on_batch_nan_warning(synthetic_data: tuple[Array, Array]) -> None:
     """Test that `.fit_on_batch()` emits a RuntimeWarning when NaN is in the loss."""
     X, y = synthetic_data
     im = ImpactModel(
@@ -44,7 +43,7 @@ def test_fit_on_batch_nan_warning(synthetic_data: tuple[ArrayLike, ArrayLike]) -
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
-def test_fit_svi(synthetic_data: tuple[ArrayLike, ArrayLike], vi: SVI) -> None:
+def test_fit_svi(synthetic_data: tuple[Array, Array], vi: SVI) -> None:
     """Test the `.fit()` method of ImpactModel using SVI."""
     X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
@@ -62,7 +61,7 @@ def test_fit_svi(synthetic_data: tuple[ArrayLike, ArrayLike], vi: SVI) -> None:
 
 
 @pytest.mark.parametrize("mcmc", [lm], indirect=True)
-def test_fit_mcmc(synthetic_data: tuple[ArrayLike, ArrayLike], mcmc: MCMC) -> None:
+def test_fit_mcmc(synthetic_data: tuple[Array, Array], mcmc: MCMC) -> None:
     """Test the `.fit()` method of ImpactModel using MCMC."""
     X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), inference=mcmc)

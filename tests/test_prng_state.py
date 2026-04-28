@@ -16,8 +16,7 @@
 
 import jax.numpy as jnp
 import pytest
-from jax import random
-from jax.typing import ArrayLike
+from jax import Array, random
 from numpyro.infer import SVI
 
 from aimz import ImpactModel
@@ -25,10 +24,7 @@ from tests.conftest import lm
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
-def test_rng_key_consistency(
-    synthetic_data: tuple[ArrayLike, ArrayLike],
-    vi: SVI,
-) -> None:
+def test_rng_key_consistency(synthetic_data: tuple[Array, Array], vi: SVI) -> None:
     """Test that the ImpactModel's internal rng_key remains unchanged.
 
     Verifies that providing an explicit PRNG key to method calls does not mutate the

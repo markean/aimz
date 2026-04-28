@@ -14,15 +14,18 @@
 
 """pytest configuration."""
 
+from collections.abc import Callable, Iterator
+
 import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
 import pytest
 from jax import Array, random
-from jax.typing import ArrayLike
 from numpyro import sample
 from numpyro.infer import MCMC, NUTS, SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
+
+from aimz import ImpactModel
 
 numpyro.set_host_device_count(3)
 
@@ -32,7 +35,7 @@ def synthetic_data() -> tuple[Array, Array]:
     """Fixture for generating synthetic data.
 
     Returns:
-        tuple[Array, Array]: A tuple containing the input data and output data.
+        The input data and output data.
     """
     rng_key = random.key(42)
     key_w, key_b, key_x, key_e = random.split(rng_key, 4)
@@ -89,7 +92,7 @@ def vi(request: pytest.FixtureRequest) -> SVI:
     )
 
 
-def lm(X: ArrayLike, y: ArrayLike | None = None) -> None:
+def lm(X: Array, y: Array | None = None) -> None:
     """Linear regression model."""
     n_features = X.shape[1]
 
@@ -103,11 +106,7 @@ def lm(X: ArrayLike, y: ArrayLike | None = None) -> None:
     sample("y", dist.Normal(mu, sigma), obs=y)
 
 
-def lm_with_kwargs_array(
-    X: ArrayLike,
-    c: ArrayLike,
-    y: ArrayLike | None = None,
-) -> None:
+def lm_with_kwargs_array(X: Array, c: Array, y: Array | None = None) -> None:
     """Linear regression model with an extra array argument."""
     n_features = X.shape[1]
 
@@ -121,10 +120,77 @@ def lm_with_kwargs_array(
     sample("y", dist.Normal(mu, sigma), obs=y)
 
 
-def latent_variable_model(X: ArrayLike, y: ArrayLike | None = None) -> None:
+def latent_variable_model(X: Array, y: Array | None = None) -> None:
     """Latent variable model."""
     z = numpyro.sample(
         "z",
         dist.Normal(0.0, 1.0).expand([X.shape[0]]),
     ) + X.mean(axis=1)
     numpyro.sample("y", dist.Normal(z, 1.0), obs=y)
+
+
+def _make_svi(model: Callable) -> SVI:
+
+    return SVI(
+        model,
+        guide=AutoNormal(model),
+        optim=numpyro.optim.Adam(step_size=1e-3),
+        loss=Trace_ELBO(),
+    )
+
+
+def _make_mcmc(model: Callable) -> MCMC:
+
+    return MCMC(NUTS(model), num_warmup=100, num_samples=100, num_chains=1)
+
+
+@pytest.fixture(scope="module")
+def im_lm_svi_fitted(synthetic_data: tuple[Array, Array]) -> Iterator[ImpactModel]:
+    """`lm` fitted with SVI. Reusable for read-only tests."""
+    X, y = synthetic_data
+    im = ImpactModel(lm, rng_key=random.key(42), inference=_make_svi(lm))
+    im.fit(X=X, y=y, batch_size=len(X), progress=False)
+    yield im
+    im.cleanup()
+
+
+@pytest.fixture(scope="module")
+def im_lm_mcmc_fitted(synthetic_data: tuple[Array, Array]) -> Iterator[ImpactModel]:
+    """`lm` fitted with MCMC. Reusable for read-only tests."""
+    X, y = synthetic_data
+    im = ImpactModel(lm, rng_key=random.key(42), inference=_make_mcmc(lm))
+    im.fit_on_batch(X=X, y=y)
+    yield im
+    im.cleanup()
+
+
+@pytest.fixture(scope="module")
+def im_lm_with_kwargs_svi_fitted(
+    synthetic_data: tuple[Array, Array],
+) -> Iterator[ImpactModel]:
+    """`lm_with_kwargs_array` fitted with SVI. Reusable for read-only tests."""
+    X, y = synthetic_data
+    im = ImpactModel(
+        lm_with_kwargs_array,
+        rng_key=random.key(42),
+        inference=_make_svi(lm_with_kwargs_array),
+    )
+    im.fit(X=X, y=y, c=y, batch_size=3, progress=False)
+    yield im
+    im.cleanup()
+
+
+@pytest.fixture(scope="module")
+def im_latent_var_svi_fitted(
+    synthetic_data: tuple[Array, Array],
+) -> Iterator[ImpactModel]:
+    """`latent_variable_model` fitted with SVI. Reusable for read-only tests."""
+    X, y = synthetic_data
+    im = ImpactModel(
+        latent_variable_model,
+        rng_key=random.key(42),
+        inference=_make_svi(latent_variable_model),
+    )
+    im.fit(X=X, y=y, batch_size=len(X), progress=False)
+    yield im
+    im.cleanup()

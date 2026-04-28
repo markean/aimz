@@ -15,21 +15,19 @@
 """Tests for the `.log_likelihood()` method."""
 
 import pytest
-from jax import random
-from jax.typing import ArrayLike
+from jax import Array, random
 from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
 from numpyro.optim import Adam
 
 from aimz import ImpactModel
 from aimz._exceptions import NotFittedError
-from tests.conftest import lm
 
 
 def test_model_not_fitted() -> None:
     """Calling `.log_likelihood()` on an unfitted model raises an error."""
 
-    def kernel(X: ArrayLike, y: ArrayLike | None = None) -> None:
+    def kernel(X: Array, y: Array | None = None) -> None:
         pass
 
     im = ImpactModel(
@@ -49,19 +47,16 @@ def test_model_not_fitted() -> None:
 class TestBatchSize:
     """Test class related to batch size specification."""
 
-    @pytest.mark.parametrize("vi", [lm], indirect=True)
     def test_default_batch_size(
         self,
-        synthetic_data: tuple[ArrayLike, ArrayLike],
-        vi: SVI,
+        synthetic_data: tuple[Array, Array],
+        im_lm_svi_fitted: ImpactModel,
     ) -> None:
         """Warns if `batch_size` is not explicitly set."""
         X, y = synthetic_data
-        im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
-        im.fit(X=X, y=y, batch_size=3)
         msg = (
             r"The `batch_size` \(\d+\) is not divisible by the number of devices "
             r"\(\d+\)\."
         )
         with pytest.warns(UserWarning, match=msg):
-            im.log_likelihood(X=X, y=y)
+            im_lm_svi_fitted.log_likelihood(X=X, y=y)

@@ -15,36 +15,18 @@
 """Tests for saving and loading functionality of models."""
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import cloudpickle
-import pytest
-from jax import random
-from jax.typing import ArrayLike
 
 from aimz import ImpactModel
-from tests.conftest import lm
-
-if TYPE_CHECKING:
-    from numpyro.infer import SVI
 
 
-@pytest.mark.parametrize("vi", [lm], indirect=True)
-def test_save_load(
-    synthetic_data: tuple[ArrayLike, ArrayLike],
-    vi: "SVI",
-    tmp_path: "Path",
-) -> None:
+def test_save_load(im_lm_svi_fitted: ImpactModel, tmp_path: Path) -> None:
     """Test saving and loading an ImpactModel without errors."""
-    X, y = synthetic_data
-    im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
-    im.fit(X=X, y=y, batch_size=3)
-
     p = tmp_path / "model.pkl"
-    with Path.open(p, "wb") as f:
-        cloudpickle.dump(im, f)
-    del im  # Simulate reloading from scratch
-    with Path.open(p, "rb") as f:
+    with p.open("wb") as f:
+        cloudpickle.dump(im_lm_svi_fitted, f)
+    with p.open("rb") as f:
         im = cloudpickle.load(f)
 
     assert isinstance(im, ImpactModel)
