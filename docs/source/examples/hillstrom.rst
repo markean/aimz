@@ -14,9 +14,6 @@ to compute treatment effects.
 .. jupyter-execute::
     :hide-output:
 
-    import arviz_base as az
-    import arviz_plots as azp
-    import arviz_stats as azs
     import jax
     import jax.numpy as jnp
     import matplotlib.pyplot as plt
@@ -27,6 +24,9 @@ to compute treatment effects.
     from jax import Array, random
     from numpyro import deterministic, factor, plate, sample
     from numpyro.infer import MCMC, NUTS
+    import arviz_base as az
+    import arviz_plots as azp
+    import arviz_stats as azs
 
     from aimz import ImpactModel
 
