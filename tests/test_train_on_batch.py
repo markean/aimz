@@ -14,18 +14,23 @@
 
 """Tests for the `.train_on_batch()` method."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pytest
-from jax import random
-from jax.typing import ArrayLike
-from numpyro.infer import SVI
+from jax import Array, random
 
 from aimz import ImpactModel
 from tests.conftest import lm_with_kwargs_array
 
+if TYPE_CHECKING:
+    from numpyro.infer import SVI
+
 
 @pytest.mark.parametrize("vi", [lm_with_kwargs_array], indirect=True)
 def test_train_on_batch_lm_with_kwargs_array(
-    synthetic_data: tuple[ArrayLike, ArrayLike],
+    synthetic_data: tuple[Array, Array],
     vi: SVI,
 ) -> None:
     """Test the `.train_on_batch()` method of `ImpactModel`."""

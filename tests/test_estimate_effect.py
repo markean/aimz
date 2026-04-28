@@ -18,21 +18,20 @@ from pathlib import Path
 
 import jax.numpy as jnp
 import pytest
-from jax import random
-from jax.typing import ArrayLike
+from jax import Array, random
 from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
 from numpyro.optim import Adam
 
 from aimz import ImpactModel
 from aimz._exceptions import NotFittedError
-from tests.conftest import latent_variable_model, lm
+from tests.conftest import lm
 
 
 def test_model_not_fitted() -> None:
     """Calling `.estimate_effect()` on an unfitted model raises an error."""
 
-    def kernel(X: ArrayLike, y: ArrayLike | None = None) -> None:
+    def kernel(X: Array, y: Array | None = None) -> None:
         pass
 
     im = ImpactModel(
@@ -49,15 +48,13 @@ def test_model_not_fitted() -> None:
         im.estimate_effect()
 
 
-@pytest.mark.parametrize("vi", [latent_variable_model], indirect=True)
 def test_estimate_effect_argument_validation(
-    synthetic_data: tuple[ArrayLike, ArrayLike],
-    vi: SVI,
+    synthetic_data: tuple[Array, Array],
+    im_latent_var_svi_fitted: ImpactModel,
 ) -> None:
     """Validate argument exclusivity and successful effect computation."""
     X, y = synthetic_data
-    im = ImpactModel(latent_variable_model, rng_key=random.key(42), inference=vi)
-    im.fit(X=X, y=y, batch_size=len(X))
+    im = im_latent_var_svi_fitted
 
     msg = "Either `output_baseline` or `args_baseline` must be provided."
     with pytest.raises(ValueError, match=msg):
@@ -83,7 +80,7 @@ def test_estimate_effect_argument_validation(
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
 def test_estimate_effect_output_dir_lazy_args(
-    synthetic_data: tuple[ArrayLike, ArrayLike],
+    synthetic_data: tuple[Array, Array],
     vi: SVI,
 ) -> None:
     """Ensure lazy (args_*) inputs work and baseline `output_dir` is propagated."""
@@ -113,17 +110,14 @@ def test_estimate_effect_output_dir_lazy_args(
     im.cleanup()
 
 
-@pytest.mark.parametrize("vi", [lm], indirect=True)
 def test_estimate_effect_on_batch(
-    synthetic_data: tuple[ArrayLike, ArrayLike],
-    vi: SVI,
+    synthetic_data: tuple[Array, Array],
+    im_lm_svi_fitted: ImpactModel,
 ) -> None:
     """Ensure `on_batch=True` uses `predict_on_batch` and produces valid results."""
-    X, y = synthetic_data
-    im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
-    im.fit(X=X, y=y, batch_size=len(X))
+    X, _ = synthetic_data
 
-    effect = im.estimate_effect(
+    effect = im_lm_svi_fitted.estimate_effect(
         args_baseline={"X": X},
         args_intervention={"X": X, "intervention": {"sigma": 10.0}},
         on_batch=True,
@@ -133,22 +127,19 @@ def test_estimate_effect_on_batch(
     assert "output_dir" not in effect.attrs
 
 
-@pytest.mark.parametrize("vi", [lm], indirect=True)
 @pytest.mark.parametrize("in_sample", [True, False])
 def test_estimate_effect_on_batch_dict(
-    synthetic_data: tuple[ArrayLike, ArrayLike],
-    vi: SVI,
+    synthetic_data: tuple[Array, Array],
+    im_lm_svi_fitted: ImpactModel,
     *,
     in_sample: bool,
 ) -> None:
     """Dict results from `predict_on_batch` are wrapped in the correct group."""
-    X, y = synthetic_data
-    im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
-    im.fit(X=X, y=y, batch_size=len(X))
+    X, _ = synthetic_data
 
     expected_group = "posterior_predictive" if in_sample else "predictions"
 
-    effect = im.estimate_effect(
+    effect = im_lm_svi_fitted.estimate_effect(
         args_baseline={"X": X, "return_datatree": False, "in_sample": in_sample},
         args_intervention={
             "X": X,

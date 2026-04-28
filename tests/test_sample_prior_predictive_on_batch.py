@@ -18,8 +18,7 @@ import jax.numpy as jnp
 import numpyro.distributions as dist
 import pytest
 import xarray as xr
-from jax import random
-from jax.typing import ArrayLike
+from jax import Array, random
 from numpyro import sample
 from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
@@ -30,10 +29,10 @@ from aimz._exceptions import KernelValidationError
 from tests.conftest import lm
 
 
-def test_kernel_without_output(synthetic_data: tuple[ArrayLike, ArrayLike]) -> None:
+def test_kernel_without_output(synthetic_data: tuple[Array, Array]) -> None:
     """Kernel without output sample site raises an error."""
 
-    def kernel(X: ArrayLike, y: ArrayLike | None = None) -> None:
+    def kernel(X: Array, y: Array | None = None) -> None:
         sample("z", dist.Delta(y if y is not None else jnp.zeros(len(X))), obs=y)
 
     X, _ = synthetic_data
@@ -58,7 +57,7 @@ class TestKernelParameterValidation:
 
     def test_invalid_parameter(
         self,
-        synthetic_data: tuple[ArrayLike, ArrayLike],
+        synthetic_data: tuple[Array, Array],
         vi: "SVI",
     ) -> None:
         """An invalid parameter raise an error."""
@@ -68,21 +67,22 @@ class TestKernelParameterValidation:
             im.sample_prior_predictive_on_batch(X=X, y=y)
 
 
-@pytest.mark.parametrize("vi", [lm], indirect=True)
 def test_sample_prior_predictive_on_batch_lm(
-    synthetic_data: tuple[ArrayLike, ArrayLike],
-    vi: "SVI",
+    synthetic_data: tuple[Array, Array],
+    im_lm_svi_fitted: ImpactModel,
 ) -> None:
     """Test the `.sample_prior_predictive_on_batch()` method of ImpactModel."""
-    X, y = synthetic_data
-    im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
-    im.fit_on_batch(X, y)
-    samples = im.sample_prior_predictive_on_batch(X=X, num_samples=99, return_sites="y")
+    X, _ = synthetic_data
+    samples = im_lm_svi_fitted.sample_prior_predictive_on_batch(
+        X=X,
+        num_samples=99,
+        return_sites="y",
+    )
 
     assert isinstance(samples, xr.DataTree)
     assert samples.prior_predictive["y"].values.shape == (1, 99, len(X))
 
-    samples_dict = im.sample_prior_predictive_on_batch(
+    samples_dict = im_lm_svi_fitted.sample_prior_predictive_on_batch(
         X=X,
         num_samples=99,
         return_datatree=False,
@@ -91,5 +91,5 @@ def test_sample_prior_predictive_on_batch_lm(
 
     assert isinstance(samples_dict, dict)
     assert samples_dict["y"].shape == (99, len(X))
-    assert im.kernel_spec.traced
-    assert im.kernel_spec.output_observed
+    assert im_lm_svi_fitted.kernel_spec.traced
+    assert im_lm_svi_fitted.kernel_spec.output_observed

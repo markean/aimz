@@ -17,8 +17,7 @@
 import jax.numpy as jnp
 import numpyro.distributions as dist
 import pytest
-from jax import random
-from jax.typing import ArrayLike
+from jax import Array, random
 from numpyro import deterministic, sample
 from numpyro.infer import MCMC, SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
@@ -37,7 +36,7 @@ class TestKernelSignatureValidation:
     def test_extra_parameters(self) -> None:
         """Extra parameters not present in the kernel raise an error."""
 
-        def kernel(X: ArrayLike, y: ArrayLike | None = None) -> None:
+        def kernel(X: Array, y: Array | None = None) -> None:
             pass
 
         with pytest.warns(
@@ -60,7 +59,7 @@ class TestKernelSignatureValidation:
     def test_missing_parameters(self) -> None:
         """Missing required parameters in the kernel raise an error."""
 
-        def kernel(X: ArrayLike, arg: object, y: ArrayLike | None = None) -> None:
+        def kernel(X: Array, arg: object, y: Array | None = None) -> None:
             pass
 
         im = ImpactModel(
@@ -83,7 +82,7 @@ class TestKernelBodyValidation:
     def test_missing_output_site(self) -> None:
         """Missing output sample site in the kernel raises an error."""
 
-        def kernel(X: ArrayLike, y: ArrayLike | None = None) -> None:
+        def kernel(X: Array, y: Array | None = None) -> None:
             sample("z", dist.Normal(0.0, 1.0), obs=y)
 
         im = ImpactModel(
@@ -102,7 +101,7 @@ class TestKernelBodyValidation:
     def test_sample_output_site(self) -> None:
         """Raises error if output site is not a sample site."""
 
-        def kernel(X: ArrayLike, y: ArrayLike | None = None) -> None:
+        def kernel(X: Array, y: Array | None = None) -> None:
             deterministic("y", jnp.zeros_like(y))
 
         im = ImpactModel(
@@ -121,7 +120,7 @@ class TestKernelBodyValidation:
     def test_unobserved_output_site(self) -> None:
         """Raises error if output site is not observed."""
 
-        def kernel(X: ArrayLike, y: ArrayLike | None = None) -> None:
+        def kernel(X: Array, y: Array | None = None) -> None:
             sample("y", dist.Normal(0.0, 1.0))
 
         im = ImpactModel(
@@ -140,7 +139,7 @@ class TestKernelBodyValidation:
     def test_parameter_site_conflict(self) -> None:
         """Raises an error if a parameter name conflicts with a site name."""
 
-        def kernel(X: ArrayLike, y: ArrayLike | None = None) -> None:
+        def kernel(X: Array, y: Array | None = None) -> None:
             sample("X", dist.Normal(0.0, 1.0))
             sample("y", dist.Normal(0.0, 1.0), obs=y)
 
@@ -160,7 +159,7 @@ class TestKernelBodyValidation:
     def test_kernel_with_invalid_site_name(self) -> None:
         """Kernel with site names incompatible with xarray.DataTree raises an error."""
 
-        def kernel(X: ArrayLike, y: ArrayLike | None = None) -> None:
+        def kernel(X: Array, y: Array | None = None) -> None:
             mu = sample("x/y", dist.Normal())
             sigma = sample("sigma", dist.Exponential(1.0))
             sample("y", dist.Normal(mu, sigma), obs=y)
@@ -190,7 +189,7 @@ def test_fit_raises_for_mcmc_inference(mcmc: MCMC) -> None:
 def test_fit_unexpected_y_shape() -> None:
     """Calling `.fit()` with an unexpected shape of `y` raises a warning."""
 
-    def kernel(X: ArrayLike, y: ArrayLike | None = None) -> None:
+    def kernel(X: Array, y: Array | None = None) -> None:
         sample("y", dist.Normal(0.0, 1.0), obs=y)
 
     im = ImpactModel(
@@ -207,7 +206,7 @@ def test_fit_unexpected_y_shape() -> None:
         im.fit(X=jnp.zeros((3, 2)), y=jnp.zeros((3, 1)), batch_size=3)
 
 
-def test_fit_nan_warning(synthetic_data: tuple[ArrayLike, ArrayLike]) -> None:
+def test_fit_nan_warning(synthetic_data: tuple[Array, Array]) -> None:
     """Test that `.fit()` emits a RuntimeWarning when NaN is in the loss."""
     X, y = synthetic_data
     im = ImpactModel(
@@ -228,7 +227,7 @@ def test_fit_nan_warning(synthetic_data: tuple[ArrayLike, ArrayLike]) -> None:
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
-def test_fit_lm(synthetic_data: tuple[ArrayLike, ArrayLike], vi: SVI) -> None:
+def test_fit_lm(synthetic_data: tuple[Array, Array], vi: SVI) -> None:
     """Test the `.fit()` method of `ImpactModel`."""
     X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), inference=vi)

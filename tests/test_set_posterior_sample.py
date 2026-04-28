@@ -14,13 +14,14 @@
 
 """Tests for the `.set_posterior_sample()` method."""
 
+from __future__ import annotations
+
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
+from jax import Array, random
 from jax import numpy as jnp
-from jax import random
-from jax.typing import ArrayLike
 from numpyro.infer import Predictive
 from numpyro.infer.svi import SVIRunResult
 
@@ -33,7 +34,7 @@ if TYPE_CHECKING:
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
-def test_empty_posterior_sample(vi: "SVI") -> None:
+def test_empty_posterior_sample(vi: SVI) -> None:
     """Empty posterior sample raises ValueError."""
     im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
     msg = "`posterior_sample` cannot be empty."
@@ -42,10 +43,7 @@ def test_empty_posterior_sample(vi: "SVI") -> None:
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
-def test_set_posterior_sample(
-    synthetic_data: tuple[ArrayLike, ArrayLike],
-    vi: "SVI",
-) -> None:
+def test_set_posterior_sample(synthetic_data: tuple[Array, Array], vi: SVI) -> None:
     """Test the `.set_posterior_sample()` method of ImpactModel."""
     X, y = synthetic_data
 
@@ -83,7 +81,7 @@ def test_set_posterior_sample(
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
-def test_inconsistent_batch_shapes(vi: "SVI") -> None:
+def test_inconsistent_batch_shapes(vi: SVI) -> None:
     """Setting a posterior sample with inconsistent batch shapes raises ValueError."""
     im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
     with pytest.raises(

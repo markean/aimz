@@ -18,8 +18,7 @@ from tempfile import TemporaryDirectory
 
 import numpyro.distributions as dist
 import pytest
-from jax import random
-from jax.typing import ArrayLike
+from jax import Array, random
 from numpyro import sample
 from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
@@ -27,13 +26,13 @@ from numpyro.optim import Adam
 
 from aimz import ImpactModel
 from aimz._exceptions import NotFittedError
-from tests.conftest import latent_variable_model, lm
+from tests.conftest import lm
 
 
 def test_model_not_fitted() -> None:
     """Calling `.predict()` on an unfitted model raises an error."""
 
-    def kernel(X: ArrayLike, y: ArrayLike | None = None) -> None:
+    def kernel(X: Array, y: Array | None = None) -> None:
         pass
 
     im = ImpactModel(
@@ -50,58 +49,46 @@ def test_model_not_fitted() -> None:
         im.predict(None)
 
 
-@pytest.mark.parametrize("vi", [latent_variable_model], indirect=True)
 def test_predict_fall_back(
-    synthetic_data: tuple[ArrayLike, ArrayLike],
-    vi: SVI,
+    synthetic_data: tuple[Array, Array],
+    im_latent_var_svi_fitted: ImpactModel,
 ) -> None:
     """Calling `.predict()` warns and falls back on an incompatible model."""
-    X, y = synthetic_data
-    im = ImpactModel(latent_variable_model, rng_key=random.key(42), inference=vi)
-    im.fit(X=X, y=y, batch_size=len(X))
+    X, _ = synthetic_data
     msg = "One or more posterior sample shapes are not compatible"
     with pytest.warns(UserWarning, match=msg):
-        im.predict(X=X, batch_size=len(X), progress=False)
+        im_latent_var_svi_fitted.predict(X=X, batch_size=len(X), progress=False)
 
 
 class TestKernelParameterValidation:
     """Test class for validating parameter compatibility with the kernel."""
 
-    @pytest.mark.parametrize("vi", [lm], indirect=True)
     def test_invalid_parameter(
         self,
-        synthetic_data: tuple[ArrayLike, ArrayLike],
-        vi: SVI,
+        synthetic_data: tuple[Array, Array],
+        im_lm_svi_fitted: ImpactModel,
     ) -> None:
         """An invalid parameter raise an error."""
         X, y = synthetic_data
-        im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
-        im.fit(X=X, y=y, batch_size=3)
         with pytest.raises(TypeError):
-            im.predict(X=X, y=y)
+            im_lm_svi_fitted.predict(X=X, y=y)
 
-    @pytest.mark.parametrize("vi", [lm], indirect=True)
     def test_extra_parameters(
         self,
-        synthetic_data: tuple[ArrayLike, ArrayLike],
-        vi: SVI,
+        synthetic_data: tuple[Array, Array],
+        im_lm_svi_fitted: ImpactModel,
     ) -> None:
         """Extra parameters not present in the kernel raise an error."""
-        X, y = synthetic_data
-        im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
-        im.fit(X=X, y=y, batch_size=3)
+        X, _ = synthetic_data
         with pytest.raises(TypeError):
-            im.predict(X=X, extra=True)
+            im_lm_svi_fitted.predict(X=X, extra=True)
 
-    def test_missing_parameters(
-        self,
-        synthetic_data: tuple[ArrayLike, ArrayLike],
-    ) -> None:
+    def test_missing_parameters(self, synthetic_data: tuple[Array, Array]) -> None:
         """Missing required parameters in the kernel raise an error."""
         X, y = synthetic_data
         arg = True
 
-        def kernel(X: ArrayLike, arg: object, y: ArrayLike | None = None) -> None:
+        def kernel(X: Array, arg: object, y: Array | None = None) -> None:
             sample("y", dist.Normal(0.0, 1.0), obs=y)
 
         vi = SVI(
@@ -119,25 +106,19 @@ class TestKernelParameterValidation:
 class TestBatchSize:
     """Test class related to batch size specification."""
 
-    @pytest.mark.parametrize("vi", [lm], indirect=True)
     def test_default_batch_size(
         self,
-        synthetic_data: tuple[ArrayLike, ArrayLike],
-        vi: SVI,
+        synthetic_data: tuple[Array, Array],
+        im_lm_svi_fitted: ImpactModel,
     ) -> None:
         """Warns if `batch_size` is not explicitly set."""
-        X, y = synthetic_data
-        im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
-        im.fit(X=X, y=y, batch_size=3)
+        X, _ = synthetic_data
         with pytest.warns(UserWarning, match=".*"):
-            im.predict(X=X, progress=False)
+            im_lm_svi_fitted.predict(X=X, progress=False)
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
-def test_predict_after_cleanup(
-    synthetic_data: tuple[ArrayLike, ArrayLike],
-    vi: SVI,
-) -> None:
+def test_predict_after_cleanup(synthetic_data: tuple[Array, Array], vi: SVI) -> None:
     """Test `.predict()` recreates tempdir after `.cleanup()`."""
     X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
