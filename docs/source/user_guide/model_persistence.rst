@@ -75,7 +75,7 @@ Save a trained :class:`~aimz.ImpactModel` (and optionally its input data) to dis
 
 .. jupyter-execute::
 
-    with Path.open("model.pkl", "wb") as f:
+    with Path("model.pkl").open("wb") as f:
         cloudpickle.dump((im, X, y), f)
 
 
@@ -96,7 +96,7 @@ Any JAX array—whether part of the :class:`~aimz.ImpactModel` or the input data
     import numpyro.distributions as dist
     from numpyro import sample
 
-    with Path.open("model.pkl", "rb") as f:
+    with Path("model.pkl").open("rb") as f:
         im, X, y = cloudpickle.load(f)
 
 

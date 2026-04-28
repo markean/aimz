@@ -77,7 +77,7 @@ class MLP(nnx.Module):
 # ── RSS measurement ───────────────────────────────────────────────────────────────────
 def _current_rss_mib() -> float:
     """Return current anonymous RSS in MiB."""
-    with Path.open(f"/proc/{os.getpid()}/status") as f:
+    with Path(f"/proc/{os.getpid()}/status").open() as f:
         for line in f:
             if line.startswith("RssAnon:"):
                 return int(line.split()[1]) / 1024.0

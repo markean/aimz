@@ -200,7 +200,7 @@ def save_model(
     else:
         conda_env, pip_requirements, pip_constraints = _process_conda_env(conda_env)
 
-    with Path.open(path / _CONDA_ENV_FILE_NAME, "w") as f:
+    with (path / _CONDA_ENV_FILE_NAME).open("w") as f:
         yaml.safe_dump(conda_env, stream=f, default_flow_style=False)
 
     # Save `constraints.txt` if necessary.
