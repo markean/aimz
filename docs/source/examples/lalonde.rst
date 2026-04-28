@@ -17,9 +17,6 @@ high-school degree more than those with one.
 
 .. jupyter-execute::
 
-    import arviz_base as az
-    import arviz_plots as azp
-    import arviz_stats as azs
     import jax
     import jax.numpy as jnp
     import matplotlib.pyplot as plt
@@ -29,6 +26,9 @@ high-school degree more than those with one.
     from jax import Array, random
     from numpyro import deterministic, plate, sample
     from numpyro.infer import MCMC, NUTS
+    import arviz_base as az
+    import arviz_plots as azp
+    import arviz_stats as azs
 
     from aimz import ImpactModel
 
