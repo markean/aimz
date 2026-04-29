@@ -7,6 +7,9 @@ on:
         description: 'Version to publish (x.y.z)'
         required: true
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build distribution 📦
