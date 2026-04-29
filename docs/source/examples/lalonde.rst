@@ -17,6 +17,8 @@ high-school degree more than those with one.
 
 .. jupyter-execute::
 
+    import logging
+
     import arviz_base as az
     import arviz_plots as azp
     import arviz_stats as azs
@@ -31,6 +33,8 @@ high-school degree more than those with one.
     from numpyro.infer import MCMC, NUTS
 
     from aimz import ImpactModel
+
+    logging.basicConfig(level=logging.INFO, force=True)
 
     # Force JAX to use CPU even if GPU is available
     jax.config.update("jax_platform_name", "cpu")

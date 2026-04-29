@@ -17,6 +17,8 @@ batched training and prediction without requiring changes to the model code.
 
 .. code-block:: python
 
+    import logging
+
     import jax
     import jax.numpy as jnp
     import matplotlib.pyplot as plt
@@ -33,6 +35,8 @@ batched training and prediction without requiring changes to the model code.
     from optax import adam
 
     from aimz import ImpactModel
+
+    logging.basicConfig(level=logging.INFO, force=True)
 
     # Configure the inline backend for high-resolution figures
     %config InlineBackend.figure_format = "retina"
