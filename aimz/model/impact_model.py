@@ -647,15 +647,18 @@ class ImpactModel(BaseModel):
 
         return_sites = self._coerce_return_sites(return_sites)
 
-        # Prior sampling
+        # Use a single-element, unsharded probe (batch_size=1) to build the kernel spec
+        # and draw global prior samples once. A sharded probe would propagate the mesh
+        # axis onto global (non-batched) sites via JAX's sharding-in-types, incorrectly
+        # replicating them per device.
         dataloader, _ = _setup_inputs(
             X=X,
             y=None,
             rng_key=self.rng_key,
-            batch_size=self._device.num_devices if self._device is not None else 1,
+            batch_size=1,
             num_samples=num_samples,
             shuffle=False,
-            device=self._device,
+            device=None,
             **kwargs,
         )
         batch, _ = next(iter(dataloader))
