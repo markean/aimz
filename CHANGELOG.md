@@ -7,11 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [v0.11.0](https://github.com/markean/aimz/releases/tag/v0.11.0) - 2025-04-29
+
 ### Changed
 
 - Removed package-level logging configuration from `aimz/__init__.py`. `aimz` no longer sets a log level, attaches a `StreamHandler(sys.stdout)`, or calls `logging.captureWarnings(True)` on import; the `aimz` logger now only has a `logging.NullHandler()` attached.
 Configuring handlers, levels, and warnings capture is the responsibility of the application.
 Log messages emitted by {class}`~aimz.ImpactModel` were also refined—trailing ellipses were removed and posterior sampling now reports the number of samples being drawn—and the output-directory cleanup notice raised when {meth}`~aimz.ImpactModel.predict_on_batch` and {meth}`~aimz.ImpactModel.log_likelihood` encounter an error is now logged at the `warning` level (previously `debug`) ([#192](https://github.com/markean/aimz/issues/192)).
+
+### Fixed
+
+- Fixed {meth}`~aimz.ImpactModel.sample_prior_predictive` failing on multi-device meshes with `ValueError: in_specs ... does not match the specs of the input ... @obs`. The probe batch used to trace the kernel and draw global prior samples is now built with `batch_size=1` and `device=None`, preventing JAX's sharding-in-types from propagating the `obs` mesh axis onto global (non-batched) sample sites that are later passed as the replicated `samples` argument to the {func}`jax.shard_map` sampler ([#194](https://github.com/markean/aimz/issues/194)).
 
 ## [v0.10.0](https://github.com/markean/aimz/releases/tag/v0.10.0) - 2025-04-17
 

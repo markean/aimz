@@ -6,10 +6,6 @@ on:
       version:
         description: 'Version to publish (x.y.z)'
         required: true
-      destination:
-        description: 'Where to upload (testpypi or pypi)'
-        default: 'testpypi'
-        required: true
 
 jobs:
   build:
@@ -34,29 +30,8 @@ jobs:
           name: python-package-distributions
           path: dist/
 
-  publish-to-pypi:
-    name: Publish to PyPI
-    if: ${{ github.event.inputs.destination == 'pypi' }}
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/p/aimz
-    permissions:
-      id-token: write
-
-    steps:
-      - name: Download all the dists
-        uses: actions/download-artifact@v8
-        with:
-          name: python-package-distributions
-          path: dist/
-      - name: Publish distribution 📦 to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-
   publish-to-testpypi:
     name: Publish to TestPyPI
-    if: ${{ github.event.inputs.destination == 'testpypi' }}
     needs: build
     runs-on: ubuntu-latest
     environment:
@@ -75,3 +50,22 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+
+  publish-to-pypi:
+    name: Publish to PyPI
+    needs: publish-to-testpypi
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/aimz
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download all the dists
+        uses: actions/download-artifact@v8
+        with:
+          name: python-package-distributions
+          path: dist/
+      - name: Publish distribution 📦 to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
