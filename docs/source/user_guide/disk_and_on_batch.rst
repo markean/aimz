@@ -91,6 +91,8 @@ The example below illustrates this case.
 .. jupyter-execute::
     :hide-output:
 
+    import logging
+
     import jax.numpy as jnp
     import numpyro.distributions as dist
     from jax import random
@@ -100,6 +102,8 @@ The example below illustrates this case.
     from numpyro.infer.autoguide import AutoNormal
 
     from aimz import ImpactModel
+
+    logging.basicConfig(level=logging.INFO, force=True)
 
 
     def model(X: ArrayLike, y: ArrayLike | None = None) -> None:

@@ -57,6 +57,8 @@ The output below shows an example :external:class:`xarray.DataTree` illustrating
     :hide-code:
     :hide-output:
 
+    import logging
+
     import jax
     from aimz.model import ImpactModel
     import jax.numpy as jnp
@@ -67,6 +69,8 @@ The output below shows an example :external:class:`xarray.DataTree` illustrating
     from numpyro.infer import SVI, Trace_ELBO
     from numpyro.infer.autoguide import AutoNormal
     from jax import jit
+
+    logging.basicConfig(level=logging.INFO, force=True)
 
 
     def lm(X, y=None) -> None:

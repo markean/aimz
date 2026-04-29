@@ -23,6 +23,7 @@ Model Training
 .. jupyter-execute::
     :hide-output:
 
+    import logging
     from pathlib import Path
 
     import cloudpickle
@@ -33,6 +34,8 @@ Model Training
     from numpyro import optim, sample
     from numpyro.infer import SVI, Trace_ELBO
     from numpyro.infer.autoguide import AutoNormal
+
+    logging.basicConfig(level=logging.INFO, force=True)
 
     from aimz import ImpactModel
 

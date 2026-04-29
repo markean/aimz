@@ -387,8 +387,8 @@ class ImpactModel(BaseModel):
                 logger.info("Temporary directory created at: %s", self._temp_dir.name)
             output_dir = self._temp_dir.name
             logger.info(
-                "No output directory provided. Using the model's temporary directory "
-                "for storing output.",
+                "No output directory provided; using the model's temporary directory "
+                "for storing output",
             )
         output_dir = Path(output_dir).expanduser().resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -460,6 +460,8 @@ class ImpactModel(BaseModel):
             writer=_writer,
             queue_size=min(cpu_count() or 1, 4),
         )
+        worker_err: tuple | None = None
+        success = False
         try:
             for (batch, n_pad), subkey in zip(dataloader, subkeys, strict=True):
                 kwargs_batch = [
@@ -503,21 +505,23 @@ class ImpactModel(BaseModel):
                         (arr[:, None] if arr.ndim == 1 else arr)[:, : -n_pad or None],
                     )
                 if not error_queue.empty():
-                    _, exc, tb = error_queue.get()
-                    raise exc.with_traceback(tb)
+                    worker_err = error_queue.get()
+                    break
                 pbar.update()
-            pbar.set_description("Sampling complete, writing in progress...")
-            _shutdown_writer_threads(threads, queues)
-        except:
-            logger.debug(
-                "Exception encountered. Cleaning up output directory: %s",
-                output_dir,
-            )
-            _shutdown_writer_threads(threads, queues)
-            rmtree(output_dir, ignore_errors=True)
-            raise
+            if worker_err is None:
+                pbar.set_description("Sampling complete, writing in progress...")
+                _shutdown_writer_threads(threads, queues)
+                success = True
         finally:
+            if not success:
+                logger.warning("Cleaning up output directory: %s", output_dir)
+
+                _shutdown_writer_threads(threads, queues)
+                rmtree(output_dir, ignore_errors=True)
             pbar.close()
+        if worker_err is not None:
+            _, exc, tb = worker_err
+            raise exc.with_traceback(tb)
 
     def sample_prior_predictive_on_batch(
         self,
@@ -1025,7 +1029,7 @@ class ImpactModel(BaseModel):
         rng_key, rng_subkey = random.split(rng_key)
         if isinstance(self.inference, SVI):
             self._num_samples = num_samples
-            logger.info("Performing variational inference optimization...")
+            logger.info("Performing variational inference optimization")
             self.vi_result: SVIRunResult = self.inference.run(
                 rng_subkey,
                 num_steps=num_steps,
@@ -1040,7 +1044,7 @@ class ImpactModel(BaseModel):
                     category=RuntimeWarning,
                     stacklevel=2,
                 )
-            logger.info("Posterior sampling...")
+            logger.info("Drawing posterior samples (num_samples=%d)", self._num_samples)
             rng_key, rng_subkey = random.split(rng_key)
             self._posterior = _sample_forward(
                 substitute(self.inference.guide, data=self.vi_result.params),
@@ -1051,7 +1055,10 @@ class ImpactModel(BaseModel):
                 model_kwargs=None,
             )
         elif isinstance(self.inference, MCMC):
-            logger.info("Posterior sampling...")
+            logger.info(
+                "Drawing posterior samples (num_samples=%d)",
+                self.inference.num_samples,
+            )
             self.inference.run(rng_subkey, **args_bound)
             self._posterior = device_get(self.inference.get_samples())
             self._num_samples = (
@@ -1139,7 +1146,7 @@ class ImpactModel(BaseModel):
             **kwargs,
         )
 
-        logger.info("Performing variational inference optimization...")
+        logger.info("Performing variational inference optimization")
         losses: list[float] = []
         rng_key, rng_subkey = random.split(rng_key)
         for epoch in range(epochs):
@@ -1177,7 +1184,10 @@ class ImpactModel(BaseModel):
 
         self._is_fitted = True
 
-        logger.info("Posterior sampling...")
+        logger.info(
+            "Drawing posterior samples (num_samples=%d)",
+            self._num_samples,
+        )
         rng_key, rng_subkey = random.split(rng_key)
         self._posterior = _sample_forward(
             substitute(
@@ -1704,6 +1714,8 @@ class ImpactModel(BaseModel):
             writer=_writer,
             queue_size=min(cpu_count() or 1, 4),
         )
+        worker_err: tuple | None = None
+        success = False
         try:
             for batch, n_pad in dataloader:
                 kwargs_batch = [
@@ -1739,21 +1751,22 @@ class ImpactModel(BaseModel):
                     )
                 queues[site].put(arr[:, : -n_pad or None])
                 if not error_queue.empty():
-                    _, exc, tb = error_queue.get()
-                    raise exc.with_traceback(tb)
+                    worker_err = error_queue.get()
+                    break
                 pbar.update()
-            pbar.set_description("Computation complete, writing in progress...")
-            _shutdown_writer_threads(threads, queues=queues)
-        except:
-            logger.debug(
-                "Exception encountered. Cleaning up output directory: %s",
-                output_subdir,
-            )
-            _shutdown_writer_threads(threads, queues=queues)
-            rmtree(output_subdir, ignore_errors=True)
-            raise
+            if worker_err is None:
+                pbar.set_description("Computation complete, writing in progress...")
+                _shutdown_writer_threads(threads, queues=queues)
+                success = True
         finally:
+            if not success:
+                logger.warning("Cleaning up output directory: %s", output_subdir)
+                _shutdown_writer_threads(threads, queues=queues)
+                rmtree(output_subdir, ignore_errors=True)
             pbar.close()
+        if worker_err is not None:
+            _, exc, tb = worker_err
+            raise exc.with_traceback(tb)
 
         ds = open_zarr(output_subdir, consolidated=False).expand_dims(
             dim="chain",

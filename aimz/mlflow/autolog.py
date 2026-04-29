@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 
 FLAVOR_NAME = "aimz"
 
-_logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 @autologging_integration(FLAVOR_NAME)
@@ -171,7 +171,7 @@ def autolog(
                     ),
                     log_input_example=log_input_examples,
                     log_model_signature=log_model_signatures,
-                    logger=_logger,
+                    logger=logger,
                 )
             registered_model_name = get_autologging_config(
                 FLAVOR_NAME,

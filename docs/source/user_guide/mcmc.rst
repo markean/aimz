@@ -13,6 +13,8 @@ This enables users to apply MCMC to more complex models where variational infere
 .. jupyter-execute::
     :hide-output:
 
+    import logging
+
     import jax.numpy as jnp
     import numpyro.distributions as dist
     from jax import random
@@ -21,6 +23,8 @@ This enables users to apply MCMC to more complex models where variational infere
     from numpyro.infer import MCMC, NUTS
 
     from aimz import ImpactModel
+
+    logging.basicConfig(level=logging.INFO, force=True)
 
 
 Model and Data
