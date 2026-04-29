@@ -117,6 +117,8 @@ Model
 
 .. jupyter-execute::
 
+    import logging
+
     import jax.numpy as jnp
     import numpyro.distributions as dist
     from jax import nn, random
@@ -126,6 +128,8 @@ Model
     from numpyro.infer.autoguide import AutoNormal
 
     from aimz import ImpactModel
+
+    logging.basicConfig(level=logging.INFO, force=True)
 
 
     def model(X: ArrayLike, C: ArrayLike, y: ArrayLike | None = None) -> None:

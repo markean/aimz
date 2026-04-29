@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+
+- Removed package-level logging configuration from `aimz/__init__.py`. `aimz` no longer sets a log level, attaches a `StreamHandler(sys.stdout)`, or calls `logging.captureWarnings(True)` on import; the `aimz` logger now only has a `logging.NullHandler()` attached.
+Configuring handlers, levels, and warnings capture is the responsibility of the application.
+Log messages emitted by {class}`~aimz.ImpactModel` were also refined—trailing ellipses were removed and posterior sampling now reports the number of samples being drawn—and the output-directory cleanup notice raised when {meth}`~aimz.ImpactModel.predict_on_batch` and {meth}`~aimz.ImpactModel.log_likelihood` encounter an error is now logged at the `warning` level (previously `debug`) ([#192](https://github.com/markean/aimz/issues/192)).
+
 ## [v0.10.0](https://github.com/markean/aimz/releases/tag/v0.10.0) - 2025-04-17
 
 ### Added

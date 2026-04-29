@@ -15,16 +15,9 @@
 """Initialize package with global setup."""
 
 import logging
-import sys
 
 from aimz.model.impact_model import ImpactModel
 
 __all__ = ["ImpactModel"]
 
-logger = logging.getLogger(__name__)
-
-if not logger.hasHandlers():
-    logger.setLevel(logging.INFO)
-    handler = logging.StreamHandler(sys.stdout)
-    logger.addHandler(handler)
-    logging.getLogger("py.warnings").addHandler(handler)
+logging.getLogger(__name__).addHandler(logging.NullHandler())

@@ -27,6 +27,8 @@ The posterior predictive sampling methods serve as convenient aliases for :meth:
 .. jupyter-execute::
     :hide-output:
 
+    import logging
+
     import jax.numpy as jnp
     import numpyro.distributions as dist
     import xarray as xr
@@ -39,6 +41,7 @@ The posterior predictive sampling methods serve as convenient aliases for :meth:
 
     from aimz import ImpactModel
 
+    logging.basicConfig(level=logging.INFO, force=True)
     style.use("arviz-variat")
 
 \

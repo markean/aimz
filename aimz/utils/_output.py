@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import logging
 from queue import Queue
-from sys import exc_info
 from threading import Thread
 from typing import TYPE_CHECKING, cast
 
@@ -58,11 +57,9 @@ def _writer(site: str, queue: Queue, group_path: Path, error_queue: Queue) -> No
 
         try:
             cast("Array", group[site]).append(arr, axis=1)
-        except Exception as e:
-            msg = f"Error writing to site '{site}': {e}"
-            logger.exception(msg)
-            _, exc_value, exc_tb = exc_info()
-            error_queue.put((site, exc_value, exc_tb))
+        except Exception as exc:
+            logger.exception("Error writing to site '%s'", site)
+            error_queue.put((site, exc, exc.__traceback__))
             # Drain remaining items including sentinel
             while True:
                 leftover = queue.get()
