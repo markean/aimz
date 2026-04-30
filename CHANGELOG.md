@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-## [v0.11.0](https://github.com/markean/aimz/releases/tag/v0.11.0) - 2025-04-29
+## [v0.11.0](https://github.com/markean/aimz/releases/tag/v0.11.0) - 2026-04-29
 
 ### Changed
 
@@ -19,7 +19,7 @@ Log messages emitted by {class}`~aimz.ImpactModel` were also refined—trailing 
 
 - Fixed {meth}`~aimz.ImpactModel.sample_prior_predictive` failing on multi-device meshes with `ValueError: in_specs ... does not match the specs of the input ... @obs`. The probe batch used to trace the kernel and draw global prior samples is now built with `batch_size=1` and `device=None`, preventing JAX's sharding-in-types from propagating the `obs` mesh axis onto global (non-batched) sample sites that are later passed as the replicated `samples` argument to the {func}`jax.shard_map` sampler ([#194](https://github.com/markean/aimz/issues/194)).
 
-## [v0.10.0](https://github.com/markean/aimz/releases/tag/v0.10.0) - 2025-04-17
+## [v0.10.0](https://github.com/markean/aimz/releases/tag/v0.10.0) - 2026-04-17
 
 ### Added
 
