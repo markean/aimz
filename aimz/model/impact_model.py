@@ -436,8 +436,7 @@ class ImpactModel(BaseModel):
             dataloader: Iterator over batches of input data. Each batch must be a tuple
                 containing a dictionary of arrays and a padding value.
             pbar: Progress bar instance to display sampling progress.
-            **kwargs: Additional arguments passed to the model. All array-like values
-                are expected to be JAX arrays.
+            **kwargs: Additional arguments passed to the model.
 
         Raises:
             Exception: Any exception raised during sampling or writing is logged, the
@@ -536,7 +535,7 @@ class ImpactModel(BaseModel):
         """Draw samples from the prior predictive distribution.
 
         Args:
-            X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
+            X (ArrayLike): Input data. The leading axis is the sample axis.
             num_samples: The number of samples to draw.
             rng_key: A pseudo-random number generator key. By default, an internal key
                 is used and split as needed.
@@ -544,8 +543,7 @@ class ImpactModel(BaseModel):
                 :attr:`~aimz.ImpactModel.param_output` and deterministic sites.
             return_datatree: If ``True``, return a :external:class:`~xarray.DataTree`;
                 otherwise return a :class:`dict`.
-            **kwargs: Additional arguments passed to the model. All array-like values
-                are expected to be JAX arrays.
+            **kwargs: Additional arguments passed to the model.
 
         Returns:
             Prior predictive samples. Posterior samples are included if available.
@@ -607,7 +605,7 @@ class ImpactModel(BaseModel):
         decoupled and executed concurrently.
 
         Args:
-            X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
+            X (ArrayLike): Input data. The leading axis is the sample axis.
             num_samples: The number of samples to draw.
             rng_key: A pseudo-random number generator key. By default, an internal key
                 is used and split as needed.
@@ -623,8 +621,7 @@ class ImpactModel(BaseModel):
                 subdirectory will be generated within this directory to store the
                 outputs. Outputs are saved in the Zarr format.
             progress: Whether to display a progress bar.
-            **kwargs: Additional arguments passed to the model. All array-like values
-                are expected to be JAX arrays.
+            **kwargs: Additional arguments passed to the model.
 
         Returns:
             Prior predictive samples. Posterior samples are included if available.
@@ -754,9 +751,8 @@ class ImpactModel(BaseModel):
                 all latent sites. Ignored if the inference method is MCMC.
             return_datatree: If ``True``, return a :external:class:`~xarray.DataTree`;
                 otherwise return a :class:`dict`.
-            **kwargs: Additional arguments passed to the model. All array-like values
-                are expected to be JAX arrays. Only relevant when the inference method
-                is MCMC.
+            **kwargs: Additional arguments passed to the model. Only relevant when the
+                inference method is MCMC.
 
         Returns:
             Posterior samples.
@@ -822,7 +818,7 @@ class ImpactModel(BaseModel):
         set to ``True``.
 
         Args:
-            X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
+            X (ArrayLike): Input data. The leading axis is the sample axis.
             intervention: A dictionary mapping sample sites to their corresponding
                 intervention values. Interventions enable counterfactual analysis by
                 modifying the specified sample sites during prediction (posterior
@@ -833,8 +829,7 @@ class ImpactModel(BaseModel):
                 :attr:`~aimz.ImpactModel.param_output` and deterministic sites.
             return_datatree: If ``True``, return a :external:class:`~xarray.DataTree`;
                 otherwise return a :class:`dict`.
-            **kwargs: Additional arguments passed to the model. All array-like values
-                are expected to be JAX arrays.
+            **kwargs: Additional arguments passed to the model.
 
         Returns:
             Posterior predictive samples. Posterior samples are included if available.
@@ -874,8 +869,8 @@ class ImpactModel(BaseModel):
         ``in_sample`` automatically set to ``True``.
 
         Args:
-            X (ArrayLike | ArrayLoader): Input data, either an array-like of shape
-                ``(n_samples, n_features)`` or a data loader that holds all array-like
+            X (ArrayLike | ArrayLoader): Input data. If array-like, the leading axis is
+                the sample axis. Alternatively, a data loader that holds all array-like
                 objects and handles batching internally.
             intervention: A dictionary mapping sample sites to their corresponding
                 intervention values. Interventions enable counterfactual analysis by
@@ -896,8 +891,7 @@ class ImpactModel(BaseModel):
                 subdirectory will be generated within this directory to store the
                 outputs. Outputs are saved in the Zarr format.
             progress: Whether to display a progress bar.
-            **kwargs: Additional arguments passed to the model. All array-like values
-                are expected to be JAX arrays.
+            **kwargs: Additional arguments passed to the model.
 
         Returns:
             Posterior predictive samples. Posterior samples are included if available.
@@ -931,13 +925,12 @@ class ImpactModel(BaseModel):
         """Run a single VI step on the given batch of data.
 
         Args:
-            X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
-            y (ArrayLike): Output data with shape ``(n_samples_Y,)``.
+            X (ArrayLike): Input data. The leading axis is the sample axis.
+            y (ArrayLike): Output data. The leading axis is the sample axis.
             rng_key: A pseudo-random number generator key. By default, an internal key
                 is used and split as needed. The key is only used for initialization if
                 the internal SVI state is not yet set.
-            **kwargs: Additional arguments passed to the model. All array-like values
-                are expected to be JAX arrays.
+            **kwargs: Additional arguments passed to the model.
 
         Returns:
             - Updated SVI state after the training step.
@@ -998,8 +991,8 @@ class ImpactModel(BaseModel):
             :external:class:`~numpyro.infer.mcmc.MCMC` instance from `NumPyro`_.
 
         Args:
-            X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
-            y (ArrayLike): Output data with shape ``(n_samples_Y,)``.
+            X (ArrayLike): Input data. The leading axis is the sample axis.
+            y (ArrayLike): Output data. The leading axis is the sample axis.
             num_steps: Number of steps for variational inference optimization. Ignored
                 if the inference method is MCMC.
             num_samples: The number of posterior samples to draw. Ignored if the
@@ -1008,8 +1001,7 @@ class ImpactModel(BaseModel):
                 is used and split as needed.
             progress: Whether to display a progress bar. Ignored if the inference method
                 is MCMC.
-            **kwargs: Additional arguments passed to the model. All array-like values
-                are expected to be JAX arrays.
+            **kwargs: Additional arguments passed to the model.
 
         Returns:
             The fitted model instance, enabling method chaining.
@@ -1093,11 +1085,11 @@ class ImpactModel(BaseModel):
         then posterior samples are drawn from the fitted model.
 
         Args:
-            X (ArrayLike | ArrayLoader): Input data, either an array-like of shape
-                ``(n_samples, n_features)`` or a data loader that holds all array-like
+            X (ArrayLike | ArrayLoader): Input data. If array-like, the leading axis is
+                the sample axis. Alternatively, a data loader that holds all array-like
                 objects and handles batching internally.
-            y (ArrayLike | None): Output data with shape ``(n_samples_Y,)``. Must be
-                ``None`` if ``X`` is a data loader.
+            y (ArrayLike | None): Output data. The leading axis is the sample axis.
+                Must be ``None`` if ``X`` is a data loader.
             num_samples: The number of posterior samples to draw.
             rng_key: A pseudo-random number generator key. By default, an internal key
                 is used and split as needed.
@@ -1109,8 +1101,7 @@ class ImpactModel(BaseModel):
             epochs: The number of epochs for variational inference optimization.
             shuffle: Whether to shuffle the data at each epoch. Ignored if ``X`` is a
                 data loader.
-            **kwargs: Additional arguments passed to the model. All array-like values
-                are expected to be JAX arrays.
+            **kwargs: Additional arguments passed to the model.
 
         Returns:
             The fitted model instance, enabling method chaining.
@@ -1294,7 +1285,7 @@ class ImpactModel(BaseModel):
             parallelism.
 
         Args:
-            X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
+            X (ArrayLike): Input data. The leading axis is the sample axis.
             intervention: A dictionary mapping sample sites to their corresponding
                 intervention values. Interventions enable counterfactual analysis by
                 modifying the specified sample sites during prediction (posterior
@@ -1311,8 +1302,7 @@ class ImpactModel(BaseModel):
                 :attr:`~aimz.ImpactModel.param_output` and deterministic sites.
             return_datatree: If ``True``, return a :external:class:`~xarray.DataTree`;
                 otherwise return a :class:`dict`.
-            **kwargs: Additional arguments passed to the model. All array-like values
-                are expected to be JAX arrays.
+            **kwargs: Additional arguments passed to the model.
 
         Returns:
             Posterior predictive samples. Posterior samples are included if available.
@@ -1387,8 +1377,8 @@ class ImpactModel(BaseModel):
         and executed concurrently.
 
         Args:
-            X (ArrayLike | ArrayLoader): Input data, either an array-like of shape
-                ``(n_samples, n_features)`` or a data loader that holds all array-like
+            X (ArrayLike | ArrayLoader): Input data. If array-like, the leading axis is
+                the sample axis. Alternatively, a data loader that holds all array-like
                 objects and handles batching internally.
             intervention: A dictionary mapping sample sites to their corresponding
                 intervention values. Interventions enable counterfactual analysis by
@@ -1415,8 +1405,7 @@ class ImpactModel(BaseModel):
                 subdirectory will be generated within this directory to store the
                 outputs. Outputs are saved in the Zarr format.
             progress: Whether to display a progress bar.
-            **kwargs: Additional arguments passed to the model. All array-like values
-                are expected to be JAX arrays.
+            **kwargs: Additional arguments passed to the model.
 
         Returns:
             Posterior predictive samples. Posterior samples are included if available.
@@ -1652,11 +1641,11 @@ class ImpactModel(BaseModel):
         decoupled and executed concurrently.
 
         Args:
-            X (ArrayLike | ArrayLoader): Input data, either an array-like of shape
-                ``(n_samples, n_features)`` or a data loader that holds all array-like
+            X (ArrayLike | ArrayLoader): Input data. If array-like, the leading axis is
+                the sample axis. Alternatively, a data loader that holds all array-like
                 objects and handles batching internally.
-            y (ArrayLike | None): Output data with shape ``(n_samples_Y,)``. Must be
-                ``None`` if ``X`` is a data loader.
+            y (ArrayLike | None): Output data. The leading axis is the sample axis. Must
+                be ``None`` if ``X`` is a data loader.
             batch_size: The batch size for data loading during log-likelihood
                 computation. It also determines the chunk size used to store the
                 samples. If ``None``, it is determined automatically based on the input
@@ -1668,8 +1657,7 @@ class ImpactModel(BaseModel):
                 subdirectory will be generated within this directory to store the
                 outputs. Outputs are saved in the Zarr format.
             progress: Whether to display a progress bar.
-            **kwargs: Additional arguments passed to the model. All array-like values
-                are expected to be JAX arrays.
+            **kwargs: Additional arguments passed to the model.
 
         Returns:
             Log-likelihood values. Posterior samples are included if available.

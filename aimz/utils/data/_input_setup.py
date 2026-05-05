@@ -20,8 +20,8 @@ import logging
 from typing import TYPE_CHECKING, NamedTuple
 from warnings import warn
 
+import numpy as np
 from jax.typing import ArrayLike
-from sklearn.utils.validation import check_array, check_X_y
 
 from aimz.utils._kwargs import _group_kwargs
 from aimz.utils.data import ArrayDataset, ArrayLoader
@@ -52,12 +52,11 @@ def _setup_inputs(
     """Prepare an dataloader and grouped keyword arguments.
 
     Args:
-        X (ArrayLike | ArrayLoader): Input data, either an array-like of shape
-            ``(n_samples, n_features)`` or a data loader that holds all array-like
-            objects and handles batching internally; if a data loader is passed,
-            ``rng_key``, ``batch_size`` and ``shuffle`` are ignored.
-        y (ArrayLike | None): Output data with shape ``(n_samples_Y,)``. Must be
-            ``None`` if ``X`` is a data loader.
+        X (ArrayLike | ArrayLoader): Input data. If array-like, the leading axis is
+            the sample axis. Alternatively, a data loader that holds all array-like
+            objects and handles batching internally.
+        y (ArrayLike | None): Output data. The leading axis is the sample axis. Must
+            be ``None`` if ``X`` is a data loader.
         rng_key: A pseudo-random number generator key.
         batch_size: The size of batches for data loading.
         num_samples: Number of samples to draw, which affects the size of batches.
@@ -65,8 +64,7 @@ def _setup_inputs(
         device: The device or sharding specification to which the data should be moved.
             By default, no device transfer is applied. If ``X`` is a data loader, it
             will override the device setting of the loader.
-        **kwargs: Additional arguments passed to the model. All array-like values are
-            expected to be JAX arrays.
+        **kwargs: Additional arguments passed to the model.
 
     Returns:
         - The data loader for batching.
@@ -75,10 +73,15 @@ def _setup_inputs(
     kwargs_array, kwargs_extra = _group_kwargs(kwargs)
 
     if isinstance(X, ArrayLike):
-        if y is None:
-            X = check_array(X)
-        else:
-            X, y = check_X_y(X, y, force_writeable=True, y_numeric=True)
+        X = np.asarray(X)
+        if X.ndim == 0:
+            msg = "`X` must have at least 1 dimension."
+            raise ValueError(msg)
+        if y is not None:
+            y = np.asarray(y)
+            if y.ndim == 0:
+                msg = "`y` must have at least 1 dimension."
+                raise ValueError(msg)
         num_devices = device.num_devices if device else 1
         if batch_size is None:
             if len(X) * num_samples < MAX_ELEMENTS:

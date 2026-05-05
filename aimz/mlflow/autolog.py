@@ -32,7 +32,8 @@ from mlflow.utils.autologging_utils import (
     resolve_input_example_and_signature,
     safe_patch,
 )
-from sklearn.utils.validation import _is_arraylike
+
+from aimz.utils._validation import _is_arraylike
 
 if TYPE_CHECKING:
     from numpyro.infer.svi import SVIRunResult

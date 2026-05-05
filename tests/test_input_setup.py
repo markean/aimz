@@ -15,6 +15,7 @@
 """Tests for :func:`~aimz.utils.data._input_setup._setup_inputs`."""
 
 import jax.numpy as jnp
+import pytest
 from jax import local_device_count, make_mesh, random
 from jax.sharding import AxisType, NamedSharding, PartitionSpec
 
@@ -48,3 +49,27 @@ def test_batch_size_capped_when_exceeding_threshold() -> None:
     # Round down to nearest multiple of num_devices: 1 - 1 % num_devices = 0.
     # Floor at num_devices to avoid zero: max(0, num_devices) = num_devices.
     assert loader.batch_size == num_devices
+
+
+def test_x_zero_dim_raises() -> None:
+    """A 0-dimensional ``X`` raises ``ValueError``."""
+    with pytest.raises(ValueError, match=r"`X` must have at least 1 dimension."):
+        _setup_inputs(
+            X=jnp.array(1.0),
+            y=None,
+            rng_key=random.key(0),
+            batch_size=None,
+            num_samples=1,
+        )
+
+
+def test_y_zero_dim_raises() -> None:
+    """A 0-dimensional ``y`` raises ``ValueError``."""
+    with pytest.raises(ValueError, match=r"`y` must have at least 1 dimension."):
+        _setup_inputs(
+            X=jnp.ones((4, 2)),
+            y=jnp.array(1.0),
+            rng_key=random.key(0),
+            batch_size=None,
+            num_samples=1,
+        )

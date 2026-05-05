@@ -28,7 +28,12 @@ if TYPE_CHECKING:
 
 
 class ArrayDataset:
-    """Dataset for named arrays."""
+    """Dataset for named arrays.
+
+    Arrays are stored as-is by default, preserving whichever backend (NumPy or JAX) the
+    caller supplied. Pass ``to_jax=True`` to convert all arrays to JAX arrays at
+    construction time.
+    """
 
     def __init__(
         self,
@@ -54,7 +59,7 @@ class ArrayDataset:
             raise ValueError(msg)
         lengths = {len(cast("Sized", arr)) for arr in arrays.values()}
         if len(lengths) != 1:
-            msg = "All arrays must have the same length."
+            msg = "All arrays must have the same leading-axis size."
             raise ValueError(msg)
         (self.length,) = lengths
         if to_jax:

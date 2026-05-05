@@ -46,3 +46,4 @@ def test_rng_key_consistency(synthetic_data: tuple[Array, Array], vi: SVI) -> No
     assert jnp.allclose(im.rng_key, rng_key)
     im.predict(X=X, rng_key=rng_key, batch_size=3, progress=False)
     assert jnp.allclose(im.rng_key, rng_key)
+    im.cleanup()

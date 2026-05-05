@@ -22,7 +22,6 @@ from numpyro import deterministic, sample
 from numpyro.infer import MCMC, SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
 from numpyro.optim import Adam
-from sklearn.exceptions import DataConversionWarning
 
 from aimz import ImpactModel
 from aimz._exceptions import KernelValidationError
@@ -183,26 +182,6 @@ def test_fit_raises_for_mcmc_inference(mcmc: MCMC) -> None:
     """Calling `.fit()` with MCMC inference raises a TypeError."""
     im = ImpactModel(lm, rng_key=random.key(42), inference=mcmc)
     with pytest.raises(TypeError):
-        im.fit(X=jnp.zeros((3, 2)), y=jnp.zeros((3, 1)), batch_size=3)
-
-
-def test_fit_unexpected_y_shape() -> None:
-    """Calling `.fit()` with an unexpected shape of `y` raises a warning."""
-
-    def kernel(X: Array, y: Array | None = None) -> None:
-        sample("y", dist.Normal(0.0, 1.0), obs=y)
-
-    im = ImpactModel(
-        kernel,
-        rng_key=random.key(42),
-        inference=SVI(
-            kernel,
-            guide=AutoNormal(kernel),
-            optim=Adam(step_size=1e-3),
-            loss=Trace_ELBO(),
-        ),
-    )
-    with pytest.warns(DataConversionWarning):
         im.fit(X=jnp.zeros((3, 2)), y=jnp.zeros((3, 1)), batch_size=3)
 
 

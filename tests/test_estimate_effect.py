@@ -151,3 +151,23 @@ def test_estimate_effect_on_batch_dict(
     )
 
     assert expected_group in effect.children
+
+
+def test_estimate_effect_group_mismatch_raises(
+    synthetic_data: tuple[Array, Array],
+    im_lm_svi_fitted: ImpactModel,
+) -> None:
+    """Mismatched groups between baseline and intervention raise ``ValueError``."""
+    X, _ = synthetic_data
+
+    dt_baseline = im_lm_svi_fitted.predict_on_batch(X)
+    dt_intervention = im_lm_svi_fitted.predict_on_batch(X, in_sample=False)
+
+    with pytest.raises(
+        ValueError,
+        match=r"Group 'posterior_predictive' not found in `dt_intervention`.",
+    ):
+        im_lm_svi_fitted.estimate_effect(
+            output_baseline=dt_baseline,
+            output_intervention=dt_intervention,
+        )

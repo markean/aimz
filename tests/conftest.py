@@ -95,12 +95,8 @@ def vi(request: pytest.FixtureRequest) -> SVI:
 def lm(X: Array, y: Array | None = None) -> None:
     """Linear regression model."""
     n_features = X.shape[1]
-
-    # Priors for weights and bias
     w = sample("w", dist.Normal(jnp.zeros(n_features), jnp.ones(n_features)))
     b = sample("b", dist.Normal(0, 1))
-
-    # Likelihood
     mu = jnp.dot(X, w) + b
     sigma = sample("sigma", dist.Exponential(1.0))
     sample("y", dist.Normal(mu, sigma), obs=y)
@@ -109,15 +105,24 @@ def lm(X: Array, y: Array | None = None) -> None:
 def lm_with_kwargs_array(X: Array, c: Array, y: Array | None = None) -> None:
     """Linear regression model with an extra array argument."""
     n_features = X.shape[1]
-
-    # Priors for weights and bias
     w = sample("w", dist.Normal(jnp.zeros(n_features), jnp.ones(n_features)))
     b = sample("b", dist.Normal(0, 1))
-
-    # Likelihood
     mu = jnp.dot(X, w) + b + c
     sigma = sample("sigma", dist.Exponential(1.0))
     sample("y", dist.Normal(mu, sigma), obs=y)
+
+
+def mlm(X: Array, y: Array | None = None) -> None:
+    """Multivariate linear regression model."""
+    n_features = X.shape[1]
+    n_targets = 2
+    w = sample(
+        "w",
+        dist.Normal().expand([n_features, n_targets]).to_event(2),
+    )
+    sigma = sample("sigma", dist.Exponential())
+    with numpyro.plate("data", X.shape[0]):
+        sample("y", dist.Normal(X @ w, sigma).to_event(1), obs=y)
 
 
 def latent_variable_model(X: Array, y: Array | None = None) -> None:
