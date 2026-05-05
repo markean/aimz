@@ -17,7 +17,8 @@
 from typing import NamedTuple
 
 from jax.typing import ArrayLike
-from sklearn.utils.validation import _is_arraylike
+
+from aimz.utils._validation import _is_arraylike
 
 
 def _group_kwargs(kwargs: dict) -> tuple[NamedTuple, NamedTuple]:

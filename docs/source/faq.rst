@@ -111,10 +111,11 @@ Future recipes or example galleries may be provided separately, but the library 
 
 What kinds of data can aimz handle?
 -----------------------------------
-Current functionality is optimized for tall tabular array inputs: one or more two-dimensional numeric arrays of shape ``(n, d)`` (NumPy / JAX), along with a one-dimensional output variable of shape ``(n,)``.
-Multiple named arrays are supported as long as they share the same leading dimension ``n``.
-Support for other modalities—including images, text, sequences with temporal axes, or ragged/nested structures—is on the roadmap.
-In some cases, these can already be adapted by reshaping to 2D during preprocessing and reversing the reshape inside the model.
+aimz accepts NumPy or JAX arrays of any shape with at least one dimension; the leading axis is treated as the sample axis.
+This covers tabular inputs (``(n, d)``), 1D inputs (``(n,)``), and higher-rank inputs such as sequences (``(n, seq_len, d)``) or images (``(n, h, w, c)``).
+Multiple named arrays are supported as long as they share the same leading-axis size.
+The output variable has the same flexibility — it can be 1D for scalar targets, 2D for multi-output regression, or higher-rank as the model requires — provided its leading axis matches the input.
+Ragged or nested structures are not currently supported.
 If native support for a specific structure is important for your use case, opening an issue helps prioritize it, and contributions are welcome.
 
 

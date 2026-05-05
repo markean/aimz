@@ -21,7 +21,6 @@ from typing import TYPE_CHECKING
 
 import jax.numpy as jnp
 from jax import Array
-from sklearn.utils.validation import check_array, check_X_y
 
 from aimz._exceptions import KernelValidationError, NotFittedError
 
@@ -33,6 +32,11 @@ if TYPE_CHECKING:
     from jax.typing import ArrayLike
 
     from aimz import ImpactModel
+
+
+def _is_arraylike(x: object) -> bool:
+    """Returns whether the input is array-like."""
+    return hasattr(x, "__len__") or hasattr(x, "shape") or hasattr(x, "__array__")
 
 
 def _check_is_fitted(model: ImpactModel, msg: str | None = None) -> None:
@@ -197,22 +201,29 @@ def _validate_X_y_to_jax(
     when available.
 
     Args:
-        X (ArrayLike): Input data with shape ``(n_samples_X, n_features)``.
-        y (ArrayLike): Output data with shape ``(n_samples_Y,)``.
+        X (ArrayLike): Input data. The leading axis is the sample axis.
+        y (ArrayLike): Output data. The leading axis is the sample axis.
 
     Returns:
         Validated JAX arrays, returning ``X`` if only X is provided, or a tuple
         ``(X, y)`` otherwise.
     """
+    device_x = X.device if isinstance(X, Array) and X.committed else None
+    X = jnp.asarray(X, device=device_x)
+    if X.ndim == 0:
+        msg = "`X` must have at least 1 dimension."
+        raise ValueError(msg)
+
     if y is None:
-        device_x = X.device if isinstance(X, Array) and X.committed else None
+        return X
 
-        return jnp.asarray(check_array(X), device=device_x)
+    device_y = y.device if isinstance(y, Array) and y.committed else None
+    y = jnp.asarray(y, device=device_y)
+    if y.ndim == 0:
+        msg = "`y` must have at least 1 dimension."
+        raise ValueError(msg)
+    if len(X) != len(y):
+        msg = "`X` and `y` must have the same leading-axis size."
+        raise ValueError(msg)
 
-    device_x, device_y = (
-        arr.device if isinstance(arr, Array) and arr.committed else None
-        for arr in (X, y)
-    )
-    X, y = check_X_y(X, y, force_writeable=True, y_numeric=True)
-
-    return jnp.asarray(X, device=device_x), jnp.asarray(y, device=device_y)
+    return X, y

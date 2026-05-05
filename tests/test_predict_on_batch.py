@@ -24,6 +24,7 @@ from numpyro.optim import Adam
 
 from aimz import ImpactModel
 from aimz._exceptions import NotFittedError
+from tests.conftest import mlm
 
 
 def test_model_not_fitted() -> None:
@@ -104,3 +105,41 @@ def test_predict_on_batch_lm_with_kwargs_array(
         return_sites=["y"],
         return_datatree=False,
     )
+
+
+def test_predict_on_batch_x_zero_dim_raises(
+    im_lm_svi_fitted: ImpactModel,
+) -> None:
+    """A 0-dimensional ``X`` raises ``ValueError``."""
+    with pytest.raises(ValueError, match=r"`X` must have at least 1 dimension."):
+        im_lm_svi_fitted.predict_on_batch(X=1.0)
+
+
+def test_predict_on_batch_mlm() -> None:
+    """`.predict_on_batch()` works with a multivariate linear regression model."""
+    n_obs, n_features, n_targets = 100, 3, 2
+    rng_key = random.key(42)
+    rng_key, rng_subkey = random.split(rng_key)
+    X = random.normal(rng_subkey, (n_obs, n_features))
+    rng_key, rng_subkey = random.split(rng_key)
+    w = random.normal(rng_subkey, (n_features, n_targets))
+    rng_key, rng_subkey = random.split(rng_key)
+    e = random.normal(rng_subkey, (n_obs, n_targets))
+    y = X @ w + e
+
+    rng_key, rng_subkey = random.split(rng_key)
+    im = ImpactModel(
+        mlm,
+        rng_key=rng_subkey,
+        inference=SVI(
+            mlm,
+            guide=AutoNormal(mlm),
+            optim=Adam(step_size=1e-2),
+            loss=Trace_ELBO(),
+        ),
+    )
+    im.fit_on_batch(X=X, y=y)
+    out = im.predict_on_batch(X=X)
+
+    assert out["posterior_predictive"]["y"].sizes["y_dim_0"] == n_obs
+    assert out["posterior_predictive"]["y"].sizes["y_dim_1"] == n_targets

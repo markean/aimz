@@ -34,10 +34,13 @@ class TestArrayDataset:
             ArrayDataset()
 
     def test_same_lengths(self) -> None:
-        """All arrays must have the same length; otherwise, raise a ValueError."""
+        """Validate that all arrays share the same leading-axis size."""
         X = jnp.array([[1, 2, 3], [4, 5, 6]])
         y = jnp.array([1, 2, 3])
-        with pytest.raises(ValueError, match=r"All arrays must have the same length."):
+        with pytest.raises(
+            ValueError,
+            match=r"All arrays must have the same leading-axis size.",
+        ):
             ArrayDataset(X=X, y=y)
 
     def test_no_jax_conversion(self) -> None:
@@ -189,3 +192,4 @@ class TestArrayLoader:
             "Posterior predictive samples from fitting with raw arrays vs. "
             "fitting with a data loader can match, if the rng_key is properly set."
         )
+        ImpactModel.cleanup_models()

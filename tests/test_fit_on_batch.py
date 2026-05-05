@@ -67,3 +67,44 @@ def test_fit_mcmc(synthetic_data: tuple[Array, Array], mcmc: MCMC) -> None:
     im = ImpactModel(lm, rng_key=random.key(42), inference=mcmc)
     im.fit_on_batch(X=X, y=y)
     assert _is_fitted(im), "Model fitting check failed"
+
+
+def test_fit_on_batch_zero_dim_raises(synthetic_data: tuple[Array, Array]) -> None:
+    """A 0-dimensional ``X`` or ``y`` raises ``ValueError``."""
+    X, y = synthetic_data
+    im = ImpactModel(
+        lm,
+        rng_key=random.key(42),
+        inference=SVI(
+            lm,
+            guide=AutoNormal(lm),
+            optim=Adam(step_size=1e-3),
+            loss=Trace_ELBO(),
+        ),
+    )
+    with pytest.raises(ValueError, match=r"`X` must have at least 1 dimension."):
+        im.fit_on_batch(X=1.0, y=y)
+    with pytest.raises(ValueError, match=r"`y` must have at least 1 dimension."):
+        im.fit_on_batch(X=X, y=1.0)
+
+
+def test_fit_on_batch_length_mismatch_raises(
+    synthetic_data: tuple[Array, Array],
+) -> None:
+    """Mismatched leading-axis sizes between ``X`` and ``y`` raise ``ValueError``."""
+    X, y = synthetic_data
+    im = ImpactModel(
+        lm,
+        rng_key=random.key(42),
+        inference=SVI(
+            lm,
+            guide=AutoNormal(lm),
+            optim=Adam(step_size=1e-3),
+            loss=Trace_ELBO(),
+        ),
+    )
+    with pytest.raises(
+        ValueError,
+        match=r"`X` and `y` must have the same leading-axis size.",
+    ):
+        im.fit_on_batch(X=X, y=y[:-1])

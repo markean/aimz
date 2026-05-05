@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+
+- Input arrays of any shape with at least one dimension are now accepted; the leading axis is treated as the sample axis. Previously, `X` was required to be 2D and `y` 1D, and `y` with shape `(n, 1)` triggered a `DataConversionWarning` from `scikit-learn` ([#199](https://github.com/markean/aimz/issues/199)).
+
+### Removed
+
+- The `scikit-learn` dependency ([#199](https://github.com/markean/aimz/issues/199)).
+
 ## [v0.11.0](https://github.com/markean/aimz/releases/tag/v0.11.0) - 2026-04-29
 
 ### Changed

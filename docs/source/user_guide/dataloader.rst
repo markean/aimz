@@ -9,8 +9,8 @@ Built-in Dataset & Loader
 :class:`~aimz.utils.data.ArrayDataset`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 It wraps one or more named arrays passed as keyword-only arguments.
-All arrays must share the same leading dimension (the sample axis).
-By default inputs are converted to JAX arrays (set ``to_jax=False`` to skip conversion).
+All arrays must share the same leading-axis size (the sample axis).
+By default arrays are stored as supplied; pass ``to_jax=True`` to convert to JAX arrays at construction.
 
 .. code-block:: python
 
@@ -54,16 +54,33 @@ It consumes an :class:`~aimz.utils.data.ArrayDataset` and produces an iterator o
 
 
 .. note::
-    :class:`~aimz.utils.data.ArrayDataset` and :class:`~aimz.utils.data.ArrayLoader` are lightweight utilities for working with in-memory (JAX) arrays.
+    :class:`~aimz.utils.data.ArrayDataset` and :class:`~aimz.utils.data.ArrayLoader` are lightweight utilities for working with in-memory arrays.
     They are intentionally minimal and primarily used internally to enable batching, optional shuffling, and (when required) padding for device sharding.
     The user can use them directly, but they are not meant to be a comprehensive data pipeline abstraction.
     For out-of-core datasets, implement a generator that streams data in chunks from disk or cloud storage.
 
 
+Storage and Device Transfer
+---------------------------
+When raw arrays are passed to high-level methods like :meth:`~aimz.ImpactModel.fit` or :meth:`~aimz.ImpactModel.predict`, aimz stores them as NumPy arrays on host memory and transfers one batch at a time to the device during iteration.
+JAX arrays passed in are converted to NumPy at this stage; their original device placement is not preserved.
+This allows datasets larger than device memory to be processed without modification.
+You can keep arrays on device by constructing a loader explicitly with ``to_jax=True``:
+
+.. code-block:: python
+
+   loader = ArrayLoader(
+       ArrayDataset(X=X, y=y, to_jax=True),
+       rng_key=random.key(0),
+       batch_size=batch_size,
+   )
+   im.predict(loader)
+
+
 Integration with High-Level Methods
 -----------------------------------
 High-level methods (:meth:`~aimz.ImpactModel.fit`, :meth:`~aimz.ImpactModel.predict`) accept either raw arrays (``X``, ``y``, etc.) or an :class:`~aimz.utils.data.ArrayLoader`.
-Passing a loader gives finer control over batch size, ordering, and shuffling.
+Passing a loader gives finer control over batch size, ordering, shuffling, and storage backend (see above).
 Any model-level device or sharding configuration takes precedence over the loader's ``device`` argument.
 If the user pass raw arrays instead, :meth:`~aimz.ImpactModel.fit` may internally construct a temporary loader with heuristic batching.
 
