@@ -44,6 +44,21 @@ def test_model_not_fitted() -> None:
         im.log_likelihood(None, None)
 
 
+@pytest.mark.filterwarnings("ignore::UserWarning")
+def test_empty_posterior(
+    synthetic_data: tuple[Array, Array],
+    im_lm_svi_fitted: ImpactModel,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Empty posterior produces a single-draw log-likelihood without crashing."""
+    X, y = synthetic_data
+    monkeypatch.setattr(im_lm_svi_fitted, "_posterior", None)
+
+    out = im_lm_svi_fitted.log_likelihood(X=X, y=y, progress=False)
+
+    assert out.log_likelihood["y"].sizes["draw"] == 1
+
+
 class TestBatchSize:
     """Test class related to batch size specification."""
 
