@@ -1690,6 +1690,7 @@ class ImpactModel(BaseModel):
         )
 
         site = self.param_output
+        draws = self._num_samples if self.posterior else 1
         pbar = tqdm(
             desc=(f"Computing log-likelihood of {site}..."),
             total=len(dataloader),
@@ -1707,6 +1708,9 @@ class ImpactModel(BaseModel):
         )
         worker_err: tuple | None = None
         success = False
+        # Seed once so tracing succeeds even when posterior is empty or only partially
+        # covers latent sites.
+        kernel = seed(self.kernel, rng_seed=self.rng_key)
         try:
             for batch, n_pad in dataloader:
                 kwargs_batch = [
@@ -1716,10 +1720,8 @@ class ImpactModel(BaseModel):
                 ]
                 arr = device_get(
                     self._fn_log_likelihood(
-                        # Although computing the log-likelihood is deterministic, the
-                        # model still needs to be seeded in order to trace its graph.
-                        seed(self.kernel, rng_seed=self.rng_key),
-                        self.posterior,
+                        kernel,
+                        self.posterior or {},
                         self.param_input,
                         site,
                         kwargs_array._fields + kwargs_extra._fields,
@@ -1729,7 +1731,6 @@ class ImpactModel(BaseModel):
                     ),
                 )
                 if site not in zarr_arr:
-                    draws = self._num_samples if self.posterior else 1
                     zarr_arr[site] = zarr_group.create_array(
                         name=site,
                         shape=(draws, 0, *arr.shape[2:]),

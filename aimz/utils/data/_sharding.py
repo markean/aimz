@@ -21,9 +21,9 @@ from typing import TYPE_CHECKING
 
 from jax import Array, jit, shard_map
 from jax.sharding import PartitionSpec
-from numpyro.infer import log_likelihood as log_lik
 
 from aimz.sampling._forward import _sample_forward
+from aimz.utils._log_likelihood import _log_likelihood
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -147,9 +147,8 @@ def _create_sharded_log_likelihood(
 
     Returns:
         A sharded function that takes the following arguments:
-            - kernel (Callable): A probabilistic model with NumPyro primitives optimized
-                with variational inference.
-            - posterior_samples (dict): A dictionary of posterior samples.
+            - kernel (Callable): A probabilistic model with NumPyro primitives.
+            - samples (dict): A dictionary of posterior samples to condition on.
             - param_input (str): The name of the parameter in the ``kernel`` for the
                 input data.
             - param_output (str): The name of the parameter in the ``kernel`` for the
@@ -159,23 +158,22 @@ def _create_sharded_log_likelihood(
             - y (Array): Output data.
             - *args (tuple): Additional arguments constructed from the original keyword
                 arguments (both sharded and non-sharded).
-
     """
 
     def f(
         kernel: Callable,
-        posterior_samples: dict,
+        samples: dict[str, Array],
         param_input: str,
         param_output: str,
         kwargs_key: tuple[str, ...],
         X: Array,
         y: Array,
-        *args: tuple,
+        *args: object,
     ) -> Array:
-        return log_lik(
-            kernel,
-            posterior_samples=posterior_samples,
-            **{
+        return _log_likelihood(
+            model=kernel,
+            samples=samples,
+            model_kwargs={
                 param_input: X,
                 param_output: y,
                 **dict(zip(kwargs_key, args, strict=True)),
@@ -209,7 +207,7 @@ def _create_sharded_log_likelihood(
             mesh=mesh,
             in_specs=(
                 None,  # kernel
-                None,  # posterior_samples
+                PartitionSpec(),  # samples
                 None,  # param_input
                 None,  # param_output
                 None,  # kwargs_key
@@ -221,5 +219,6 @@ def _create_sharded_log_likelihood(
                 ),
             ),
             out_specs=PartitionSpec(None, axis),
+            check_vma=False,
         )(f),
     )
