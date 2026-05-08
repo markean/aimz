@@ -19,17 +19,19 @@
 
 ## Overview
 
-aimz is a Python library for scalable probabilistic impact modeling—estimating how interventions affect outcomes while quantifying uncertainty. It provides an intuitive interface for fitting Bayesian models, drawing posterior samples, generating large-scale posterior predictive simulations, and estimating intervention effects with minimal boilerplate.
+aimz is a Python library for scalable probabilistic impact modeling—estimating how interventions affect outcomes while quantifying uncertainty.
+
+It provides a high-level, object-oriented interface on top of [NumPyro](https://num.pyro.ai/en/stable/) and [JAX](https://jax.readthedocs.io/en/latest/) for building, fitting, and scaling Bayesian models: a user-defined NumPyro model is wrapped as a "kernel" inside a single class, augmented with capabilities for scalable predictive sampling, structured outputs, and experiment tracking.
 
 ## Key capabilities
 
-- **Flexible model specification:**
-Built on [NumPyro](https://num.pyro.ai/en/stable/) and [JAX](https://jax.readthedocs.io/en/latest/), bring a NumPyro model as a "kernel"—aimz does not enforce a fixed architecture.
+- **Object-oriented interface for NumPyro models:**
+Bring any NumPyro model as a "kernel" and access `fit`, `predict`, `sample`, and related methods through a single class—aimz does not enforce a fixed architecture.
 - **Scalable predictive sampling:**
-JIT-compiled, sharded sampling streams results to chunked [Zarr](https://zarr.readthedocs.io/en/stable/) stores, enabling large-scale posterior predictive simulations.
+JIT-compiled, sharded sampling streams results to chunked [Zarr](https://zarr.readthedocs.io/en/stable/) stores, enabling large-scale posterior predictive simulations that do not need to fit in memory.
 - **Structured outputs:**
 Predictions, samples, and effect estimates are materialized as [Xarray](https://xarray.dev/) objects backed by Zarr, integrating cleanly with the scientific Python ecosystem.
-- **Intervention handling:**
+- **Intervention handling and impact modeling:**
 Specify interventions declaratively and estimate effects from posterior predictive distributions.
 - **Experiment tracking:**
 [MLflow](https://mlflow.org/) integration for logging runs, parameters, metrics, and model artifacts with full lineage.
