@@ -113,7 +113,7 @@ class ArrayLoader:
         # Pad using NumPy (prevents whole-dataset transfers to GPU)
         return np.pad(x, pad_width=pad_width, mode="edge")
 
-    def __iter__(self) -> Iterator[tuple[dict[str, Array], int]]:
+    def __iter__(self) -> Iterator[tuple[dict[str, Array | npt.NDArray], int]]:
         """Iterate over the dataset in batches.
 
         Yields:
