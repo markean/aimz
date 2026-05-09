@@ -178,7 +178,7 @@ def _create_sharded_log_likelihood(
                 param_output: y,
                 **dict(zip(kwargs_key, args, strict=True)),
             },
-        ).get(param_output)
+        )[param_output]
 
     if mesh is None:
         return partial(
