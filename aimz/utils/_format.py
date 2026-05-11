@@ -17,11 +17,13 @@
 import datetime
 from collections.abc import Mapping
 from importlib.metadata import version
+from pathlib import Path
 
 import numpy as np
 import numpy.typing as npt
 import xarray as xr
 from jax import Array
+from xarray import open_zarr
 
 
 def _make_attrs() -> dict[str, str]:
@@ -34,6 +36,42 @@ def _make_attrs() -> dict[str, str]:
         "created_at": datetime.datetime.now(datetime.UTC).isoformat(),
         "aimz_version": version("aimz"),
     }
+
+
+def _build_datatree(
+    output_dir: Path,
+    output_subdir: Path,
+    group: str,
+    posterior: Mapping[str, Array | npt.NDArray] | None = None,
+) -> xr.DataTree:
+    """Build the aimz output DataTree from a Zarr group.
+
+    Args:
+        output_dir: Top-level output directory; stored on the root tree's attrs.
+        output_subdir: Subdirectory holding the Zarr group; read with
+            :external:func:`~xarray.open_zarr` and stored on the group's attrs.
+        group: Group name to attach the loaded dataset under (e.g.
+            ``"log_likelihood"``, ``"prior_predictive"``).
+        posterior: Optional posterior samples; when provided, added as a ``"posterior"``
+            subtree before ``group``.
+
+    Returns:
+        A DataTree rooted at ``"root"`` with the loaded dataset attached under ``group``
+        and, optionally, a ``"posterior"`` subtree.
+    """
+    ds = open_zarr(output_subdir, consolidated=False).expand_dims(dim="chain", axis=0)
+    ds = ds.assign_coords(
+        {k: np.arange(ds.sizes[k]) for k in ds.sizes},
+    ).assign_attrs(_make_attrs())
+
+    out = xr.DataTree(name="root")
+    if posterior:
+        out["posterior"] = _dict_to_datatree(posterior)
+    out[group] = xr.DataTree(ds)
+    out[group].attrs["output_dir"] = str(output_subdir)
+    out.attrs["output_dir"] = str(output_dir)
+
+    return out
 
 
 def _dict_to_datatree(data: Mapping[str, Array | npt.NDArray]) -> xr.DataTree:
