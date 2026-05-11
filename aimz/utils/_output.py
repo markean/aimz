@@ -17,9 +17,15 @@
 from __future__ import annotations
 
 import logging
+from os import cpu_count
 from queue import Queue
 from threading import Thread
 from typing import TYPE_CHECKING, cast
+
+try:
+    import psutil
+except ImportError:
+    psutil: ModuleType | None = None
 
 from zarr import open_group
 
@@ -28,8 +34,31 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
+    from types import ModuleType
 
     from zarr import Array
+
+
+_QUEUE_SIZE_MAX = 128
+_QUEUE_SIZE_FALLBACK_CAP = 4
+
+
+def _determine_writer_queue_size(num_items: int, item_nbytes: int) -> int:
+    """Determine the writer queue size from workload and host-memory bounds.
+
+    Args:
+        num_items: Total number of items the producer will emit.
+        item_nbytes: Bytes the producer commits to the queue(s) per iteration.
+
+    Returns:
+        The writer queue size.
+    """
+    if psutil is None:
+        queue_size = min(cpu_count() or 1, _QUEUE_SIZE_FALLBACK_CAP)
+    else:
+        queue_size = psutil.virtual_memory().available // item_nbytes
+
+    return max(1, min(_QUEUE_SIZE_MAX, num_items, queue_size))
 
 
 def _writer(site: str, queue: Queue, group_path: Path, error_queue: Queue) -> None:

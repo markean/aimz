@@ -20,7 +20,6 @@ import contextlib
 import logging
 from datetime import UTC, datetime
 from inspect import signature, stack
-from os import cpu_count
 from pathlib import Path
 from shutil import rmtree
 from tempfile import TemporaryDirectory
@@ -48,15 +47,15 @@ from numpyro.handlers import do, seed, substitute, trace
 from numpyro.infer import MCMC, SVI
 from numpyro.infer.svi import SVIRunResult, SVIState
 from tqdm.auto import tqdm
-from xarray import open_zarr
 from zarr import open_group
 
 from aimz.model._core import BaseModel
 from aimz.model.kernel_spec import KernelSpec
 from aimz.sampling._forward import _sample_forward
-from aimz.utils._format import _dict_to_datatree, _make_attrs
+from aimz.utils._format import _build_datatree, _dict_to_datatree
 from aimz.utils._kwargs import _group_kwargs
 from aimz.utils._output import (
+    _determine_writer_queue_size,
     _shutdown_writer_threads,
     _start_writer_threads,
     _writer,
@@ -453,12 +452,9 @@ class ImpactModel(BaseModel):
 
         zarr_group = open_group(output_dir, mode="w")
         zarr_arr = {}
-        threads, queues, error_queue = _start_writer_threads(
-            return_sites,
-            group_path=output_dir,
-            writer=_writer,
-            queue_size=min(cpu_count() or 1, 4),
-        )
+        threads = []
+        queues = {}
+        error_queue = None
         worker_err: tuple | None = None
         success = False
         try:
@@ -481,7 +477,24 @@ class ImpactModel(BaseModel):
                         *(*kwargs_batch, *kwargs_extra),
                     ),
                 )
-                for site, arr in dict_arr.items():
+                sliced = {
+                    site: (arr[:, None] if arr.ndim == 1 else arr)[:, : -n_pad or None]
+                    for site, arr in dict_arr.items()
+                }
+                if error_queue is None:
+                    threads, queues, error_queue = _start_writer_threads(
+                        return_sites,
+                        group_path=output_dir,
+                        writer=_writer,
+                        queue_size=_determine_writer_queue_size(
+                            len(dataloader),
+                            item_nbytes=max(
+                                1,
+                                sum(int(arr.nbytes) for arr in sliced.values()),
+                            ),
+                        ),
+                    )
+                for site, arr in sliced.items():
                     if site not in zarr_arr:
                         zarr_arr[site] = zarr_group.create_array(
                             name=site,
@@ -494,15 +507,10 @@ class ImpactModel(BaseModel):
                             ),
                             dimension_names=(
                                 "draw",
-                                *tuple(
-                                    f"{site}_dim_{i}"
-                                    for i in range(max(arr.ndim - 1, 1))
-                                ),
+                                *tuple(f"{site}_dim_{i}" for i in range(arr.ndim - 1)),
                             ),
                         )
-                    queues[site].put(
-                        (arr[:, None] if arr.ndim == 1 else arr)[:, : -n_pad or None],
-                    )
+                    queues[site].put(arr)
                 if not error_queue.empty():
                     worker_err = error_queue.get()
                     break
@@ -714,21 +722,12 @@ class ImpactModel(BaseModel):
             **kwargs,
         )
 
-        ds = open_zarr(output_subdir, consolidated=False).expand_dims(
-            dim="chain",
-            axis=0,
+        return _build_datatree(
+            output_dir,
+            output_subdir=output_subdir,
+            group="prior_predictive",
+            posterior=self.posterior,
         )
-        ds = ds.assign_coords(
-            {k: np.arange(ds.sizes[k]) for k in ds.sizes},
-        ).assign_attrs(_make_attrs())
-        out = xr.DataTree(name="root")
-        out["prior_predictive"] = xr.DataTree(ds)
-        out["prior_predictive"].attrs["output_dir"] = str(output_subdir)
-        if self.posterior:
-            out["posterior"] = _dict_to_datatree(self.posterior)
-        out.attrs["output_dir"] = str(output_dir)
-
-        return out
 
     def sample(
         self,
@@ -1504,22 +1503,12 @@ class ImpactModel(BaseModel):
             **kwargs,
         )
 
-        ds = open_zarr(output_subdir, consolidated=False).expand_dims(
-            dim="chain",
-            axis=0,
+        return _build_datatree(
+            output_dir,
+            output_subdir=output_subdir,
+            group="posterior_predictive" if in_sample else "predictions",
+            posterior=self.posterior,
         )
-        ds = ds.assign_coords(
-            {k: np.arange(ds.sizes[k]) for k in ds.sizes},
-        ).assign_attrs(_make_attrs())
-        out = xr.DataTree(name="root")
-        if self.posterior:
-            out["posterior"] = _dict_to_datatree(self.posterior)
-        group = "posterior_predictive" if in_sample else "predictions"
-        out[group] = xr.DataTree(ds)
-        out[group].attrs["output_dir"] = str(output_subdir)
-        out.attrs["output_dir"] = str(output_dir)
-
-        return out
 
     def estimate_effect(
         self,
@@ -1700,12 +1689,9 @@ class ImpactModel(BaseModel):
 
         zarr_group = open_group(output_subdir, mode="w")
         zarr_arr = {}
-        threads, queues, error_queue = _start_writer_threads(
-            (site,),
-            group_path=output_subdir,
-            writer=_writer,
-            queue_size=min(cpu_count() or 1, 4),
-        )
+        threads = []
+        queues = {}
+        error_queue = None
         worker_err: tuple | None = None
         success = False
         # Seed once so tracing succeeds even when posterior is empty or only partially
@@ -1741,6 +1727,16 @@ class ImpactModel(BaseModel):
                             *tuple(f"{site}_dim_{i}" for i in range(arr.ndim - 1)),
                         ),
                     )
+                if error_queue is None:
+                    threads, queues, error_queue = _start_writer_threads(
+                        (site,),
+                        group_path=output_subdir,
+                        writer=_writer,
+                        queue_size=_determine_writer_queue_size(
+                            len(dataloader),
+                            item_nbytes=max(1, int((arr[:, : -n_pad or None]).nbytes)),
+                        ),
+                    )
                 queues[site].put(arr[:, : -n_pad or None])
                 if not error_queue.empty():
                     worker_err = error_queue.get()
@@ -1760,21 +1756,12 @@ class ImpactModel(BaseModel):
             _, exc, tb = worker_err
             raise exc.with_traceback(tb)
 
-        ds = open_zarr(output_subdir, consolidated=False).expand_dims(
-            dim="chain",
-            axis=0,
+        return _build_datatree(
+            output_dir,
+            output_subdir=output_subdir,
+            group="log_likelihood",
+            posterior=self.posterior,
         )
-        ds = ds.assign_coords(
-            {k: np.arange(ds.sizes[k]) for k in ds.sizes},
-        ).assign_attrs(_make_attrs())
-        out = xr.DataTree(name="root")
-        if self.posterior:
-            out["posterior"] = _dict_to_datatree(self.posterior)
-        out["log_likelihood"] = xr.DataTree(ds)
-        out["log_likelihood"].attrs["output_dir"] = str(output_subdir)
-        out.attrs["output_dir"] = str(output_dir)
-
-        return out
 
     def cleanup(self) -> None:
         """Clean up the temporary directory created for storing outputs.

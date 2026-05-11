@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Input arrays of any shape with at least one dimension are now accepted; the leading axis is treated as the sample axis. Previously, `X` was required to be 2D and `y` 1D, and `y` with shape `(n, 1)` triggered a `DataConversionWarning` from `scikit-learn` ([#199](https://github.com/markean/aimz/issues/199)).
 - {meth}`~aimz.ImpactModel.log_likelihood` now evaluates the kernel directly at each posterior draw, mirroring the per-draw pattern used by predictive sampling. The seeded kernel is also constructed once before the per-batch loop, so each batch reuses the same cached compilation ([#202](https://github.com/markean/aimz/issues/202)).
+- Writer-thread queue sizing used when streaming batched outputs now adapts to available host memory and the per-batch output size ([#208](https://github.com/markean/aimz/issues/208)).
 
 ### Removed
 
