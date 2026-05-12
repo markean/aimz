@@ -14,6 +14,9 @@
 
 """Tests for writer-thread queue sizing in :mod:`aimz.utils._output`."""
 
+from pathlib import Path
+from queue import Queue
+from threading import Thread
 from unittest.mock import MagicMock
 
 import pytest
@@ -22,6 +25,7 @@ from aimz.utils._output import (
     _QUEUE_SIZE_FALLBACK_CAP,
     _QUEUE_SIZE_MAX,
     _determine_writer_queue_size,
+    _writer,
 )
 
 
@@ -85,3 +89,34 @@ class TestDetermineWriterQueueSize:
         # The function's floor must keep `Queue(maxsize)` bounded.
         fake_psutil.virtual_memory.return_value.available = 1
         assert _determine_writer_queue_size(num_items=100, item_nbytes=10**18) == 1
+
+
+def test_writer_reports_open_group_failure_and_drains_queue(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Writer startup errors are surfaced without leaving queued items stuck."""
+
+    class StoreOpenError(OSError):
+        """Test exception for a store-open failure."""
+
+    def fail_open_group(*args: object, **kwargs: object) -> None:
+        """Raise an error that mimics a filesystem or store-open failure."""
+        raise StoreOpenError
+
+    monkeypatch.setattr("aimz.utils._output.open_group", fail_open_group)
+    queue = Queue(maxsize=1)
+    error_queue = Queue()
+    thread = Thread(target=_writer, args=("site", queue, tmp_path, error_queue))
+
+    thread.start()
+    queue.put(object())
+    queue.put(None)
+    queue.join()
+    thread.join(timeout=1)
+
+    assert not thread.is_alive()
+    site, exc, tb = error_queue.get_nowait()
+    assert site == "site"
+    assert isinstance(exc, StoreOpenError)
+    assert tb is not None
