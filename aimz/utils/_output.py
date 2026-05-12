@@ -76,7 +76,17 @@ def _writer(site: str, queue: Queue, group_path: Path, error_queue: Queue) -> No
         group_path: The path of the Zarr group.
         error_queue: The queue to collect errors raised by the writer thread.
     """
-    group = open_group(group_path, mode="r+")
+    try:
+        group = open_group(group_path, mode="r+")
+    except Exception as exc:
+        logger.exception("Error opening output group for site '%s'", site)
+        error_queue.put((site, exc, exc.__traceback__))
+        while True:
+            leftover = queue.get()
+            queue.task_done()
+            if leftover is None:
+                break
+        return
 
     while True:
         arr = queue.get()
@@ -89,13 +99,12 @@ def _writer(site: str, queue: Queue, group_path: Path, error_queue: Queue) -> No
         except Exception as exc:
             logger.exception("Error writing to site '%s'", site)
             error_queue.put((site, exc, exc.__traceback__))
-            # Drain remaining items including sentinel
+            # Drain remaining items including sentinel so queue.join() can finish
             while True:
                 leftover = queue.get()
                 queue.task_done()
                 if leftover is None:
                     break
-
             break
         finally:
             queue.task_done()
