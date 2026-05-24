@@ -107,7 +107,11 @@ def test_writer_reports_open_group_failure_and_drains_queue(
     monkeypatch.setattr("aimz.utils._output.open_group", fail_open_group)
     queue = Queue(maxsize=1)
     error_queue = Queue()
-    thread = Thread(target=_writer, args=("site", queue, tmp_path, error_queue))
+    thread = Thread(
+        target=_writer,
+        args=("site", queue, tmp_path, error_queue),
+        kwargs={"apply": lambda _array, _item: None},
+    )
 
     thread.start()
     queue.put(object())
