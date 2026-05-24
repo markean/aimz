@@ -56,9 +56,10 @@ from aimz.utils._format import _build_datatree, _dict_to_datatree
 from aimz.utils._kwargs import _group_kwargs
 from aimz.utils._output import (
     _determine_writer_queue_size,
+    _select_write_strategy,
     _shutdown_writer_threads,
     _start_writer_threads,
-    _writer,
+    _WriteStrategy,
 )
 from aimz.utils._validation import (
     _check_is_fitted,
@@ -415,13 +416,16 @@ class ImpactModel(BaseModel):
         samples: dict[str, Array],
         dataloader: ArrayLoader,
         pbar: tqdm,
+        strategy_cls: type[_WriteStrategy],
         **kwargs: object,
     ) -> None:
         """Draw samples using a predictive function and write them concurrently to disk.
 
-        This function iterates over batches from the provided data loader, calls the
-        specified sampling function (``sampler``) to generate predictions conditioned on
-        the provided ``samples``, and writes the resulting arrays to a Zarr group.
+        Iterates over batches from the data loader, calls ``sampler`` to generate
+        predictions conditioned on ``samples``, and writes the resulting arrays to a
+        Zarr group. How site arrays are created and enqueued is delegated to
+        ``strategy_cls`` (append vs. preallocated slices); the loop itself is
+        strategy-agnostic.
 
         Args:
             num_samples: Number of samples to draw.
@@ -435,6 +439,8 @@ class ImpactModel(BaseModel):
             dataloader: Iterator over batches of input data. Each batch must be a tuple
                 containing a dictionary of arrays and a padding value.
             pbar: Progress bar instance to display sampling progress.
+            strategy_cls: Write-strategy class deciding how site arrays are created
+                and enqueued (append vs. preallocated slices).
             **kwargs: Additional arguments passed to the model.
 
         Raises:
@@ -443,7 +449,8 @@ class ImpactModel(BaseModel):
         """
         kwargs_array, kwargs_extra = _group_kwargs(kwargs)
 
-        rng_key, *subkeys = random.split(rng_key, num=len(dataloader) + 1)
+        n_batches = len(dataloader)
+        rng_key, *subkeys = random.split(rng_key, num=n_batches + 1)
         if self._device and self._mesh:
             subkeys = device_put(
                 subkeys,
@@ -451,7 +458,11 @@ class ImpactModel(BaseModel):
             )
 
         zarr_group = open_group(output_dir, mode="w")
-        zarr_arr = {}
+        strategy = strategy_cls(
+            zarr_group=zarr_group,
+            draws=num_samples,
+            dataloader=dataloader,
+        )
         threads = []
         queues = {}
         error_queue = None
@@ -478,39 +489,24 @@ class ImpactModel(BaseModel):
                     ),
                 )
                 sliced = {
-                    site: (arr[:, None] if arr.ndim == 1 else arr)[:, : -n_pad or None]
+                    site: arr[:, None] if arr.ndim == 1 else arr[:, : -n_pad or None]
                     for site, arr in dict_arr.items()
                 }
+                strategy.create_arrays(sliced)
                 if error_queue is None:
                     threads, queues, error_queue = _start_writer_threads(
                         return_sites,
                         group_path=output_dir,
-                        writer=_writer,
+                        apply=strategy.apply,
                         queue_size=_determine_writer_queue_size(
-                            len(dataloader),
+                            n_batches,
                             item_nbytes=max(
                                 1,
                                 sum(int(arr.nbytes) for arr in sliced.values()),
                             ),
                         ),
                     )
-                for site, arr in sliced.items():
-                    if site not in zarr_arr:
-                        zarr_arr[site] = zarr_group.create_array(
-                            name=site,
-                            shape=(num_samples, 0, *arr.shape[2:]),
-                            dtype="float32" if arr.dtype == "bfloat16" else arr.dtype,
-                            chunks=(
-                                num_samples,
-                                dataloader.batch_size,
-                                *arr.shape[2:],
-                            ),
-                            dimension_names=(
-                                "draw",
-                                *tuple(f"{site}_dim_{i}" for i in range(arr.ndim - 1)),
-                            ),
-                        )
-                    queues[site].put(arr)
+                strategy.enqueue(queues, sliced)
                 if not error_queue.empty():
                     worker_err = error_queue.get()
                     break
@@ -559,6 +555,9 @@ class ImpactModel(BaseModel):
         Raises:
             TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
                 argument.
+
+        See Also:
+            :meth:`~aimz.ImpactModel.sample_prior_predictive`
         """
         X = cast("Array", _validate_X_y_to_jax(X))
 
@@ -637,8 +636,13 @@ class ImpactModel(BaseModel):
         Raises:
             TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
                 argument.
+            NotImplementedError: If a return site's axis-1 size does not match the
+                input batch size.
 
         See Also:
+            :meth:`~aimz.ImpactModel.sample_prior_predictive_on_batch` for an
+            in-memory alternative.
+
             :meth:`~aimz.ImpactModel.cleanup` to remove the temporary directory if
             created.
         """
@@ -703,6 +707,7 @@ class ImpactModel(BaseModel):
             device=self._device,
             **kwargs,
         )
+        n_batches = len(dataloader)
 
         self._sample_and_write(
             num_samples,
@@ -715,10 +720,11 @@ class ImpactModel(BaseModel):
             dataloader=dataloader,
             pbar=tqdm(
                 desc=(f"Prior predictive sampling [{', '.join(return_sites)}]"),
-                total=len(dataloader),
+                total=n_batches,
                 disable=not progress,
                 dynamic_ncols=True,
             ),
+            strategy_cls=_select_write_strategy(dataloader),
             **kwargs,
         )
 
@@ -1138,6 +1144,7 @@ class ImpactModel(BaseModel):
             device=None,
             **kwargs,
         )
+        n_batches = len(dataloader)
 
         logger.info("Performing variational inference optimization")
         losses: list[float] = []
@@ -1147,7 +1154,7 @@ class ImpactModel(BaseModel):
             pbar = tqdm(
                 dataloader,
                 desc=f"Epoch {epoch + 1}/{epochs}",
-                total=len(dataloader),
+                total=n_batches,
                 disable=not progress,
                 dynamic_ncols=True,
             )
@@ -1412,6 +1419,8 @@ class ImpactModel(BaseModel):
         Raises:
             TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
                 argument.
+            NotImplementedError: If a return site's axis-1 size does not match the
+                input batch size.
 
         See Also:
             :meth:`~aimz.ImpactModel.cleanup` to remove the temporary directory if
@@ -1484,9 +1493,10 @@ class ImpactModel(BaseModel):
             device=self._device,
             **kwargs,
         )
+        n_batches = len(dataloader)
 
         self._sample_and_write(
-            num_samples=self._num_samples,
+            self._num_samples,
             rng_key=rng_key,
             return_sites=return_sites,
             output_dir=output_subdir,
@@ -1496,10 +1506,11 @@ class ImpactModel(BaseModel):
             dataloader=dataloader,
             pbar=tqdm(
                 desc=(f"Posterior predictive sampling [{', '.join(return_sites)}]"),
-                total=len(dataloader),
+                total=n_batches,
                 disable=not progress,
                 dynamic_ncols=True,
             ),
+            strategy_cls=_select_write_strategy(dataloader),
             **kwargs,
         )
 
@@ -1651,6 +1662,10 @@ class ImpactModel(BaseModel):
         Returns:
             Log-likelihood values. Posterior samples are included if available.
 
+        Raises:
+            NotImplementedError: If a return site's axis-1 size does not match the
+                input batch size.
+
         See Also:
             :meth:`~aimz.ImpactModel.cleanup` to remove the temporary directory if
             created.
@@ -1677,18 +1692,23 @@ class ImpactModel(BaseModel):
             device=self._device,
             **kwargs,
         )
+        n_batches = len(dataloader)
 
         site = self.param_output
         draws = self._num_samples if self.posterior else 1
         pbar = tqdm(
             desc=(f"Computing log-likelihood of {site}..."),
-            total=len(dataloader),
+            total=n_batches,
             disable=not progress,
             dynamic_ncols=True,
         )
 
         zarr_group = open_group(output_subdir, mode="w")
-        zarr_arr = {}
+        strategy = _select_write_strategy(dataloader)(
+            zarr_group=zarr_group,
+            draws=draws,
+            dataloader=dataloader,
+        )
         threads = []
         queues = {}
         error_queue = None
@@ -1716,28 +1736,21 @@ class ImpactModel(BaseModel):
                         *(*kwargs_batch, *kwargs_extra),
                     ),
                 )
-                if site not in zarr_arr:
-                    zarr_arr[site] = zarr_group.create_array(
-                        name=site,
-                        shape=(draws, 0, *arr.shape[2:]),
-                        dtype="float32" if arr.dtype == "bfloat16" else arr.dtype,
-                        chunks=(draws, dataloader.batch_size, *arr.shape[2:]),
-                        dimension_names=(
-                            "draw",
-                            *tuple(f"{site}_dim_{i}" for i in range(arr.ndim - 1)),
-                        ),
-                    )
+                sliced = {
+                    site: arr[:, None] if arr.ndim == 1 else arr[:, : -n_pad or None],
+                }
+                strategy.create_arrays(sliced)
                 if error_queue is None:
                     threads, queues, error_queue = _start_writer_threads(
                         (site,),
                         group_path=output_subdir,
-                        writer=_writer,
+                        apply=strategy.apply,
                         queue_size=_determine_writer_queue_size(
-                            len(dataloader),
-                            item_nbytes=max(1, int((arr[:, : -n_pad or None]).nbytes)),
+                            n_batches,
+                            item_nbytes=max(1, int(sliced[site].nbytes)),
                         ),
                     )
-                queues[site].put(arr[:, : -n_pad or None])
+                strategy.enqueue(queues, sliced)
                 if not error_queue.empty():
                     worker_err = error_queue.get()
                     break

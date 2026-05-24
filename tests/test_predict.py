@@ -60,6 +60,28 @@ def test_predict_fall_back(
         im_latent_var_svi_fitted.predict(X=X, batch_size=len(X), progress=False)
 
 
+def test_predict_rejects_unsupported_size(
+    synthetic_data: tuple[Array, Array],
+    im_lm_svi_fitted: ImpactModel,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`.predict()` rejects return sites whose axis-1 size doesn't match the batch.
+
+    The slice write strategy requires every return site to emit an axis-1 size equal to
+    the input batch size; ``sigma`` in ``lm`` does not satisfy this.
+    """
+    X, _ = synthetic_data
+    monkeypatch.setattr(im_lm_svi_fitted, "_mesh", None)
+    monkeypatch.setattr(im_lm_svi_fitted, "_fn_sample_posterior_predictive", None)
+    with pytest.raises(NotImplementedError, match="match the input batch size"):
+        im_lm_svi_fitted.predict(
+            X=X,
+            return_sites="sigma",
+            batch_size=3,
+            progress=False,
+        )
+
+
 class TestKernelParameterValidation:
     """Test class for validating parameter compatibility with the kernel."""
 
