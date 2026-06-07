@@ -41,7 +41,7 @@ from jax import (
     make_mesh,
     random,
 )
-from jax.sharding import AxisType, Mesh, NamedSharding, PartitionSpec
+from jax.sharding import AxisType, NamedSharding, PartitionSpec
 from jax.typing import ArrayLike
 from numpyro.handlers import do, seed, substitute, trace
 from numpyro.infer import MCMC, SVI
@@ -140,8 +140,6 @@ class ImpactModel(BaseModel):
         self._fn_sample_prior_predictive: Callable | None = None
         self._fn_sample_posterior_predictive: Callable | None = None
         self._fn_log_likelihood: Callable | None = None
-        self._mesh: Mesh | None
-        self._device: NamedSharding | None
         num_devices = local_device_count()
         if num_devices > 1:
             self._mesh = make_mesh(
@@ -150,9 +148,13 @@ class ImpactModel(BaseModel):
                 axis_types=(AxisType.Explicit,),
             )
             self._device = NamedSharding(self._mesh, spec=PartitionSpec("obs"))
+            self._replicated_sharding = NamedSharding(self._mesh, spec=PartitionSpec())
         else:
             self._mesh = None
             self._device = None
+            self._replicated_sharding = None
+        self._posterior_device_cache: dict[NamedSharding | None, dict[str, Array]] = {}
+        self._posterior_device_src: dict[str, Array] | None = None
         self._temp_dir: TemporaryDirectory | None = None
         logger.info(
             "Backend: %s, Devices: %d",
@@ -216,7 +218,16 @@ class ImpactModel(BaseModel):
             for k, v in self.__dict__.items()
             if not (
                 k.startswith("_fn")
-                or k in {"_device", "_mesh", "_num_devices", "_temp_dir"}
+                or k
+                in {
+                    "_device",
+                    "_mesh",
+                    "_num_devices",
+                    "_replicated_sharding",
+                    "_posterior_device_cache",
+                    "_posterior_device_src",
+                    "_temp_dir",
+                }
             )
         }
 
@@ -405,6 +416,40 @@ class ImpactModel(BaseModel):
 
         return output_dir, output_subdir
 
+    def _place_posterior_on_device(
+        self,
+        sharding: NamedSharding | None,
+    ) -> dict[str, Array]:
+        """Return the posterior placed on devices, cached.
+
+        The cache is rebuilt whenever ``self._posterior`` is replaced; each distinct
+        ``sharding`` placement coexists in the same cache.
+
+        Args:
+            sharding: Placement to commit the posterior to, or ``None`` to leave it in
+                place (e.g. single-device).
+
+        Returns:
+            The posterior samples by variable name, placed on devices.
+        """
+        if self._posterior_device_src is not self._posterior:
+            self._posterior_device_cache = {}
+            # Keep the source posterior alive while its placements are cached, so the
+            # identity check above stays meaningful until _posterior is next replaced.
+            self._posterior_device_src = self._posterior
+        cache = self._posterior_device_cache
+        if sharding not in cache:
+            posterior = cast("dict[str, Array]", self.posterior)
+            # sharding=None (no mesh): leave in place; device_put(..., None) would
+            # force a copy of a host-backed posterior to the default device.
+            cache[sharding] = (
+                posterior
+                if sharding is None
+                else device_put(posterior, device=sharding)
+            )
+
+        return cache[sharding]
+
     def _sample_and_write(
         self,
         num_samples: int,
@@ -451,10 +496,10 @@ class ImpactModel(BaseModel):
 
         n_batches = len(dataloader)
         rng_key, *subkeys = random.split(rng_key, num=n_batches + 1)
-        if self._device and self._mesh:
+        if self._replicated_sharding is not None:
             subkeys = device_put(
                 subkeys,
-                NamedSharding(self._mesh, spec=PartitionSpec()),
+                device=self._replicated_sharding,
             )
 
         zarr_group = open_group(output_dir, mode="w")
@@ -686,6 +731,13 @@ class ImpactModel(BaseModel):
         prior_samples = {
             k: v for k, v in prior_samples.items() if k not in return_sites
         }
+        # Prior samples are redrawn every call, so (unlike the posterior) this is a
+        # one-shot placement rather than a cached one.
+        if self._replicated_sharding is not None:
+            prior_samples = device_put(
+                prior_samples,
+                device=self._replicated_sharding,
+            )
 
         kwargs_array, kwargs_extra = _group_kwargs(kwargs)
         if self._fn_sample_prior_predictive is None:
@@ -1502,7 +1554,7 @@ class ImpactModel(BaseModel):
             output_dir=output_subdir,
             kernel=kernel,
             sampler=self._fn_sample_posterior_predictive,
-            samples=cast("dict[str, Array]", self.posterior),
+            samples=self._place_posterior_on_device(self._replicated_sharding),
             dataloader=dataloader,
             pbar=tqdm(
                 desc=(f"Posterior predictive sampling [{', '.join(return_sites)}]"),
@@ -1727,7 +1779,10 @@ class ImpactModel(BaseModel):
                 arr = device_get(
                     self._fn_log_likelihood(
                         kernel,
-                        self.posterior or {},
+                        self._place_posterior_on_device(
+                            self._replicated_sharding,
+                        )
+                        or {},
                         self.param_input,
                         site,
                         kwargs_array._fields + kwargs_extra._fields,
