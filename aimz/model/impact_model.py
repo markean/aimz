@@ -528,9 +528,9 @@ class ImpactModel(BaseModel):
                         return_sites,
                         samples,
                         self.param_input,
-                        kwargs_array._fields + kwargs_extra._fields,
+                        (*kwargs_array, *kwargs_extra),
                         batch[self.param_input],
-                        *(*kwargs_batch, *kwargs_extra),
+                        *(*kwargs_batch, *kwargs_extra.values()),
                     ),
                 )
                 sliced = {
@@ -1013,7 +1013,7 @@ class ImpactModel(BaseModel):
             _, kwargs_extra = _group_kwargs(kwargs)
             self._fn_vi_update = jit(
                 cast("SVI", self.inference).update,
-                static_argnames=tuple(kwargs_extra._fields),
+                static_argnames=tuple(kwargs_extra),
             )
 
         self._vi_state, loss = self._fn_vi_update(self._vi_state, **batch)
@@ -1213,7 +1213,7 @@ class ImpactModel(BaseModel):
             for batch, _ in pbar:
                 self._vi_state, loss = self.train_on_batch(
                     **batch,
-                    **kwargs_extra._asdict(),
+                    **kwargs_extra,
                     rng_key=rng_subkey,
                 )
                 loss_batch = device_get(loss)
@@ -1785,10 +1785,10 @@ class ImpactModel(BaseModel):
                         or {},
                         self.param_input,
                         site,
-                        kwargs_array._fields + kwargs_extra._fields,
+                        (*kwargs_array, *kwargs_extra),
                         batch[self.param_input],
                         batch[self.param_output],
-                        *(*kwargs_batch, *kwargs_extra),
+                        *(*kwargs_batch, *kwargs_extra.values()),
                     ),
                 )
                 sliced = {

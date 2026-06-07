@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING
 from warnings import warn
 
 import numpy as np
@@ -48,7 +48,7 @@ def _setup_inputs(
     shuffle: bool = False,
     device: Sharding | None = None,
     **kwargs: object,
-) -> tuple[ArrayLoader, NamedTuple]:
+) -> tuple[ArrayLoader, dict]:
     """Prepare an dataloader and grouped keyword arguments.
 
     Args:
@@ -105,7 +105,7 @@ def _setup_inputs(
             )
             warn(msg, category=UserWarning, stacklevel=2)
         loader = ArrayLoader(
-            ArrayDataset(X=X, y=y, **kwargs_array._asdict()),
+            ArrayDataset(X=X, y=y, **kwargs_array),
             rng_key=rng_key,
             batch_size=batch_size,
             shuffle=shuffle,
