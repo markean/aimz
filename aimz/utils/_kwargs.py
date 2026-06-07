@@ -14,14 +14,10 @@
 
 """Module for processing keyword arguments for sharding."""
 
-from typing import NamedTuple
-
-from jax.typing import ArrayLike
-
 from aimz.utils._validation import _is_arraylike
 
 
-def _group_kwargs(kwargs: dict) -> tuple[NamedTuple, NamedTuple]:
+def _group_kwargs(kwargs: dict) -> tuple[dict, dict]:
     """Separate keyword arguments into array-like and non-array-like groups.
 
     Args:
@@ -29,21 +25,11 @@ def _group_kwargs(kwargs: dict) -> tuple[NamedTuple, NamedTuple]:
             non-array-like.
 
     Returns:
-        A tuple containing two ``NamedTuple`` objects:
-            - kwargs_array (KwargsArray): Contains the array-like arguments.
-            - kwargs_extra (KwargsExtra): Contains the non-array-like arguments.
+        A tuple containing two dictionaries:
+            - kwargs_array: Contains the array-like arguments.
+            - kwargs_extra: Contains the non-array-like arguments.
     """
-    dict_kwargs_array = {k: v for k, v in kwargs.items() if _is_arraylike(v)}
-    dict_kwargs_extra = {k: v for k, v in kwargs.items() if not _is_arraylike(v)}
+    kwargs_array = {k: v for k, v in kwargs.items() if _is_arraylike(v)}
+    kwargs_extra = {k: v for k, v in kwargs.items() if not _is_arraylike(v)}
 
-    # Dynamically create NamedTuple classes
-    KwargsArray = NamedTuple(
-        "KwargsArray",
-        [(k, ArrayLike) for k in dict_kwargs_array],
-    )
-    KwargsExtra = NamedTuple(
-        "KwargsExtra",
-        [(k, object) for k in dict_kwargs_extra],
-    )
-
-    return KwargsArray(**dict_kwargs_array), KwargsExtra(**dict_kwargs_extra)
+    return kwargs_array, kwargs_extra
