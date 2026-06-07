@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+
+- {meth}`~aimz.ImpactModel.predict`, {meth}`~aimz.ImpactModel.log_likelihood`, and {meth}`~aimz.ImpactModel.sample_prior_predictive` now place the conditioning samples on devices once instead of re-transferring and re-replicating them on every batch. For {meth}`~aimz.ImpactModel.predict` and {meth}`~aimz.ImpactModel.log_likelihood` the placed posterior is cached across calls (keyed by device sharding and rebuilt whenever the posterior is replaced); {meth}`~aimz.ImpactModel.sample_prior_predictive` places its per-call prior samples once before the batch loop. This is a no-op on a single device and affects performance only, not results ([#219](https://github.com/markean/aimz/issues/219)).
+
 ## [v0.12.0](https://github.com/markean/aimz/releases/tag/v0.12.0) - 2026-05-23
 
 ### Changed
