@@ -1,7 +1,7 @@
 # aimz: Scalable probabilistic impact modeling
 
 [![Project Status: Active – The project has reached a stable, usable state and is being actively developed.](https://www.repostatus.org/badges/latest/active.svg)](https://www.repostatus.org/#active)
-![Run Pytest](https://github.com/markean/aimz/actions/workflows/coverage.yaml/badge.svg)
+![Run Pytest](https://github.com/markean/aimz/actions/workflows/ci.yaml/badge.svg)
 [![PyPI](https://img.shields.io/pypi/v/aimz)](https://pypi.org/project/aimz/)
 [![Conda](https://img.shields.io/conda/vn/conda-forge/aimz.svg)](https://anaconda.org/conda-forge/aimz)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://pypi.org/project/aimz/)
@@ -11,9 +11,9 @@
 [![JOSS](https://joss.theoj.org/papers/10.21105/joss.09738/status.svg)](https://doi.org/10.21105/joss.09738)
 [![DOI](https://zenodo.org/badge/1009062911.svg)](https://doi.org/10.5281/zenodo.16101876)
 
-[**Installation**](https://aimz.readthedocs.io/stable/getting_started/installation.html) |
-[**Tutorial**](https://aimz.readthedocs.io/latest/getting_started/tutorial.html) |
+[**Installation**](https://aimz.readthedocs.io/latest/user_guide/installation.html) |
 [**User Guide**](https://aimz.readthedocs.io/latest/user_guide/index.html) |
+[**Examples**](https://aimz.readthedocs.io/latest/examples/index.html) |
 [**FAQs**](https://aimz.readthedocs.io/latest/faq.html) |
 [**Changelog**](https://aimz.readthedocs.io/latest/changelog.html)
 
@@ -48,7 +48,7 @@ pip install -U aimz
 conda install -c conda-forge aimz
 ```
 
-For additional details, see the full [installation guide](https://aimz.readthedocs.io/stable/getting_started/installation.html).
+For additional details, see the full [installation guide](https://aimz.readthedocs.io/latest/user_guide/installation.html).
 
 ## Quick start
 
