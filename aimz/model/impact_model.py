@@ -267,7 +267,12 @@ class ImpactModel(BaseModel):
 
     @property
     def posterior(self) -> dict[str, Array] | None:
-        """Posterior samples by variable name, or ``None`` if not set."""
+        """Posterior samples by variable name, or ``None`` if not set.
+
+        Read-only by contract: mutating it in place is unsupported and desynchronizes
+        the internal device-placement cache. Use
+        :meth:`~aimz.ImpactModel.set_posterior_sample` or refit the model to change it.
+        """
         return self._posterior
 
     @property
@@ -430,8 +435,11 @@ class ImpactModel(BaseModel):
                 place (e.g. single-device).
 
         Returns:
-            The posterior samples by variable name, placed on devices.
+            The posterior samples by variable name, placed on devices, or an empty
+            dict when no posterior samples are set.
         """
+        if not self.posterior:
+            return {}
         if self._posterior_device_src is not self._posterior:
             self._posterior_device_cache = {}
             # Keep the source posterior alive while its placements are cached, so the
@@ -1779,10 +1787,7 @@ class ImpactModel(BaseModel):
                 arr = device_get(
                     self._fn_log_likelihood(
                         kernel,
-                        self._place_posterior_on_device(
-                            self._replicated_sharding,
-                        )
-                        or {},
+                        self._place_posterior_on_device(self._replicated_sharding),
                         self.param_input,
                         site,
                         (*kwargs_array, *kwargs_extra),
