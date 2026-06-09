@@ -1,0 +1,534 @@
+# Copyright 2025 Eli Lilly and Company
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Disk-streaming engine that runs the kernel across shards and writes to Zarr.
+
+:class:`_OutputStreamer` owns the streaming subsystem extracted from
+:class:`~aimz.ImpactModel`: it builds (and caches) the sharded sampler / log-likelihood
+callables, places the posterior on devices, and drives the data- and draw-parallel write
+paths. The model passes a stable :class:`_RuntimeContext` once and a per-call
+:class:`_WriteRequest` each time it predicts, draws prior samples, or computes a
+log-likelihood.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal, NamedTuple, cast
+
+from jax import Array, device_get, device_put, random
+from tqdm.auto import tqdm
+from zarr import open_group
+
+from aimz.sampling._forward import _sample_forward
+from aimz.utils._kwargs import _group_kwargs
+from aimz.utils._output import (
+    _select_write_strategy,
+    _SliceWriteStrategy,
+    _write_loop,
+)
+from aimz.utils.data._input_setup import _resolve_draw_batch_size, _setup_inputs
+from aimz.utils.data._sharding import (
+    _create_sharded_log_likelihood,
+    _create_sharded_sampler,
+    _prepare_draw_chunk,
+    _replicate,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sized
+    from pathlib import Path
+
+    import numpy as np
+    from jax.sharding import Mesh, Sharding
+    from jax.typing import ArrayLike
+
+    from aimz.utils.data import ArrayLoader
+
+
+@dataclass(frozen=True)
+class _RuntimeContext:
+    """Stable per-model sharding configuration shared across write calls."""
+
+    param_input: str
+    param_output: str
+    mesh: Mesh | None
+    num_devices: int
+    replicated_sharding: Sharding | None
+    partitioned_sharding: Sharding | None
+
+
+@dataclass(frozen=True)
+class _WriteRequest:
+    """The invariants of one streamed write job (shared by both write strategies)."""
+
+    parallel: Literal["data", "draw"]
+    X: ArrayLike | ArrayLoader
+    return_sites: tuple[str, ...]
+    num_samples: int
+    batch_size: int | None
+    output_dir: Path
+    progress: bool
+    loader_rng_key: Array
+    kwargs: dict[str, object]
+
+
+class _Step(NamedTuple):
+    """Per-item inputs for one sharded forward call, shared by both write strategies.
+
+    A write strategy assembles a ``_Step`` for each item it streams (an observation
+    batch or a draw chunk) and hands it to a ``compute`` closure that forwards it to the
+    sharded sampler / log-likelihood function. The strategy fills the fields differently
+    — whole vs. sliced — but the ``compute`` signature is identical, which keeps the
+    strategy streamers kind-agnostic.
+    """
+
+    num: int
+    """Draw count for the call: global count (data) or per-device count (draw)."""
+    keys: Array | None
+    """Per-draw keys for predictive sampling; ``None`` for log-likelihood."""
+    samples: dict[str, Array]
+    """Conditioning samples: the whole posterior (data) or one draw chunk (draw)."""
+    x: Array
+    """Input data: one observation batch (data) or the whole replicated input (draw)."""
+    y: Array | None
+    """Output data (log-likelihood only)."""
+    tail: tuple
+    """Array-kwargs and extra-kwargs values forwarded after ``x``."""
+
+
+class _OutputStreamer:
+    """Run the kernel across shards and stream the per-item outputs to Zarr.
+
+    Constructed once per model from a :class:`_RuntimeContext`; owns the jit/shard_map
+    callable cache and the posterior device-placement cache. Exposes
+    :meth:`write_predictive` (predict / prior predictive) and
+    :meth:`write_log_likelihood`, each dispatching to the data- or draw-parallel
+    streamer by the request's ``parallel`` strategy.
+    """
+
+    def __init__(self, ctx: _RuntimeContext) -> None:
+        """Initialize the streamer with its runtime context and empty caches.
+
+        Args:
+            ctx: Stable sharding configuration for the owning model.
+        """
+        self._ctx = ctx
+        # Sharded sampling/log-likelihood callables, built lazily and cached by
+        # ``(kind, parallel)`` so new kinds or strategies need no new slot.
+        self._fn_cache: dict[tuple[str, str], Callable] = {}
+        self._posterior_device_cache: dict[Sharding | None, dict[str, Array]] = {}
+        self._posterior_device_src: dict[str, Array] | None = None
+
+    def _cached_fn(
+        self,
+        kind: str,
+        parallel: Literal["data", "draw"],
+        factory: Callable,
+        n_kwargs_array: int,
+        n_kwargs_extra: int,
+    ) -> Callable:
+        """Build a sharded callable once and cache it by ``(kind, parallel)``.
+
+        Returns the cached callable, building it with ``factory`` (which selects the
+        partition specs) on first use.
+        """
+        key = (kind, parallel)
+        fn = self._fn_cache.get(key)
+        if fn is None:
+            fn = factory(
+                self._ctx.mesh,
+                n_kwargs_array,
+                n_kwargs_extra,
+                parallel=parallel,
+            )
+            self._fn_cache[key] = fn
+        return fn
+
+    def _place_posterior(
+        self,
+        posterior: dict[str, Array] | None,
+        sharding: Sharding | None,
+    ) -> dict[str, Array]:
+        """Return the posterior placed on devices, cached by ``sharding``.
+
+        The cache is rebuilt whenever ``posterior`` is replaced (by identity); each
+        distinct placement coexists in the same cache. Used by the data-parallel path to
+        replicate the posterior once across calls; the draw-parallel path places its
+        per-chunk slices itself.
+
+        Args:
+            posterior: The posterior samples to place, or empty/``None`` when unset.
+            sharding: Placement to commit the posterior to, or ``None`` to leave it in
+                place (e.g. single-device).
+
+        Returns:
+            The posterior samples by variable name, placed on devices, or an empty
+            dict when no posterior samples are set.
+        """
+        if not posterior:
+            return {}
+        if self._posterior_device_src is not posterior:
+            self._posterior_device_cache = {}
+            # Keep the source posterior alive while its placements are cached, so the
+            # identity check above stays meaningful until it is next replaced.
+            self._posterior_device_src = posterior
+        cache = self._posterior_device_cache
+        if sharding not in cache:
+            # sharding=None (no mesh): leave in place; device_put(..., None) would
+            # force a copy of a host-backed posterior to the default device.
+            cache[sharding] = (
+                posterior
+                if sharding is None
+                else device_put(posterior, device=sharding)
+            )
+        return cache[sharding]
+
+    def write_predictive(
+        self,
+        req: _WriteRequest,
+        *,
+        kernel: Callable,
+        rng_key: Array,
+        group: str,
+        posterior: dict[str, Array] | None,
+    ) -> None:
+        """Write predictive samples (predict / prior predictive) to ``req.output_dir``.
+
+        Builds the predictive ``compute`` — one sharded-sampler call per item — and
+        dispatches to the strategy streamer. ``parallel="draw"`` chunks the draw axis;
+        ``parallel="data"`` shards the observation axis and conditions every batch on
+        the replicated posterior, or — for prior predictive — on the global prior
+        samples drawn once from a single-element probe (a sharded probe would propagate
+        the mesh axis onto global sites via JAX's sharding-in-types).
+
+        Args:
+            req: The streamed write job.
+            kernel: Probabilistic model with `NumPyro`_ primitives.
+            rng_key: Pseudo-random number generator key for sampling.
+            group: Output group (``"posterior_predictive"``, ``"predictions"``, or
+                ``"prior_predictive"``).
+            posterior: The posterior to condition on (ignored for prior predictive).
+
+        .. _NumPyro: https://num.pyro.ai/
+        """
+        kwargs_array, kwargs_extra = _group_kwargs(req.kwargs)
+        kwargs_key = (*kwargs_array, *kwargs_extra)
+        kind = "prior_predictive" if group == "prior_predictive" else "predict"
+        fn = self._cached_fn(
+            kind,
+            req.parallel,
+            _create_sharded_sampler,
+            len(kwargs_array),
+            len(kwargs_extra),
+        )
+
+        def compute(step: _Step) -> dict[str, Array]:
+            return fn(
+                kernel,
+                step.num,
+                step.keys,
+                req.return_sites,
+                step.samples,
+                self._ctx.param_input,
+                kwargs_key,
+                step.x,
+                *step.tail,
+            )
+
+        phase = "Prior" if group == "prior_predictive" else "Posterior"
+        pbar = tqdm(
+            desc=f"{phase} predictive sampling [{', '.join(req.return_sites)}]",
+            disable=not req.progress,
+            dynamic_ncols=True,
+        )
+        if req.parallel == "draw":
+            chunk_posterior = (
+                {}
+                if group == "prior_predictive"
+                else cast("dict[str, Array]", posterior)
+            )
+            self._write_draws(
+                req,
+                compute=compute,
+                y=None,
+                posterior=chunk_posterior,
+                rng_key=rng_key,
+                pbar=pbar,
+            )
+            return
+
+        if group == "prior_predictive":
+            # Single-element, unsharded probe draws the global prior samples once; the
+            # return sites are dropped so they are redrawn per batch. Prior samples are
+            # redrawn every call, so this is a one-shot (not cached) placement.
+            probe, _ = _setup_inputs(
+                X=req.X,
+                y=None,
+                rng_key=req.loader_rng_key,
+                batch_size=1,
+                num_samples=req.num_samples,
+                shuffle=False,
+                device=None,
+                **req.kwargs,
+            )
+            batch, _ = next(iter(probe))
+            rng_key, rng_subkey = random.split(rng_key)
+            samples = _sample_forward(
+                kernel,
+                rng_keys=random.split(rng_subkey, num=req.num_samples),
+                return_sites=None,
+                samples=None,
+                model_kwargs=batch,
+            )
+            samples = {k: v for k, v in samples.items() if k not in req.return_sites}
+            if self._ctx.replicated_sharding is not None:
+                samples = device_put(samples, device=self._ctx.replicated_sharding)
+        else:
+            samples = self._place_posterior(posterior, self._ctx.replicated_sharding)
+        self._write_data(
+            req,
+            compute=compute,
+            y=None,
+            samples=samples,
+            rng_key=rng_key,
+            pbar=pbar,
+        )
+
+    def write_log_likelihood(
+        self,
+        req: _WriteRequest,
+        *,
+        kernel: Callable,
+        posterior: dict[str, Array] | None,
+        y: ArrayLike | None,
+    ) -> None:
+        """Write the log-likelihood of ``y`` under ``kernel`` to ``req.output_dir``.
+
+        Builds the log-likelihood ``compute`` — one sharded call per item, keyed by the
+        output site — and dispatches to the strategy streamer.
+
+        Args:
+            req: The streamed write job (its single return site is the output site).
+            kernel: Probabilistic model with `NumPyro`_ primitives, already seeded.
+            posterior: The posterior to condition on.
+            y: Output data.
+
+        .. _NumPyro: https://num.pyro.ai/
+        """
+        site = self._ctx.param_output
+        kwargs_array, kwargs_extra = _group_kwargs(req.kwargs)
+        kwargs_key = (*kwargs_array, *kwargs_extra)
+        fn = self._cached_fn(
+            "log_likelihood",
+            req.parallel,
+            _create_sharded_log_likelihood,
+            len(kwargs_array),
+            len(kwargs_extra),
+        )
+
+        def compute(step: _Step) -> dict[str, Array]:
+            return {
+                site: fn(
+                    kernel,
+                    step.samples,
+                    self._ctx.param_input,
+                    site,
+                    kwargs_key,
+                    step.x,
+                    step.y,
+                    *step.tail,
+                ),
+            }
+
+        pbar = tqdm(
+            desc=f"Computing log-likelihood of {site}...",
+            disable=not req.progress,
+            dynamic_ncols=True,
+        )
+        if req.parallel == "draw":
+            self._write_draws(
+                req,
+                compute=compute,
+                y=cast("ArrayLike", y),
+                posterior=cast("dict[str, Array]", posterior),
+                rng_key=None,
+                pbar=pbar,
+            )
+        else:
+            self._write_data(
+                req,
+                compute=compute,
+                y=y,
+                samples=self._place_posterior(
+                    posterior,
+                    self._ctx.replicated_sharding,
+                ),
+                rng_key=None,
+                pbar=pbar,
+            )
+
+    def _write_data(
+        self,
+        req: _WriteRequest,
+        *,
+        compute: Callable[[_Step], dict[str, Array]],
+        y: ArrayLike | None,
+        samples: dict[str, Array],
+        rng_key: Array | None,
+        pbar: tqdm,
+    ) -> None:
+        """Stream over data-parallel batches and write to ``req.output_dir``.
+
+        Shards the observation axis across devices and conditions every batch on the
+        whole (replicated) ``samples``. For each batch it assembles a :class:`_Step`,
+        runs ``compute``, trims the observation padding (axis 1), and drives
+        ``_write_loop``. Kind-agnostic: ``compute`` carries the sampler / log-likelihood
+        call. ``rng_key`` is ``None`` for log-likelihood (no per-draw keys).
+        """
+        _, kwargs_extra = _group_kwargs(req.kwargs)
+        extra = tuple(kwargs_extra.values())
+        dataloader, _ = _setup_inputs(
+            X=req.X,
+            y=y,
+            rng_key=req.loader_rng_key,
+            batch_size=req.batch_size,
+            num_samples=req.num_samples,
+            shuffle=False,
+            device=self._ctx.partitioned_sharding,
+            **req.kwargs,
+        )
+        n_batches = len(dataloader)
+        pbar.reset(total=n_batches)
+        if rng_key is None:
+            subkeys = [None] * n_batches
+        else:
+            # One fresh key per batch; the sampler splits it into per-draw keys.
+            rng_key, *subkeys = random.split(rng_key, num=n_batches + 1)
+            if self._ctx.replicated_sharding is not None:
+                subkeys = device_put(subkeys, device=self._ctx.replicated_sharding)
+
+        def produce(item: object) -> dict[str, np.ndarray]:
+            (batch, n_pad), subkey = cast("tuple", item)
+            tail = (
+                *(
+                    v
+                    for k, v in batch.items()
+                    if k not in (self._ctx.param_input, self._ctx.param_output)
+                ),
+                *extra,
+            )
+            step = _Step(
+                num=req.num_samples,
+                keys=subkey,
+                samples=samples,
+                x=batch[self._ctx.param_input],
+                y=batch.get(self._ctx.param_output),
+                tail=tail,
+            )
+            dict_arr = device_get(compute(step))
+            return {
+                site: arr[:, None] if arr.ndim == 1 else arr[:, : -n_pad or None]
+                for site, arr in dict_arr.items()
+            }
+
+        _write_loop(
+            items=zip(dataloader, subkeys, strict=True),
+            n_items=n_batches,
+            return_sites=req.return_sites,
+            output_dir=req.output_dir,
+            strategy=_select_write_strategy(
+                open_group(req.output_dir, mode="w"),
+                dataloader,
+            ),
+            produce=produce,
+            pbar=pbar,
+        )
+
+    def _write_draws(
+        self,
+        req: _WriteRequest,
+        *,
+        compute: Callable[[_Step], dict[str, Array]],
+        y: ArrayLike | None,
+        posterior: dict[str, Array],
+        rng_key: Array | None,
+        pbar: tqdm,
+    ) -> None:
+        """Stream over draw chunks and write to ``req.output_dir``.
+
+        Shards the draw axis across devices and holds the whole input resident:
+        replicates the input/output/array-kwargs once, splits the per-draw keys once,
+        and for each chunk slices a posterior chunk (``_prepare_draw_chunk``), assembles
+        a :class:`_Step`, runs ``compute``, trims to the chunk's true draw count
+        (axis 0), and drives ``_write_loop``. Kind-agnostic: ``compute`` carries the
+        sampler / log-likelihood call. ``rng_key`` is ``None`` for log-likelihood;
+        ``posterior`` is empty for prior predictive (each chunk draws fresh).
+        """
+        batch_size = _resolve_draw_batch_size(
+            req.batch_size,
+            req.num_samples,
+            len(cast("Sized", req.X)),
+            self._ctx.num_devices,
+        )
+        pbar.reset(total=-(-req.num_samples // batch_size))
+        kwargs_array, kwargs_extra = _group_kwargs(req.kwargs)
+        x_dev = _replicate(req.X, self._ctx.replicated_sharding)
+        y_dev = _replicate(y, self._ctx.replicated_sharding) if y is not None else None
+        tail = (
+            *(
+                _replicate(v, self._ctx.replicated_sharding)
+                for v in kwargs_array.values()
+            ),
+            *kwargs_extra.values(),
+        )
+        draw_keys = (
+            random.split(rng_key, num=req.num_samples) if rng_key is not None else None
+        )
+
+        def produce(item: object) -> dict[str, np.ndarray]:
+            start = cast("int", item)
+            stop = min(start + batch_size, req.num_samples)
+            chunk_samples, chunk_keys, per_device = _prepare_draw_chunk(
+                posterior,
+                draw_keys,
+                start,
+                stop,
+                self._ctx.num_devices,
+                self._ctx.partitioned_sharding,
+            )
+            step = _Step(
+                num=per_device,
+                keys=chunk_keys,
+                samples=chunk_samples,
+                x=x_dev,
+                y=y_dev,
+                tail=tail,
+            )
+            return {s: a[: stop - start] for s, a in device_get(compute(step)).items()}
+
+        _write_loop(
+            items=range(0, req.num_samples, batch_size),
+            n_items=-(-req.num_samples // batch_size),
+            return_sites=req.return_sites,
+            output_dir=req.output_dir,
+            strategy=_SliceWriteStrategy(
+                zarr_group=open_group(req.output_dir, mode="w"),
+                total=req.num_samples,
+                batch_size=batch_size,
+                axis=0,
+            ),
+            produce=produce,
+            pbar=pbar,
+        )

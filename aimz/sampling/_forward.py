@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from jax import Array, lax, random
+from jax import Array, lax
 from numpyro.handlers import mask, seed, substitute, trace
 
 if TYPE_CHECKING:
@@ -28,21 +28,24 @@ if TYPE_CHECKING:
 
 def _sample_forward(
     model: Callable,
-    num_samples: int,
-    rng_key: Array,
+    rng_keys: Array,
     return_sites: tuple[str, ...] | None,
     samples: dict[str, Array] | None,
     model_kwargs: Mapping[str, object] | None,
 ) -> dict[str, Array]:
     """Generates forward samples from a model conditioned on parameter draws.
 
-    This function repeatedly traces the model with different random keys and sets of
-    parameter values. Deterministic sites in the model are excluded from substitution.
+    Traces the model once per draw, each with its own key from ``rng_keys`` and (when
+    provided) its own row of ``samples``. Deterministic sites are excluded from
+    substitution. Callers pass the per-draw keys directly: a scalar-key caller splits
+    with ``random.split(rng_key, num=num_samples)``, while the sample-parallel sharded
+    path forwards its device-local slice of the host-split keys (so draws stay
+    deterministic across mesh sizes).
 
     Args:
         model: A probabilistic model with NumPyro primitives.
-        num_samples: The number of samples to draw.
-        rng_key: A pseudo-random number generator key.
+        rng_keys: Per-draw keys with shape ``(num_samples,)``; the number of draws is
+            ``len(rng_keys)``.
         return_sites: Names of variables (sites) to return.
         samples: A dictionary of samples to condition on, where each array has shape
             ``(num_samples, ...)``.
@@ -81,7 +84,5 @@ def _sample_forward(
             sites = set(return_sites)
 
         return {k: v["value"] for k, v in model_trace.items() if k in sites}
-
-    rng_keys = random.split(rng_key, num=num_samples).reshape((num_samples,))
 
     return lax.map(_trace_one_sample, xs=(rng_keys, samples or {}))

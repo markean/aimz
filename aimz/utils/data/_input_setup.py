@@ -38,6 +38,64 @@ logger = logging.getLogger(__name__)
 MAX_ELEMENTS = 25_000_000
 
 
+def _default_batch_size(n_obs: int, num_samples: int, num_devices: int) -> int:
+    """Resolve the default batch size along the observation axis.
+
+    Used when ``batch_size`` is not given. The whole input is a single batch when it
+    fits the memory budget; otherwise the batch is capped to ``MAX_ELEMENTS``, rounded
+    down to a multiple of ``num_devices``, and floored at ``num_devices`` to avoid an
+    empty batch.
+
+    Args:
+        n_obs: Number of observations (the length of the observation axis).
+        num_samples: Number of samples drawn per observation.
+        num_devices: Number of devices the observation axis is sharded across.
+
+    Returns:
+        The resolved batch size.
+    """
+    if n_obs * num_samples < MAX_ELEMENTS:
+        return n_obs
+    capped = MAX_ELEMENTS // num_samples
+    return max(capped - capped % num_devices, num_devices)
+
+
+def _resolve_draw_batch_size(
+    batch_size: int | None,
+    num_samples: int,
+    n_obs: int,
+    num_devices: int,
+) -> int:
+    """Resolve the per-chunk draw count for draw-parallel streaming.
+
+    When ``batch_size`` is ``None`` the whole posterior is a single chunk if it fits
+    the memory budget; otherwise the draw axis is chunked so each chunk's output stays
+    within ``MAX_ELEMENTS``, rounded down to a multiple of ``num_devices``. An explicit
+    ``batch_size`` is used as given (each chunk is padded to a device multiple).
+
+    Args:
+        batch_size: The requested draws per chunk, or ``None`` to resolve a default.
+        num_samples: Total number of posterior draws.
+        n_obs: Number of observations (the resident, replicated observation axis).
+        num_devices: Number of devices the draw axis is sharded across.
+
+    Returns:
+        The resolved number of draws per chunk.
+    """
+    if batch_size is not None:
+        return batch_size
+    if num_samples * n_obs < MAX_ELEMENTS:
+        return num_samples
+    cap = max(MAX_ELEMENTS // n_obs, num_devices)
+    batch_size = min(max(cap - cap % num_devices, num_devices), num_samples)
+    logger.info(
+        "Using batch_size=%d (draws per chunk). Specify explicitly to better "
+        "control memory usage.",
+        batch_size,
+    )
+    return batch_size
+
+
 def _setup_inputs(
     *,
     X: ArrayLike | ArrayLoader,
@@ -53,10 +111,10 @@ def _setup_inputs(
 
     Args:
         X (ArrayLike | ArrayLoader): Input data. If array-like, the leading axis is
-            the sample axis. Alternatively, a data loader that holds all array-like
+            the observation axis. Alternatively, a data loader that holds all array-like
             objects and handles batching internally.
-        y (ArrayLike | None): Output data. The leading axis is the sample axis. Must
-            be ``None`` if ``X`` is a data loader.
+        y (ArrayLike | None): Output data. The leading axis is the observation axis.
+            Must be ``None`` if ``X`` is a data loader.
         rng_key: A pseudo-random number generator key.
         batch_size: The size of batches for data loading.
         num_samples: Number of samples to draw, which affects the size of batches.
@@ -84,14 +142,7 @@ def _setup_inputs(
                 raise ValueError(msg)
         num_devices = device.num_devices if device else 1
         if batch_size is None:
-            if len(X) * num_samples < MAX_ELEMENTS:
-                batch_size = len(X)
-            else:
-                # Cap batch size to stay within the memory budget, round down to the
-                # nearest multiple of `num_devices`, and ensure at least `num_devices`
-                # to avoid a zero-sized batch.
-                batch_size = MAX_ELEMENTS // num_samples
-                batch_size = max(batch_size - batch_size % num_devices, num_devices)
+            batch_size = _default_batch_size(len(X), num_samples, num_devices)
             logger.info(
                 "Using batch_size=%d. Specify explicitly to better control memory "
                 "usage.",
