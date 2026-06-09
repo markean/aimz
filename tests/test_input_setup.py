@@ -12,14 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for :func:`~aimz.utils.data._input_setup._setup_inputs`."""
+"""Tests for the input-setup utilities in :mod:`aimz.utils.data._input_setup`."""
 
 import jax.numpy as jnp
 import pytest
 from jax import local_device_count, make_mesh, random
 from jax.sharding import AxisType, NamedSharding, PartitionSpec
 
-from aimz.utils.data._input_setup import MAX_ELEMENTS, _setup_inputs
+from aimz.utils.data._input_setup import (
+    MAX_ELEMENTS,
+    _resolve_draw_batch_size,
+    _setup_inputs,
+)
 
 
 def test_batch_size_capped_when_exceeding_threshold() -> None:
@@ -49,6 +53,61 @@ def test_batch_size_capped_when_exceeding_threshold() -> None:
     # Round down to nearest multiple of num_devices: 1 - 1 % num_devices = 0.
     # Floor at num_devices to avoid zero: max(0, num_devices) = num_devices.
     assert loader.batch_size == num_devices
+
+
+def test_resolve_draw_batch_size() -> None:
+    """Draw chunking honors explicit sizes, the memory budget, and device floors."""
+    num_devices = 3
+
+    # An explicit batch size is used as given.
+    explicit = 7
+    assert (
+        _resolve_draw_batch_size(
+            explicit,
+            num_samples=1000,
+            n_obs=10,
+            num_devices=num_devices,
+        )
+        == explicit
+    )
+
+    # The whole posterior is one chunk when it fits the memory budget.
+    num_samples = 1000
+    assert (
+        _resolve_draw_batch_size(
+            None,
+            num_samples=num_samples,
+            n_obs=10,
+            num_devices=num_devices,
+        )
+        == num_samples
+    )
+
+    # Above the budget the chunk is capped to MAX_ELEMENTS // n_obs, rounded down to
+    # a multiple of num_devices: (MAX_ELEMENTS // 50_000 = 500) -> 498.
+    n_obs = 50_000
+    capped = MAX_ELEMENTS // n_obs
+    expected = capped - capped % num_devices
+    assert (
+        _resolve_draw_batch_size(
+            None,
+            num_samples=10_000,
+            n_obs=n_obs,
+            num_devices=num_devices,
+        )
+        == expected
+    )
+
+    # The cap is floored at num_devices and never exceeds num_samples.
+    assert (
+        _resolve_draw_batch_size(
+            None,
+            num_samples=10,
+            n_obs=MAX_ELEMENTS,
+            num_devices=num_devices,
+        )
+        == num_devices
+    )
 
 
 def test_x_zero_dim_raises() -> None:

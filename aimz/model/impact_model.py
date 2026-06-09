@@ -60,6 +60,7 @@ from aimz.utils._validation import (
     _check_is_fitted,
     _validate_group,
     _validate_kernel_body,
+    _validate_parallel,
     _validate_X_y_to_jax,
 )
 from aimz.utils.data._input_setup import (
@@ -576,9 +577,10 @@ class ImpactModel(BaseModel):
 
         Raises:
             TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
-                argument.
+                argument, or ``parallel="draw"`` is used with a data loader ``X``.
+            ValueError: If ``parallel`` is not ``"data"`` or ``"draw"``.
             NotImplementedError: If a return site's axis-1 size does not match the
-                input batch size.
+                input batch size (``parallel="data"`` only).
 
         See Also:
             :meth:`~aimz.ImpactModel.sample_prior_predictive_on_batch` for an
@@ -587,6 +589,14 @@ class ImpactModel(BaseModel):
             :meth:`~aimz.ImpactModel.cleanup` to remove the temporary directory if
             created.
         """
+        _validate_parallel(parallel)
+        if parallel == "draw" and not isinstance(X, ArrayLike):
+            msg = (
+                "`parallel='draw'` replicates the whole input across devices, so `X` "
+                "must be an array, not a data loader."
+            )
+            raise TypeError(msg)
+
         # Validate the provided parameters against the kernel's signature
         args_bound = (
             signature(self.kernel).bind(**{self.param_input: X, **kwargs}).arguments
@@ -801,7 +811,8 @@ class ImpactModel(BaseModel):
 
         Raises:
             TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
-                argument.
+                argument, or ``parallel="draw"`` is used with a data loader ``X``.
+            ValueError: If ``parallel`` is not ``"data"`` or ``"draw"``.
 
         See Also:
             :meth:`~aimz.ImpactModel.predict()`.
@@ -1321,6 +1332,7 @@ class ImpactModel(BaseModel):
         Raises:
             TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
                 argument, or ``parallel="draw"`` is used with a data loader ``X``.
+            ValueError: If ``parallel`` is not ``"data"`` or ``"draw"``.
             NotImplementedError: If a return site's axis-1 size does not match the
                 input batch size (``parallel="data"`` only).
 
@@ -1329,6 +1341,7 @@ class ImpactModel(BaseModel):
             created.
         """
         _check_is_fitted(self)
+        _validate_parallel(parallel)
 
         # No posterior to shard means draw-parallel has nothing to chunk, so it behaves
         # identically to the data-parallel path.
@@ -1349,24 +1362,23 @@ class ImpactModel(BaseModel):
             ):
                 msg = (
                     "One or more posterior sample shapes are not compatible with "
-                    "`.predict()` under `parallel='data'`; falling back to "
-                    "`.predict_on_batch()`. Pass `parallel='draw'` to stream these "
-                    "models instead."
+                    "`.predict()` under `parallel='data'`; rerunning with "
+                    "`parallel='draw'`. Pass `parallel='draw'` to silence this "
+                    "warning."
                 )
                 warn(msg, category=UserWarning, stacklevel=2)
 
-                return cast(
-                    "xr.DataTree",
-                    self.predict_on_batch(
-                        cast("ArrayLike", X),
-                        intervention=intervention,
-                        rng_key=rng_key,
-                        in_sample=in_sample,
-                        return_sites=return_sites
-                        or cast("KernelSpec", self._kernel_spec).return_sites,
-                        return_datatree=True,
-                        **kwargs,
-                    ),
+                return self.predict(
+                    X,
+                    intervention=intervention,
+                    rng_key=rng_key,
+                    in_sample=in_sample,
+                    return_sites=return_sites,
+                    parallel="draw",
+                    batch_size=batch_size,
+                    output_dir=output_dir,
+                    progress=progress,
+                    **kwargs,
                 )
         elif parallel == "draw":
             msg = (
@@ -1561,6 +1573,7 @@ class ImpactModel(BaseModel):
 
         Raises:
             TypeError: If ``parallel="draw"`` is used with a data loader ``X``.
+            ValueError: If ``parallel`` is not ``"data"`` or ``"draw"``.
             NotImplementedError: If a return site's axis-1 size does not match the
                 input batch size (``parallel="data"`` only).
 
@@ -1569,6 +1582,7 @@ class ImpactModel(BaseModel):
             created.
         """
         _check_is_fitted(self)
+        _validate_parallel(parallel)
 
         # No posterior to shard means draw-parallel has nothing to chunk, so it behaves
         # identically to the data-parallel path (a single-draw result).

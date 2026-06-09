@@ -91,6 +91,20 @@ def _validate_group(dt_baseline: xr.DataTree, dt_intervention: xr.DataTree) -> s
     return group
 
 
+def _validate_parallel(parallel: str) -> None:
+    """Validate a multi-device sharding strategy name.
+
+    Args:
+        parallel: The sharding strategy to validate.
+
+    Raises:
+        ValueError: If ``parallel`` is not ``"data"`` or ``"draw"``.
+    """
+    if parallel not in ("data", "draw"):
+        msg = f"`parallel` must be either 'data' or 'draw', got {parallel!r}."
+        raise ValueError(msg)
+
+
 def _validate_kernel_signature(
     kernel: Callable,
     param_input: str,

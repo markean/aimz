@@ -153,6 +153,35 @@ def test_estimate_effect_on_batch_dict(
     assert expected_group in effect.children
 
 
+def test_estimate_effect_draw_parallel(
+    synthetic_data: tuple[Array, Array],
+    im_latent_var_svi_fitted: ImpactModel,
+) -> None:
+    """`parallel='draw'` propagates through `args_*` to streamed predictions."""
+    X, y = synthetic_data
+    im = im_latent_var_svi_fitted
+
+    effect = im.estimate_effect(
+        args_baseline={
+            "X": X,
+            "parallel": "draw",
+            "batch_size": 500,
+            "progress": False,
+        },
+        args_intervention={
+            "X": X,
+            "intervention": {"z": jnp.zeros_like(y)},
+            "parallel": "draw",
+            "batch_size": 500,
+            "progress": False,
+        },
+    )
+
+    assert effect.posterior_predictive["y"].mean(dim=["chain", "draw"]).shape == (
+        len(y),
+    )
+
+
 def test_estimate_effect_group_mismatch_raises(
     synthetic_data: tuple[Array, Array],
     im_lm_svi_fitted: ImpactModel,

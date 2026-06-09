@@ -50,11 +50,11 @@ def test_model_not_fitted() -> None:
         im.predict(None)
 
 
-def test_predict_fall_back(
+def test_predict_local_latent_rerun_warning(
     synthetic_data: tuple[Array, Array],
     im_latent_var_svi_fitted: ImpactModel,
 ) -> None:
-    """Calling `.predict()` warns and falls back on an incompatible model."""
+    """Calling `.predict()` warns and reruns under draw on a local-latent model."""
     X, _ = synthetic_data
     msg = "One or more posterior sample shapes are not compatible"
     with pytest.warns(UserWarning, match=msg):
