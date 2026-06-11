@@ -422,9 +422,14 @@ class _SliceWriteStrategy(_WriteStrategy):
         for site, arr in site_arrays.items():
             if site not in self._seen:
                 if arr.shape[self._axis] != self._chunk_size:
+                    requirement = (
+                        "the input batch size"
+                        if self._axis == 1
+                        else "the draw chunk size"
+                    )
                     msg = (
                         f"Slice writing requires each site's axis-{self._axis} size "
-                        f"to match the input batch size. Site {site!r} emitted shape "
+                        f"to match {requirement}. Site {site!r} emitted shape "
                         f"{arr.shape} for a batch of size {self._chunk_size}; this "
                         "kernel is not currently supported under slice writing."
                     )
