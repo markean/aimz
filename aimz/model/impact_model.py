@@ -64,7 +64,7 @@ from aimz.utils._validation import (
     _validate_X_y_to_jax,
 )
 from aimz.utils.data._input_setup import (
-    _default_batch_size,
+    _resolve_batch_size,
     _setup_inputs,
 )
 
@@ -146,7 +146,7 @@ class ImpactModel(BaseModel):
         # The streaming engine owns the sharded-callable and posterior placement caches.
         self._streamer = _OutputStreamer(
             _RuntimeContext(
-                param_input=self.param_input,
+                self.param_input,
                 param_output=self.param_output,
                 mesh=mesh,
                 num_devices=self._num_devices,
@@ -452,14 +452,11 @@ class ImpactModel(BaseModel):
         if self._num_devices > 1:
             return True
 
-        batch_size = (
-            batch_size
-            if batch_size is not None
-            else _default_batch_size(
-                n_obs,
-                num_samples=self._num_samples,
-                num_devices=self._num_devices,
-            )
+        batch_size = _resolve_batch_size(
+            batch_size,
+            n_obs,
+            other_size=self._num_samples,
+            num_devices=self._num_devices,
         )
 
         return batch_size < n_obs
@@ -1342,7 +1339,6 @@ class ImpactModel(BaseModel):
         """
         _check_is_fitted(self)
         _validate_parallel(parallel)
-
         # No posterior to shard means draw-parallel has nothing to chunk, so it behaves
         # identically to the data-parallel path.
         if not self.posterior:
@@ -1363,11 +1359,9 @@ class ImpactModel(BaseModel):
                 msg = (
                     "One or more posterior sample shapes are not compatible with "
                     "`.predict()` under `parallel='data'`; rerunning with "
-                    "`parallel='draw'`. Pass `parallel='draw'` to silence this "
-                    "warning."
+                    "`parallel='draw'`. Pass `parallel='draw'` to silence this warning."
                 )
                 warn(msg, category=UserWarning, stacklevel=2)
-
                 return self.predict(
                     X,
                     intervention=intervention,
@@ -1583,16 +1577,11 @@ class ImpactModel(BaseModel):
         """
         _check_is_fitted(self)
         _validate_parallel(parallel)
-
         # No posterior to shard means draw-parallel has nothing to chunk, so it behaves
         # identically to the data-parallel path (a single-draw result).
         if not self.posterior:
             parallel = "data"
 
-        # Data-parallel splits the observation axis (across devices or into batches)
-        # while replicating the posterior, so an observation-aligned posterior site
-        # cannot be matched to each slice; rerun under draw-parallel, which holds the
-        # whole input resident. A single unsplit batch matches, so it is left alone.
         if parallel == "data" and self._requires_whole_input(X, batch_size=batch_size):
             msg = (
                 "One or more posterior sample shapes are not compatible with "
@@ -1600,7 +1589,6 @@ class ImpactModel(BaseModel):
                 "`parallel='draw'`. Pass `parallel='draw'` to silence this warning."
             )
             warn(msg, category=UserWarning, stacklevel=2)
-
             return self.log_likelihood(
                 X,
                 y,
@@ -1619,7 +1607,6 @@ class ImpactModel(BaseModel):
             raise TypeError(msg)
 
         output_dir, output_subdir = self._create_output_subdir(output_dir)
-        site = self.param_output
         # Seed once so tracing succeeds even when posterior is empty or only partially
         # covers latent sites.
         kernel = seed(self.kernel, rng_seed=self.rng_key)
@@ -1627,7 +1614,7 @@ class ImpactModel(BaseModel):
             _WriteRequest(
                 parallel=parallel,
                 X=X,
-                return_sites=(site,),
+                return_sites=(self.param_output,),
                 num_samples=self._num_samples,
                 batch_size=batch_size,
                 output_dir=output_subdir,

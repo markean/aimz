@@ -38,62 +38,41 @@ logger = logging.getLogger(__name__)
 MAX_ELEMENTS = 25_000_000
 
 
-def _default_batch_size(n_obs: int, num_samples: int, num_devices: int) -> int:
-    """Resolve the default batch size along the observation axis.
+def _resolve_batch_size(
+    batch_size: int | None,
+    axis_size: int,
+    *,
+    other_size: int,
+    num_devices: int,
+) -> int:
+    """Resolve the per-step batch size along the chunked axis of a 2-axis output.
 
-    Used when ``batch_size`` is not given. The whole input is a single batch when it
-    fits the memory budget; otherwise the batch is capped to ``MAX_ELEMENTS``, rounded
-    down to a multiple of ``num_devices``, and floored at ``num_devices`` to avoid an
-    empty batch.
+    Each streamed step produces an output of ``batch_size * other_size`` elements:
+    data-parallel chunks the observation axis (``other_size`` draws per observation),
+    while draw-parallel chunks the draw axis (``other_size`` resident observations).
+    An explicit ``batch_size`` is used as given. Otherwise the whole axis is a single
+    batch when it fits the memory budget; above it, the batch is capped to
+    ``MAX_ELEMENTS // other_size``, rounded down to a multiple of ``num_devices``,
+    floored at ``num_devices`` to avoid an empty batch, and clamped to ``axis_size``.
 
     Args:
-        n_obs: Number of observations (the length of the observation axis).
-        num_samples: Number of samples drawn per observation.
-        num_devices: Number of devices the observation axis is sharded across.
+        batch_size: The requested batch size, or ``None`` to resolve a default.
+        axis_size: Length of the axis being chunked (observations or draws).
+        other_size: Length of the axis held whole within each step.
+        num_devices: Number of devices the chunked axis is sharded across.
 
     Returns:
         The resolved batch size.
     """
-    if n_obs * num_samples < MAX_ELEMENTS:
-        return n_obs
-    capped = MAX_ELEMENTS // num_samples
-    return max(capped - capped % num_devices, num_devices)
-
-
-def _resolve_draw_batch_size(
-    batch_size: int | None,
-    num_samples: int,
-    n_obs: int,
-    num_devices: int,
-) -> int:
-    """Resolve the per-chunk draw count for draw-parallel streaming.
-
-    When ``batch_size`` is ``None`` the whole posterior is a single chunk if it fits
-    the memory budget; otherwise the draw axis is chunked so each chunk's output stays
-    within ``MAX_ELEMENTS``, rounded down to a multiple of ``num_devices``. An explicit
-    ``batch_size`` is used as given (each chunk is padded to a device multiple).
-
-    Args:
-        batch_size: The requested draws per chunk, or ``None`` to resolve a default.
-        num_samples: Total number of posterior draws.
-        n_obs: Number of observations (the resident, replicated observation axis).
-        num_devices: Number of devices the draw axis is sharded across.
-
-    Returns:
-        The resolved number of draws per chunk.
-    """
     if batch_size is not None:
         return batch_size
-    if num_samples * n_obs < MAX_ELEMENTS:
-        return num_samples
-    cap = max(MAX_ELEMENTS // n_obs, num_devices)
-    batch_size = min(max(cap - cap % num_devices, num_devices), num_samples)
-    logger.info(
-        "Using batch_size=%d (draws per chunk). Specify explicitly to better "
-        "control memory usage.",
-        batch_size,
-    )
-    return batch_size
+
+    if axis_size * other_size < MAX_ELEMENTS:
+        return axis_size
+
+    cap = MAX_ELEMENTS // other_size
+
+    return min(max(cap - cap % num_devices, num_devices), axis_size)
 
 
 def _setup_inputs(
@@ -142,7 +121,12 @@ def _setup_inputs(
                 raise ValueError(msg)
         num_devices = device.num_devices if device else 1
         if batch_size is None:
-            batch_size = _default_batch_size(len(X), num_samples, num_devices)
+            batch_size = _resolve_batch_size(
+                None,
+                len(X),
+                other_size=num_samples,
+                num_devices=num_devices,
+            )
             logger.info(
                 "Using batch_size=%d. Specify explicitly to better control memory "
                 "usage.",

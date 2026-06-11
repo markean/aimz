@@ -24,6 +24,7 @@ log-likelihood.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, NamedTuple, cast
 
@@ -38,7 +39,7 @@ from aimz.utils._output import (
     _SliceWriteStrategy,
     _write_loop,
 )
-from aimz.utils.data._input_setup import _resolve_draw_batch_size, _setup_inputs
+from aimz.utils.data._input_setup import _resolve_batch_size, _setup_inputs
 from aimz.utils.data._sharding import (
     _create_sharded_log_likelihood,
     _create_sharded_sampler,
@@ -55,6 +56,8 @@ if TYPE_CHECKING:
     from jax.typing import ArrayLike
 
     from aimz.utils.data import ArrayLoader
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -476,15 +479,23 @@ class _OutputStreamer:
         sampler / log-likelihood call. ``rng_key`` is ``None`` for log-likelihood;
         ``posterior`` is empty for prior predictive (each chunk draws fresh).
         """
-        batch_size = _resolve_draw_batch_size(
+        batch_size = _resolve_batch_size(
             req.batch_size,
             req.num_samples,
-            len(cast("Sized", req.X)),
-            self._ctx.num_devices,
+            other_size=len(cast("Sized", req.X)),
+            num_devices=self._ctx.num_devices,
         )
+        if req.batch_size is None:
+            logger.info(
+                "Using batch_size=%d (draws per chunk). Specify explicitly to better "
+                "control memory usage.",
+                batch_size,
+            )
         pbar.reset(total=-(-req.num_samples // batch_size))
         kwargs_array, kwargs_extra = _group_kwargs(req.kwargs)
-        x_dev = _replicate(req.X, self._ctx.replicated_sharding)
+        # The public draw-parallel entry points reject data loaders, so `req.X` is
+        # always an array here.
+        x_dev = _replicate(cast("ArrayLike", req.X), self._ctx.replicated_sharding)
         y_dev = _replicate(y, self._ctx.replicated_sharding) if y is not None else None
         tail = (
             *(
