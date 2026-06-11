@@ -308,6 +308,33 @@ class ImpactModel(BaseModel):
 
         self._vi_result = vi_result
 
+    def _bind_kernel_args(
+        self,
+        X: ArrayLike,
+        kwargs: Mapping[str, object],
+    ) -> dict[str, object]:
+        """Bind the input and extra arguments to the kernel signature.
+
+        Args:
+            X: Input data, bound to :attr:`~aimz.ImpactModel.param_input`.
+            kwargs: Additional arguments passed to the model.
+
+        Returns:
+            Mapping of fully bound keyword arguments to invoke the kernel.
+
+        Raises:
+            TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
+                argument.
+        """
+        args_bound = (
+            signature(self.kernel).bind(**{self.param_input: X, **kwargs}).arguments
+        )
+        if self.param_output in args_bound:
+            msg = f"Specifying {self.param_output!r} is not allowed."
+            raise TypeError(msg)
+
+        return args_bound
+
     def _build_kernel_spec(
         self,
         args_bound: Mapping[str, object],
@@ -496,13 +523,7 @@ class ImpactModel(BaseModel):
         """
         X = cast("Array", _validate_X_y_to_jax(X))
 
-        # Validate the provided parameters against the kernel's signature
-        args_bound = (
-            signature(self.kernel).bind(**{self.param_input: X, **kwargs}).arguments
-        )
-        if self.param_output in args_bound:
-            msg = f"Specifying {self.param_output!r} is not allowed."
-            raise TypeError(msg)
+        args_bound = self._bind_kernel_args(X, kwargs)
         self._build_kernel_spec(args_bound, with_output=False)
 
         if rng_key is None:
@@ -594,13 +615,7 @@ class ImpactModel(BaseModel):
             )
             raise TypeError(msg)
 
-        # Validate the provided parameters against the kernel's signature
-        args_bound = (
-            signature(self.kernel).bind(**{self.param_input: X, **kwargs}).arguments
-        )
-        if self.param_output in args_bound:
-            msg = f"Specifying {self.param_output!r} is not allowed."
-            raise TypeError(msg)
+        args_bound = self._bind_kernel_args(X, kwargs)
 
         # Build the kernel spec from the whole-input trace so the return-site defaults
         # (the output and deterministic sites) resolve even before fitting.
@@ -1226,13 +1241,7 @@ class ImpactModel(BaseModel):
 
         X = cast("Array", _validate_X_y_to_jax(X))
 
-        # Validate the provided parameters against the kernel's signature
-        args_bound = (
-            signature(self.kernel).bind(**{self.param_input: X, **kwargs}).arguments
-        )
-        if self.param_output in args_bound:
-            msg = f"Specifying {self.param_output!r} is not allowed."
-            raise TypeError(msg)
+        args_bound = self._bind_kernel_args(X, kwargs)
 
         if rng_key is None:
             self._rng_key, rng_key = random.split(self._rng_key)
@@ -1345,13 +1354,7 @@ class ImpactModel(BaseModel):
             parallel = "data"
 
         if isinstance(X, ArrayLike):
-            # Validate the provided parameters against the kernel's signature
-            args_bound = (
-                signature(self.kernel).bind(**{self.param_input: X, **kwargs}).arguments
-            )
-            if self.param_output in args_bound:
-                msg = f"Specifying {self.param_output!r} is not allowed."
-                raise TypeError(msg)
+            self._bind_kernel_args(X, kwargs)
             if parallel == "data" and self._requires_whole_input(
                 X,
                 batch_size=batch_size,
