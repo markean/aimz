@@ -135,7 +135,7 @@ def _validate_kernel_signature(
         sub = ", ".join(map(repr, param_main))
         msg = (
             f"Kernel must accept {sub} as argument(s). Modify the kernel signature or "
-            "set `param_input` and param_output` accordingly."
+            "set `param_input` and `param_output` accordingly."
         )
         raise KernelValidationError(msg)
 
