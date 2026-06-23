@@ -38,7 +38,7 @@ Feature Summary
 ============================= ==================================== =======================================================
 Feature                       Disk-backed (default)                On-batch (``*_on_batch``)
 ============================= ==================================== =======================================================
-Typical dataset size          Medium → large                       Small → moderate
+Typical dataset size          Medium -> large                       Small -> moderate
 Supported use cases           Standard models                      Broader model support
 Peak memory usage             Chunk-bounded                        Full batch resident
 Writes to disk                Yes                                  No
@@ -46,7 +46,7 @@ Return type                   :external:class:`xarray.DataTree`    :external:cla
                                                                    (via ``return_datatree=False``)
 Custom batch sizing           Yes (``batch_size``)                 No (single pass)
 Device parallelism (sharding) Yes                                  No
-Automatic fallback            Yes (may auto‑delegate to on‑batch)  No (final mode)
+Automatic rerun               Yes (incompatible shapes -> ``draw``) No (final mode)
 Latency (small data)          Higher (I/O + orchestration)         Minimal
 ============================= ==================================== =======================================================
 
@@ -70,8 +70,8 @@ Quick Recommendations
 ---------------------
 * Moderate or large data, or need persisted outputs: use disk-backed (e.g., :meth:`~aimz.ImpactModel.fit`, :meth:`~aimz.ImpactModel.predict`).
 * Small data, rapid iteration, CI, or read-only / ephemeral filesystem: use on-batch (``*_on_batch``).
-* If :meth:`~aimz.ImpactModel.predict` issues a fallback warning, call :meth:`~aimz.ImpactModel.predict_on_batch` directly.
-  This occurs when the model or posterior sample shapes are incompatible with shard-based chunked execution.
+* If :meth:`~aimz.ImpactModel.predict` warns that posterior sample shapes are not compatible with ``shard_axis="obs"``, it automatically reruns under ``shard_axis="draw"``; pass ``shard_axis="draw"`` explicitly to silence the warning (see :ref:`faq-model-compatibility`).
+  For posterior shapes that remain incompatible with chunked execution, call :meth:`~aimz.ImpactModel.predict_on_batch` directly.
 * Custom training loop: iterate with :meth:`~aimz.ImpactModel.train_on_batch`.
 * Need multi-device (sharding) execution: disk-backed.
 * Need raw NumPy/dict outputs (no :external:class:`xarray.DataTree`): on-batch with ``return_datatree=False``.
@@ -82,10 +82,10 @@ Quick Recommendations
    as MCMC is incompatible with epoch-based or chunked batch processing. See :doc:`mcmc` for more details.
 
 
-Example: :meth:`~aimz.ImpactModel.predict` with Fallback Warning
-----------------------------------------------------------------
+Example: :meth:`~aimz.ImpactModel.predict` with an Automatic Rerun
+-------------------------------------------------------------------
 
-A common scenario for the fallback warning occurs when the model contains **local latent variables**, which can make posterior sample shapes incompatible with shard-based parallel execution.
+A common scenario for the rerun warning occurs when the model contains **local latent variables**, which make posterior sample shapes incompatible with data-parallel (observation-sharded) execution; :meth:`~aimz.ImpactModel.predict` then warns and reruns under ``shard_axis="draw"``.
 The example below illustrates this case.
 
 .. jupyter-execute::
@@ -134,7 +134,7 @@ The example below illustrates this case.
 .. jupyter-execute::
     :stderr:
 
-    # Calling `.predict()` triggers a fallback warning
+    # Calling `.predict()` warns and reruns under shard_axis="draw"
     im.predict(X)
 
 

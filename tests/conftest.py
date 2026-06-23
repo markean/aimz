@@ -134,6 +134,16 @@ def latent_variable_model(X: Array, y: Array | None = None) -> None:
     numpyro.sample("y", dist.Normal(z, 1.0), obs=y)
 
 
+def multidim_latent_model(X: Array, y: Array | None = None) -> None:
+    """Model with a rank-3 observation-aligned latent `(num_samples, n_obs, k)`."""
+    z = numpyro.sample(
+        "z",
+        dist.Normal(0.0, 1.0).expand([X.shape[0], 2]).to_event(2),
+    )
+    mu = z.mean(axis=-1) + X.mean(axis=-1)
+    numpyro.sample("y", dist.Normal(mu, 1.0), obs=y)
+
+
 def _make_svi(model: Callable) -> SVI:
 
     return SVI(

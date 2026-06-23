@@ -9,7 +9,7 @@ Built-in Dataset & Loader
 :class:`~aimz.utils.data.ArrayDataset`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 It wraps one or more named arrays passed as keyword-only arguments.
-All arrays must share the same leading-axis size (the sample axis).
+All arrays must share the same leading-axis size (the observation axis).
 By default arrays are stored as supplied; pass ``to_jax=True`` to convert to JAX arrays at construction.
 
 .. code-block:: python
@@ -127,13 +127,13 @@ For fine-grained control (e.g., custom scheduling, gradient accumulation, or ear
 Using Other DataLoader Implementations
 --------------------------------------
 You are not restricted to the built-in loader.
-Any iterable that yields a mapping (field name → array) per batch works with a custom loop, provided the arrays are convertible via :external:func:`jax.numpy.asarray`.
+Any iterable that yields a mapping (field name -> array) per batch works with a custom loop, provided the arrays are convertible via :external:func:`jax.numpy.asarray`.
 
 .. code-block:: python
 
     im = ImpactModel(...)
 
-    # PyTorch DataLoader example (CPU → JAX conversion per batch)
+    # PyTorch DataLoader example (CPU -> JAX conversion per batch)
     dataset = TensorDataset(X, y)
     loader = DataLoader(dataset, batch_size=10, shuffle=True)
 
@@ -182,7 +182,7 @@ You can reuse the same loop pattern for prediction or likelihood evaluation:
         # preds['y'] shape: (num_draws, batch_size, ...); average over draws
         batch_means.append(preds["y"].mean(axis=0))
 
-    # Stitch back together along the sample axis
+    # Stitch back together along the observation axis
     posterior_predictive_mean = jnp.concatenate(batch_means, axis=0)
     # ... further metrics / evaluation
 

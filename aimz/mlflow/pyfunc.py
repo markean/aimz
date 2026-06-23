@@ -42,6 +42,7 @@ class _ImpactModelWrapper(PyFuncModel):
         """Run predictions using the wrapped ImpactModel."""
         if isinstance(model_input, dict):
             return self.model.predict(**model_input, **(params or {}))
+
         return self.model.predict(
             cast("ArrayLike | ArrayLoader", model_input),
             **(params or {}),

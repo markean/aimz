@@ -26,6 +26,7 @@ from numpyro.optim import Adam
 
 from aimz import ImpactModel
 from aimz._exceptions import NotFittedError
+from aimz.model._streaming import _OutputStreamer, _RuntimeContext
 from tests.conftest import lm
 
 
@@ -71,8 +72,22 @@ def test_predict_rejects_unsupported_size(
     the input batch size; ``sigma`` in ``lm`` does not satisfy this.
     """
     X, _ = synthetic_data
-    monkeypatch.setattr(im_lm_svi_fitted, "_mesh", None)
-    monkeypatch.setattr(im_lm_svi_fitted, "_fn_sample_posterior_predictive", None)
+    # Force the single-device (unsharded) path so the slice write strategy's axis-1
+    # check fires for `sigma`, by swapping in a mesh-less streamer.
+    monkeypatch.setattr(
+        im_lm_svi_fitted,
+        "_streamer",
+        _OutputStreamer(
+            _RuntimeContext(
+                param_input=im_lm_svi_fitted.param_input,
+                param_output=im_lm_svi_fitted.param_output,
+                mesh=None,
+                num_devices=1,
+                replicated_sharding=None,
+                partitioned_sharding=None,
+            ),
+        ),
+    )
     with pytest.raises(NotImplementedError, match="match the input batch size"):
         im_lm_svi_fitted.predict(
             X=X,

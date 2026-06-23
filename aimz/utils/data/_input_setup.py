@@ -20,6 +20,7 @@ import logging
 from typing import TYPE_CHECKING
 from warnings import warn
 
+import jax.numpy as jnp
 import numpy as np
 from jax.typing import ArrayLike
 
@@ -32,10 +33,52 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Maximum number of elements allowed per batch or chunk. Each element is assumed to be
-# 4 bytes (float32 or int32). `MAX_ELEMENTS = 25_000_000` corresponds to ~100 MB per
-# chunk, helping to control disk and memory usage during data processing.
-MAX_ELEMENTS = 25_000_000
+# Soft memory budget per batch or chunk, in bytes. The element cap is derived at call
+# time by dividing this by the output dtype's item size, so the budget tracks precision:
+# ~100 MB whether the predictive output is float32 (default, 25M elements) or float64
+# (under `jax_enable_x64`, 12.5M elements). Helps control memory and disk usage.
+MAX_BYTES = 100_000_000
+
+
+def _resolve_batch_size(
+    batch_size: int | None,
+    axis_size: int,
+    other_size: int,
+    num_devices: int,
+) -> int:
+    """Resolve the per-step batch size along the chunked axis of a 2-axis output.
+
+    Each streamed step produces an output of ``batch_size * other_size`` elements:
+    data-parallel chunks the observation axis (``other_size`` draws per observation),
+    while draw-parallel chunks the draw axis (``other_size`` resident observations).
+    An explicit ``batch_size`` is used as given. Otherwise the whole axis is a single
+    batch when it fits the memory budget; above it, the batch is capped to
+    ``(MAX_BYTES // itemsize) // other_size`` (where ``itemsize`` is the output dtype's
+    byte width), rounded down to a multiple of ``num_devices``, floored at
+    ``num_devices`` to avoid an empty batch, and clamped to ``axis_size``.
+
+    Args:
+        batch_size: The requested batch size, or ``None`` to resolve a default.
+        axis_size: Length of the axis being chunked (observations or draws).
+        other_size: Length of the axis held whole within each step.
+        num_devices: Number of devices the chunked axis is sharded across.
+
+    Returns:
+        The resolved batch size.
+    """
+    if batch_size is not None:
+        return batch_size
+
+    # Output chunks hold predictive samples in JAX's default float precision; resolve
+    # the element budget against that dtype so it stays ~MAX_BYTES across precisions.
+    max_elements = MAX_BYTES // jnp.result_type(float).itemsize
+
+    if axis_size * other_size < max_elements:
+        return axis_size
+
+    cap = max_elements // other_size
+
+    return min(max(cap - cap % num_devices, num_devices), axis_size)
 
 
 def _setup_inputs(
@@ -53,10 +96,10 @@ def _setup_inputs(
 
     Args:
         X (ArrayLike | ArrayLoader): Input data. If array-like, the leading axis is
-            the sample axis. Alternatively, a data loader that holds all array-like
+            the observation axis. Alternatively, a data loader that holds all array-like
             objects and handles batching internally.
-        y (ArrayLike | None): Output data. The leading axis is the sample axis. Must
-            be ``None`` if ``X`` is a data loader.
+        y (ArrayLike | None): Output data. The leading axis is the observation axis.
+            Must be ``None`` if ``X`` is a data loader.
         rng_key: A pseudo-random number generator key.
         batch_size: The size of batches for data loading.
         num_samples: Number of samples to draw, which affects the size of batches.
@@ -84,14 +127,12 @@ def _setup_inputs(
                 raise ValueError(msg)
         num_devices = device.num_devices if device else 1
         if batch_size is None:
-            if len(X) * num_samples < MAX_ELEMENTS:
-                batch_size = len(X)
-            else:
-                # Cap batch size to stay within the memory budget, round down to the
-                # nearest multiple of `num_devices`, and ensure at least `num_devices`
-                # to avoid a zero-sized batch.
-                batch_size = MAX_ELEMENTS // num_samples
-                batch_size = max(batch_size - batch_size % num_devices, num_devices)
+            batch_size = _resolve_batch_size(
+                None,
+                axis_size=len(X),
+                other_size=num_samples,
+                num_devices=num_devices,
+            )
             logger.info(
                 "Using batch_size=%d. Specify explicitly to better control memory "
                 "usage.",

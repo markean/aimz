@@ -22,7 +22,7 @@ import xarray as xr
 from jax import Array, random
 
 from aimz import ImpactModel
-from tests.conftest import lm
+from tests.conftest import _make_svi, lm
 
 if TYPE_CHECKING:
     from numpyro.infer import SVI
@@ -86,3 +86,31 @@ def test_sample_prior_predictive_lm(
         ).prior_predictive["y"].values.shape == (1, 99, len(X))
 
     im.cleanup()
+
+
+@pytest.mark.parametrize("shard_axis", ["obs", "draw"])
+def test_sample_prior_predictive_unfitted_both_shard_axes(
+    synthetic_data: tuple[Array, Array],
+    shard_axis: str,
+) -> None:
+    """An unfitted model works under both modes (spec built from a one-row probe).
+
+    The probe only drives kernel-spec discovery (before the streamer dispatch), so it
+    is independent of the sharding strategy.
+    """
+    X, _ = synthetic_data
+    num_samples = 10
+    im = ImpactModel(lm, rng_key=random.key(0), inference=_make_svi(lm))
+    try:
+        dt = im.sample_prior_predictive(
+            X,
+            num_samples=num_samples,
+            batch_size=99,
+            progress=False,
+            shard_axis=shard_axis,
+        )
+        pp = dt["prior_predictive"]
+        assert pp["y"].sizes["draw"] == num_samples
+        assert pp["y"].shape[-1] == len(X)
+    finally:
+        im.cleanup()

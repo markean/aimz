@@ -49,6 +49,7 @@ def _log_likelihood(
     def _loglik_one_sample(sample: dict[str, Array]) -> dict[str, Array]:
         substituted_model = substitute(model, sample) if sample else model
         model_trace = trace(substituted_model).get_trace(**(model_kwargs or {}))
+
         return {
             k: site["fn"].log_prob(site["value"])
             for k, site in model_trace.items()

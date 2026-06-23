@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aimz"
-version = "0.12.0"
+version = "0.13.0.dev0"
 description = "Scalable probabilistic impact modeling"
 readme = "README.md"
 license = "Apache-2.0"
@@ -81,6 +81,7 @@ per-file-ignores = { "aimz/model/_core.py" = [
 ], "tests*" = [
     "ARG001", # unused-function-argument
     "S101",   # assert
+    "SLF001", # private-member-access
 ], "paper*" = [
     "INP001", # implicit-namespace-package
 ], "*.ipynb" = [
