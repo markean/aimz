@@ -7,9 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+- {meth}`~aimz.ImpactModel.predict`, {meth}`~aimz.ImpactModel.log_likelihood`, {meth}`~aimz.ImpactModel.sample_prior_predictive`, and {meth}`~aimz.ImpactModel.sample_posterior_predictive` now accept a `shard_axis` argument selecting the multi-device sharding strategy. The default `"obs"` shards the observation axis of the input across devices and replicates the posterior (the previous behavior). The new `"draw"` shards the drawn samples across devices in chunks of `batch_size` draws while holding the whole input resident. This has no sharding effect on a single device ([#224](https://github.com/markean/aimz/issues/224)).
+
 ### Changed
 
-- {meth}`~aimz.ImpactModel.predict`, {meth}`~aimz.ImpactModel.log_likelihood`, and {meth}`~aimz.ImpactModel.sample_prior_predictive` now place the conditioning samples on devices once instead of re-transferring and re-replicating them on every batch. For {meth}`~aimz.ImpactModel.predict` and {meth}`~aimz.ImpactModel.log_likelihood` the placed posterior is cached across calls (keyed by device sharding and rebuilt whenever the posterior is replaced); {meth}`~aimz.ImpactModel.sample_prior_predictive` places its per-call prior samples once before the batch loop. This is a no-op on a single device and affects performance only, not results ([#219](https://github.com/markean/aimz/issues/219)).
+- {meth}`~aimz.ImpactModel.predict`, {meth}`~aimz.ImpactModel.log_likelihood`, and {meth}`~aimz.ImpactModel.sample_prior_predictive` now place the conditioning samples on devices once instead of re-transferring and re-replicating them on every batch. For the data-parallel path of {meth}`~aimz.ImpactModel.predict` and {meth}`~aimz.ImpactModel.log_likelihood` the placed posterior is cached across calls (keyed by device sharding and rebuilt whenever the posterior is replaced); {meth}`~aimz.ImpactModel.sample_prior_predictive` places its per-call prior samples once before the batch loop. This is a no-op on a single device and affects performance only, not results ([#219](https://github.com/markean/aimz/issues/219)).
+- When an observation-aligned posterior sample shape is detected as incompatible with the default `shard_axis="obs"`, {meth}`~aimz.ImpactModel.predict` now warns and reruns under the new `shard_axis="draw"` scheme instead of falling back to the in-memory {meth}`~aimz.ImpactModel.predict_on_batch`, keeping results streamed to disk and memory-bounded. {meth}`~aimz.ImpactModel.log_likelihood`, which previously failed with a raw shape-broadcasting error for such posteriors, behaves the same way ([#224](https://github.com/markean/aimz/issues/224)).
+- The auto-computed `batch_size` budget is now denominated in bytes rather than a fixed element count. The element cap is derived at call time by dividing the byte budget by the output dtype's item size ([#227](https://github.com/markean/aimz/issues/227)).
 
 ## [v0.12.0](https://github.com/markean/aimz/releases/tag/v0.12.0) - 2026-05-23
 

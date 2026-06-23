@@ -21,9 +21,8 @@ import logging
 from datetime import UTC, datetime
 from inspect import signature, stack
 from pathlib import Path
-from shutil import rmtree
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Self, cast
+from typing import TYPE_CHECKING, Any, Literal, Self, cast
 from warnings import warn
 from weakref import WeakSet
 
@@ -35,7 +34,6 @@ from jax import (
     Array,
     default_backend,
     device_get,
-    device_put,
     jit,
     local_device_count,
     make_mesh,
@@ -47,30 +45,30 @@ from numpyro.handlers import do, seed, substitute, trace
 from numpyro.infer import MCMC, SVI
 from numpyro.infer.svi import SVIRunResult, SVIState
 from tqdm.auto import tqdm
-from zarr import open_group
 
 from aimz.model._core import BaseModel
+from aimz.model._streaming import (
+    _OutputStreamer,
+    _RuntimeContext,
+    _WriteRequest,
+)
 from aimz.model.kernel_spec import KernelSpec
 from aimz.sampling._forward import _sample_forward
 from aimz.utils._format import _build_datatree, _dict_to_datatree
 from aimz.utils._kwargs import _group_kwargs
-from aimz.utils._output import (
-    _determine_writer_queue_size,
-    _select_write_strategy,
-    _shutdown_writer_threads,
-    _start_writer_threads,
-    _WriteStrategy,
-)
 from aimz.utils._validation import (
     _check_is_fitted,
+    _is_arraylike,
+    _validate_aligned_inputs,
+    _validate_batch_size,
     _validate_group,
     _validate_kernel_body,
+    _validate_shard_axis,
     _validate_X_y_to_jax,
 )
-from aimz.utils.data._input_setup import _setup_inputs
-from aimz.utils.data._sharding import (
-    _create_sharded_log_likelihood,
-    _create_sharded_sampler,
+from aimz.utils.data._input_setup import (
+    _resolve_batch_size,
+    _setup_inputs,
 )
 
 if TYPE_CHECKING:
@@ -137,29 +135,33 @@ class ImpactModel(BaseModel):
     def _init_runtime_attrs(self) -> None:
         """Initialize runtime attributes."""
         self._fn_vi_update: Callable | None = None
-        self._fn_sample_prior_predictive: Callable | None = None
-        self._fn_sample_posterior_predictive: Callable | None = None
-        self._fn_log_likelihood: Callable | None = None
-        num_devices = local_device_count()
-        if num_devices > 1:
-            self._mesh = make_mesh(
-                (num_devices,),
+        self._num_devices = local_device_count()
+        if self._num_devices > 1:
+            mesh = make_mesh(
+                (self._num_devices,),
                 axis_names=("obs",),
                 axis_types=(AxisType.Explicit,),
             )
-            self._device = NamedSharding(self._mesh, spec=PartitionSpec("obs"))
-            self._replicated_sharding = NamedSharding(self._mesh, spec=PartitionSpec())
+            partitioned = NamedSharding(mesh, spec=PartitionSpec("obs"))
+            replicated = NamedSharding(mesh, spec=PartitionSpec())
         else:
-            self._mesh = None
-            self._device = None
-            self._replicated_sharding = None
-        self._posterior_device_cache: dict[NamedSharding | None, dict[str, Array]] = {}
-        self._posterior_device_src: dict[str, Array] | None = None
+            mesh = partitioned = replicated = None
+        # The streaming engine owns the sharded-callable and posterior placement caches
+        self._streamer = _OutputStreamer(
+            _RuntimeContext(
+                self.param_input,
+                param_output=self.param_output,
+                mesh=mesh,
+                num_devices=self._num_devices,
+                replicated_sharding=replicated,
+                partitioned_sharding=partitioned,
+            ),
+        )
         self._temp_dir: TemporaryDirectory | None = None
         logger.info(
             "Backend: %s, Devices: %d",
             default_backend(),
-            num_devices,
+            self._num_devices,
         )
 
     def __str__(self) -> str:
@@ -192,7 +194,6 @@ class ImpactModel(BaseModel):
             f"param_output={self.param_output!r};",
             f"kernel_spec={self.kernel_spec!r};",
             f"fitted={getattr(self, '_is_fitted', False)};",
-            f"device={self._device};",
             f"temp_dir={getattr(self, 'temp_dir', None)!r}>",
         ]
 
@@ -220,13 +221,9 @@ class ImpactModel(BaseModel):
                 k.startswith("_fn")
                 or k
                 in {
-                    "_device",
-                    "_mesh",
                     "_num_devices",
-                    "_replicated_sharding",
-                    "_posterior_device_cache",
-                    "_posterior_device_src",
                     "_temp_dir",
+                    "_streamer",
                 }
             )
         }
@@ -313,6 +310,33 @@ class ImpactModel(BaseModel):
         self._is_fitted = True
 
         self._vi_result = vi_result
+
+    def _bind_kernel_args(
+        self,
+        X: ArrayLike,
+        kwargs: Mapping[str, object],
+    ) -> dict[str, object]:
+        """Bind the input and extra arguments to the kernel signature.
+
+        Args:
+            X: Input data, bound to :attr:`~aimz.ImpactModel.param_input`.
+            kwargs: Additional arguments passed to the model.
+
+        Returns:
+            Mapping of fully bound keyword arguments to invoke the kernel.
+
+        Raises:
+            TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
+                argument.
+        """
+        args_bound = (
+            signature(self.kernel).bind(**{self.param_input: X, **kwargs}).arguments
+        )
+        if self.param_output in args_bound:
+            msg = f"Specifying {self.param_output!r} is not allowed."
+            raise TypeError(msg)
+
+        return args_bound
 
     def _build_kernel_spec(
         self,
@@ -421,163 +445,51 @@ class ImpactModel(BaseModel):
 
         return output_dir, output_subdir
 
-    def _place_posterior_on_device(
+    def _requires_whole_input(
         self,
-        sharding: NamedSharding | None,
-    ) -> dict[str, Array]:
-        """Return the posterior placed on devices, cached.
+        X: ArrayLike | ArrayLoader,
+        batch_size: int | None,
+    ) -> bool:
+        """Return whether an observation-aligned posterior requires the whole input.
 
-        The cache is rebuilt whenever ``self._posterior`` is replaced; each distinct
-        ``sharding`` placement coexists in the same cache.
+        Data-parallel replicates the posterior and splits the observation axis of
+        ``X`` across devices or into batches. A posterior site shaped
+        ``(num_samples, n_obs, ...)`` is aligned to that axis, so once it is split the
+        site can no longer be matched to each slice. A single unsplit batch on one
+        device sees every observation, so an aligned site still matches.
 
         Args:
-            sharding: Placement to commit the posterior to, or ``None`` to leave it in
-                place (e.g. single-device).
+            X: Input data. If array-like, the leading axis is the observation axis.
+            batch_size: The requested batch size, or ``None`` to use the default.
 
         Returns:
-            The posterior samples by variable name, placed on devices, or an empty
-            dict when no posterior samples are set.
+            ``True`` if an observation-aligned posterior site would be split from the
+            observations it indexes; ``False`` for a data loader, an empty posterior, a
+            globally-shaped posterior, or a single unsplit batch.
         """
-        if not self.posterior:
-            return {}
-        if self._posterior_device_src is not self._posterior:
-            self._posterior_device_cache = {}
-            # Keep the source posterior alive while its placements are cached, so the
-            # identity check above stays meaningful until _posterior is next replaced.
-            self._posterior_device_src = self._posterior
-        cache = self._posterior_device_cache
-        if sharding not in cache:
-            posterior = cast("dict[str, Array]", self.posterior)
-            # sharding=None (no mesh): leave in place; device_put(..., None) would
-            # force a copy of a host-backed posterior to the default device.
-            cache[sharding] = (
-                posterior
-                if sharding is None
-                else device_put(posterior, device=sharding)
-            )
+        if not isinstance(X, ArrayLike) or not self.posterior:
+            return False
 
-        return cache[sharding]
-
-    def _sample_and_write(
-        self,
-        num_samples: int,
-        rng_key: Array,
-        return_sites: tuple[str, ...],
-        output_dir: Path,
-        kernel: Callable,
-        sampler: Callable,
-        samples: dict[str, Array],
-        dataloader: ArrayLoader,
-        pbar: tqdm,
-        strategy_cls: type[_WriteStrategy],
-        **kwargs: object,
-    ) -> None:
-        """Draw samples using a predictive function and write them concurrently to disk.
-
-        Iterates over batches from the data loader, calls ``sampler`` to generate
-        predictions conditioned on ``samples``, and writes the resulting arrays to a
-        Zarr group. How site arrays are created and enqueued is delegated to
-        ``strategy_cls`` (append vs. preallocated slices); the loop itself is
-        strategy-agnostic.
-
-        Args:
-            num_samples: Number of samples to draw.
-            rng_key: Pseudo-random number generator key.
-            return_sites: Names of variables (sites) to return.
-            output_dir: Directory where outputs will be saved.
-            kernel: Probabilistic model with `NumPyro`_ primitives.
-            sampler: Function performing predictive sampling; must accept the same
-                signature as this function.
-            samples: Arrays to condition predictions on.
-            dataloader: Iterator over batches of input data. Each batch must be a tuple
-                containing a dictionary of arrays and a padding value.
-            pbar: Progress bar instance to display sampling progress.
-            strategy_cls: Write-strategy class deciding how site arrays are created
-                and enqueued (append vs. preallocated slices).
-            **kwargs: Additional arguments passed to the model.
-
-        Raises:
-            Exception: Any exception raised during sampling or writing is logged, the
-                output directory is cleaned up, and the exception is re-raised.
-        """
-        kwargs_array, kwargs_extra = _group_kwargs(kwargs)
-
-        n_batches = len(dataloader)
-        rng_key, *subkeys = random.split(rng_key, num=n_batches + 1)
-        if self._replicated_sharding is not None:
-            subkeys = device_put(
-                subkeys,
-                device=self._replicated_sharding,
-            )
-
-        zarr_group = open_group(output_dir, mode="w")
-        strategy = strategy_cls(
-            zarr_group=zarr_group,
-            draws=num_samples,
-            dataloader=dataloader,
+        n_obs = len(cast("Sized", X))
+        min_aligned_ndim = 2
+        aligned = any(
+            v.ndim >= min_aligned_ndim and v.shape[1] == n_obs
+            for v in self.posterior.values()
         )
-        threads = []
-        queues = {}
-        error_queue = None
-        worker_err: tuple | None = None
-        success = False
-        try:
-            for (batch, n_pad), subkey in zip(dataloader, subkeys, strict=True):
-                kwargs_batch = [
-                    v
-                    for k, v in batch.items()
-                    if k not in (self.param_input, self.param_output)
-                ]
-                dict_arr = device_get(
-                    sampler(
-                        kernel,
-                        num_samples,
-                        subkey,
-                        return_sites,
-                        samples,
-                        self.param_input,
-                        (*kwargs_array, *kwargs_extra),
-                        batch[self.param_input],
-                        *(*kwargs_batch, *kwargs_extra.values()),
-                    ),
-                )
-                sliced = {
-                    site: arr[:, None] if arr.ndim == 1 else arr[:, : -n_pad or None]
-                    for site, arr in dict_arr.items()
-                }
-                strategy.create_arrays(sliced)
-                if error_queue is None:
-                    threads, queues, error_queue = _start_writer_threads(
-                        return_sites,
-                        group_path=output_dir,
-                        apply=strategy.apply,
-                        queue_size=_determine_writer_queue_size(
-                            n_batches,
-                            item_nbytes=max(
-                                1,
-                                sum(int(arr.nbytes) for arr in sliced.values()),
-                            ),
-                        ),
-                    )
-                strategy.enqueue(queues, sliced)
-                if not error_queue.empty():
-                    worker_err = error_queue.get()
-                    break
-                pbar.update()
-            if worker_err is None:
-                pbar.set_description("Sampling complete, writing in progress...")
-                _shutdown_writer_threads(threads, queues)
-                success = True
-        finally:
-            if not success:
-                logger.warning("Cleaning up output directory: %s", output_dir)
+        if not aligned:
+            return False
 
-                _shutdown_writer_threads(threads, queues)
-                rmtree(output_dir, ignore_errors=True)
-            pbar.close()
-        if worker_err is not None:
-            _, exc, tb = worker_err
-            raise exc.with_traceback(tb)
+        if self._num_devices > 1:
+            return True
+
+        batch_size = _resolve_batch_size(
+            batch_size,
+            axis_size=n_obs,
+            other_size=self._num_samples,
+            num_devices=self._num_devices,
+        )
+
+        return batch_size < n_obs
 
     def sample_prior_predictive_on_batch(
         self,
@@ -592,7 +504,7 @@ class ImpactModel(BaseModel):
         """Draw samples from the prior predictive distribution.
 
         Args:
-            X (ArrayLike): Input data. The leading axis is the sample axis.
+            X (ArrayLike): Input data. The leading axis is the observation axis.
             num_samples: The number of samples to draw.
             rng_key: A pseudo-random number generator key. By default, an internal key
                 is used and split as needed.
@@ -614,13 +526,7 @@ class ImpactModel(BaseModel):
         """
         X = cast("Array", _validate_X_y_to_jax(X))
 
-        # Validate the provided parameters against the kernel's signature
-        args_bound = (
-            signature(self.kernel).bind(**{self.param_input: X, **kwargs}).arguments
-        )
-        if self.param_output in args_bound:
-            msg = f"Specifying {self.param_output!r} is not allowed."
-            raise TypeError(msg)
+        args_bound = self._bind_kernel_args(X, kwargs=kwargs)
         self._build_kernel_spec(args_bound, with_output=False)
 
         if rng_key is None:
@@ -629,8 +535,7 @@ class ImpactModel(BaseModel):
         prior_predictive_samples = device_get(
             _sample_forward(
                 self.kernel,
-                rng_key=rng_key,
-                num_samples=num_samples,
+                rng_keys=random.split(rng_key, num=num_samples),
                 return_sites=self._coerce_return_sites(return_sites),
                 samples=None,
                 model_kwargs=args_bound,
@@ -654,6 +559,7 @@ class ImpactModel(BaseModel):
         num_samples: int = 1000,
         rng_key: Array | None = None,
         return_sites: str | Iterable[str] | None = None,
+        shard_axis: Literal["obs", "draw"] = "obs",
         batch_size: int | None = None,
         output_dir: str | Path | None = None,
         progress: bool = True,
@@ -665,16 +571,20 @@ class ImpactModel(BaseModel):
         decoupled and executed concurrently.
 
         Args:
-            X (ArrayLike): Input data. The leading axis is the sample axis.
+            X (ArrayLike): Input data. The leading axis is the observation axis.
             num_samples: The number of samples to draw.
             rng_key: A pseudo-random number generator key. By default, an internal key
                 is used and split as needed.
             return_sites: Names of variables (sites) to return. If ``None``, samples
                 :attr:`~aimz.ImpactModel.param_output` and deterministic sites.
-            batch_size: The batch size for data loading during prior predictive
-                sampling. It also determines the chunk size used to store the samples.
-                If ``None``, it is determined automatically based on the input data and
-                number of samples.
+            shard_axis: Multi-device sharding strategy; no effect on a single device.
+                ``"obs"`` (default) shards the input across devices and replicates the
+                drawn samples. ``"draw"`` shards the drawn samples across devices and
+                replicates the input.
+            batch_size: Size of each batch, taken from the input under
+                ``shard_axis="obs"`` and from the draws under ``shard_axis="draw"``.
+                Also used as the chunk size when storing results. If ``None``, it is
+                determined automatically from the input size and number of samples.
             output_dir: The directory where the outputs will be saved. If the specified
                 directory does not exist, it will be created automatically. If ``None``,
                 a default temporary directory will be created. A timestamped
@@ -689,8 +599,9 @@ class ImpactModel(BaseModel):
         Raises:
             TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
                 argument.
+            ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``.
             NotImplementedError: If a return site's axis-1 size does not match the
-                input batch size.
+                input batch size (``shard_axis="obs"`` only).
 
         See Also:
             :meth:`~aimz.ImpactModel.sample_prior_predictive_on_batch` for an
@@ -699,93 +610,45 @@ class ImpactModel(BaseModel):
             :meth:`~aimz.ImpactModel.cleanup` to remove the temporary directory if
             created.
         """
-        # Validate the provided parameters against the kernel's signature
-        args_bound = (
-            signature(self.kernel).bind(**{self.param_input: X, **kwargs}).arguments
-        )
-        if self.param_output in args_bound:
-            msg = f"Specifying {self.param_output!r} is not allowed."
-            raise TypeError(msg)
+        _validate_shard_axis(shard_axis, X=X)
+        _validate_batch_size(batch_size, X=X)
+        _validate_aligned_inputs(X, y=None, kwargs=kwargs)
+
+        args_bound = self._bind_kernel_args(X, kwargs=kwargs)
+
+        # Build the kernel spec from a single-row slice so the trace runs on a tiny
+        # input. Only when the spec is not already cached (fitted models keep theirs),
+        # and before the return-site defaults resolve so they work even before fitting.
+        if not (self._kernel_spec and self._kernel_spec.traced):
+            probe = {
+                k: (cast("Any", v)[:1] if _is_arraylike(v) else v)
+                for k, v in args_bound.items()
+            }
+            self._build_kernel_spec(probe, with_output=False)
 
         return_sites = self._coerce_return_sites(return_sites)
 
-        # Use a single-element, unsharded probe (batch_size=1) to build the kernel spec
-        # and draw global prior samples once. A sharded probe would propagate the mesh
-        # axis onto global (non-batched) sites via JAX's sharding-in-types, incorrectly
-        # replicating them per device.
-        dataloader, _ = _setup_inputs(
-            X=X,
-            y=None,
-            rng_key=self.rng_key,
-            batch_size=1,
-            num_samples=num_samples,
-            shuffle=False,
-            device=None,
-            **kwargs,
-        )
-        batch, _ = next(iter(dataloader))
-        self._build_kernel_spec(batch, with_output=False)
         if rng_key is None:
             self._rng_key, rng_key = random.split(self._rng_key)
-        rng_key, rng_subkey = random.split(rng_key)
-        prior_samples = _sample_forward(
-            self.kernel,
-            rng_key=rng_subkey,
-            num_samples=num_samples,
-            return_sites=None,
-            samples=None,
-            model_kwargs=batch,
-        )
-        prior_samples = {
-            k: v for k, v in prior_samples.items() if k not in return_sites
-        }
-        # Prior samples are redrawn every call, so (unlike the posterior) this is a
-        # one-shot placement rather than a cached one.
-        if self._replicated_sharding is not None:
-            prior_samples = device_put(
-                prior_samples,
-                device=self._replicated_sharding,
-            )
-
-        kwargs_array, kwargs_extra = _group_kwargs(kwargs)
-        if self._fn_sample_prior_predictive is None:
-            self._fn_sample_prior_predictive = _create_sharded_sampler(
-                self._mesh,
-                n_kwargs_array=len(kwargs_array),
-                n_kwargs_extra=len(kwargs_extra),
-            )
 
         output_dir, output_subdir = self._create_output_subdir(output_dir)
 
-        dataloader, _ = _setup_inputs(
-            X=X,
-            y=None,
-            rng_key=self.rng_key,
-            batch_size=batch_size,
-            num_samples=num_samples,
-            shuffle=False,
-            device=self._device,
-            **kwargs,
-        )
-        n_batches = len(dataloader)
-
-        self._sample_and_write(
-            num_samples,
-            rng_key=rng_key,
-            return_sites=return_sites,
-            output_dir=output_subdir,
-            kernel=self.kernel,
-            sampler=self._fn_sample_prior_predictive,
-            samples=prior_samples,
-            dataloader=dataloader,
-            pbar=tqdm(
-                desc=(f"Prior predictive sampling [{', '.join(return_sites)}]"),
-                total=n_batches,
-                disable=not progress,
-                dynamic_ncols=True,
+        self._streamer.write_predictive(
+            _WriteRequest(
+                shard_axis,
+                X=X,
+                return_sites=return_sites,
+                num_samples=num_samples,
+                batch_size=batch_size,
+                output_dir=output_subdir,
+                progress=progress,
+                loader_rng_key=self.rng_key,
+                kwargs=kwargs,
             ),
-            strategy_cls=_select_write_strategy(dataloader),
-            **kwargs,
+            kernel=self.kernel,
+            rng_key=rng_key,
+            group="prior_predictive",
+            posterior=self.posterior,
         )
 
         return _build_datatree(
@@ -848,8 +711,7 @@ class ImpactModel(BaseModel):
                         self.inference.guide,
                         data=cast("SVIRunResult", self.vi_result).params,
                     ),
-                    rng_key=rng_key,
-                    num_samples=num_samples,
+                    rng_keys=random.split(rng_key, num=num_samples),
                     return_sites=self._coerce_return_sites(return_sites)
                     if return_sites
                     else None,
@@ -883,7 +745,7 @@ class ImpactModel(BaseModel):
         set to ``True``.
 
         Args:
-            X (ArrayLike): Input data. The leading axis is the sample axis.
+            X (ArrayLike): Input data. The leading axis is the observation axis.
             intervention: A dictionary mapping sample sites to their corresponding
                 intervention values. Interventions enable counterfactual analysis by
                 modifying the specified sample sites during prediction (posterior
@@ -923,6 +785,7 @@ class ImpactModel(BaseModel):
         intervention: dict | None = None,
         rng_key: Array | None = None,
         return_sites: str | Iterable[str] | None = None,
+        shard_axis: Literal["obs", "draw"] = "obs",
         batch_size: int | None = None,
         output_dir: str | Path | None = None,
         progress: bool = True,
@@ -935,8 +798,8 @@ class ImpactModel(BaseModel):
 
         Args:
             X (ArrayLike | ArrayLoader): Input data. If array-like, the leading axis is
-                the sample axis. Alternatively, a data loader that holds all array-like
-                objects and handles batching internally.
+                the observation axis. Alternatively, a data loader that holds all
+                array-like objects and handles batching internally.
             intervention: A dictionary mapping sample sites to their corresponding
                 intervention values. Interventions enable counterfactual analysis by
                 modifying the specified sample sites during prediction (posterior
@@ -945,11 +808,18 @@ class ImpactModel(BaseModel):
                 is used and split as needed.
             return_sites: Names of variables (sites) to return. If ``None``, samples
                 :attr:`~aimz.ImpactModel.param_output` and deterministic sites.
-            batch_size: The batch size for data loading during posterior predictive
-                sampling. It also determines the chunk size used to store the samples.
-                If ``None``, it is determined automatically based on the input data and
-                number of samples. Ignored if ``X`` is a data loader, in which case the
-                data loader is expected to handle batching internally.
+            shard_axis: Multi-device sharding strategy; no effect on a single device.
+                ``"obs"`` (default) shards the input across devices and replicates the
+                posterior. ``"draw"`` shards the posterior across devices and replicates
+                the input, which must be an array, not a data loader. If the model has
+                no posterior samples, the data path is used regardless of
+                ``shard_axis``.
+            batch_size: Size of each batch, taken from the input under
+                ``shard_axis="obs"`` and from the draws under ``shard_axis="draw"``.
+                Also used as the chunk size when storing results. If ``None``, it is
+                determined automatically from the input size and number of samples.
+                Ignored if ``X`` is a data loader, in which case the data loader is
+                expected to handle batching internally.
             output_dir: The directory where the outputs will be saved. If the specified
                 directory does not exist, it will be created automatically. If ``None``,
                 a default temporary directory will be created. A timestamped
@@ -963,7 +833,8 @@ class ImpactModel(BaseModel):
 
         Raises:
             TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
-                argument.
+                argument, or ``shard_axis="draw"`` is used with a data loader ``X``.
+            ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``.
 
         See Also:
             :meth:`~aimz.ImpactModel.predict()`.
@@ -975,6 +846,7 @@ class ImpactModel(BaseModel):
             in_sample=True,
             return_sites=return_sites,
             batch_size=batch_size,
+            shard_axis=shard_axis,
             output_dir=output_dir,
             progress=progress,
             **kwargs,
@@ -990,8 +862,8 @@ class ImpactModel(BaseModel):
         """Run a single VI step on the given batch of data.
 
         Args:
-            X (ArrayLike): Input data. The leading axis is the sample axis.
-            y (ArrayLike): Output data. The leading axis is the sample axis.
+            X (ArrayLike): Input data. The leading axis is the observation axis.
+            y (ArrayLike): Output data. The leading axis is the observation axis.
             rng_key: A pseudo-random number generator key. By default, an internal key
                 is used and split as needed. The key is only used for initialization if
                 the internal SVI state is not yet set.
@@ -1056,8 +928,8 @@ class ImpactModel(BaseModel):
             :external:class:`~numpyro.infer.mcmc.MCMC` instance from `NumPyro`_.
 
         Args:
-            X (ArrayLike): Input data. The leading axis is the sample axis.
-            y (ArrayLike): Output data. The leading axis is the sample axis.
+            X (ArrayLike): Input data. The leading axis is the observation axis.
+            y (ArrayLike): Output data. The leading axis is the observation axis.
             num_steps: Number of steps for variational inference optimization. Ignored
                 if the inference method is MCMC.
             num_samples: The number of posterior samples to draw. Ignored if the
@@ -1075,7 +947,7 @@ class ImpactModel(BaseModel):
             This method continues training from the existing SVI state if available. To
             start training from scratch, create a new model instance.
         """
-        X, y = _validate_X_y_to_jax(X, y)
+        X, y = _validate_X_y_to_jax(X, y=y)
 
         # Validate the provided parameters against the kernel's signature
         args_bound = (
@@ -1108,8 +980,7 @@ class ImpactModel(BaseModel):
             rng_key, rng_subkey = random.split(rng_key)
             self._posterior = _sample_forward(
                 substitute(self.inference.guide, data=self.vi_result.params),
-                rng_key=rng_subkey,
-                num_samples=self._num_samples,
+                rng_keys=random.split(rng_subkey, num=self._num_samples),
                 return_sites=None,
                 samples=None,
                 model_kwargs=None,
@@ -1151,9 +1022,9 @@ class ImpactModel(BaseModel):
 
         Args:
             X (ArrayLike | ArrayLoader): Input data. If array-like, the leading axis is
-                the sample axis. Alternatively, a data loader that holds all array-like
-                objects and handles batching internally.
-            y (ArrayLike | None): Output data. The leading axis is the sample axis.
+                the observation axis. Alternatively, a data loader that holds all
+                array-like objects and handles batching internally.
+            y (ArrayLike | None): Output data. The leading axis is the observation axis.
                 Must be ``None`` if ``X`` is a data loader.
             num_samples: The number of posterior samples to draw.
             rng_key: A pseudo-random number generator key. By default, an internal key
@@ -1204,7 +1075,6 @@ class ImpactModel(BaseModel):
             device=None,
             **kwargs,
         )
-        n_batches = len(dataloader)
 
         logger.info("Performing variational inference optimization")
         losses: list[float] = []
@@ -1214,7 +1084,7 @@ class ImpactModel(BaseModel):
             pbar = tqdm(
                 dataloader,
                 desc=f"Epoch {epoch + 1}/{epochs}",
-                total=n_batches,
+                total=len(dataloader),
                 disable=not progress,
                 dynamic_ncols=True,
             )
@@ -1254,8 +1124,7 @@ class ImpactModel(BaseModel):
                 self.inference.guide,
                 data=cast("SVIRunResult", self.vi_result).params,
             ),
-            rng_key=rng_subkey,
-            num_samples=self._num_samples,
+            rng_keys=random.split(rng_subkey, num=self._num_samples),
             return_sites=None,
             samples=None,
             model_kwargs=None,
@@ -1351,7 +1220,7 @@ class ImpactModel(BaseModel):
             parallelism.
 
         Args:
-            X (ArrayLike): Input data. The leading axis is the sample axis.
+            X (ArrayLike): Input data. The leading axis is the observation axis.
             intervention: A dictionary mapping sample sites to their corresponding
                 intervention values. Interventions enable counterfactual analysis by
                 modifying the specified sample sites during prediction (posterior
@@ -1381,13 +1250,7 @@ class ImpactModel(BaseModel):
 
         X = cast("Array", _validate_X_y_to_jax(X))
 
-        # Validate the provided parameters against the kernel's signature
-        args_bound = (
-            signature(self.kernel).bind(**{self.param_input: X, **kwargs}).arguments
-        )
-        if self.param_output in args_bound:
-            msg = f"Specifying {self.param_output!r} is not allowed."
-            raise TypeError(msg)
+        args_bound = self._bind_kernel_args(X, kwargs=kwargs)
 
         if rng_key is None:
             self._rng_key, rng_key = random.split(self._rng_key)
@@ -1401,8 +1264,7 @@ class ImpactModel(BaseModel):
         samples = device_get(
             _sample_forward(
                 kernel,
-                rng_key=rng_key,
-                num_samples=self._num_samples,
+                rng_keys=random.split(rng_key, num=self._num_samples),
                 return_sites=self._coerce_return_sites(return_sites),
                 samples=self.posterior,
                 model_kwargs=args_bound,
@@ -1429,6 +1291,7 @@ class ImpactModel(BaseModel):
         rng_key: Array | None = None,
         in_sample: bool = True,
         return_sites: str | Iterable[str] | None = None,
+        shard_axis: Literal["obs", "draw"] = "obs",
         batch_size: int | None = None,
         output_dir: str | Path | None = None,
         progress: bool = True,
@@ -1444,8 +1307,8 @@ class ImpactModel(BaseModel):
 
         Args:
             X (ArrayLike | ArrayLoader): Input data. If array-like, the leading axis is
-                the sample axis. Alternatively, a data loader that holds all array-like
-                objects and handles batching internally.
+            the observation axis. Alternatively, a data loader that holds all array-like
+            objects and handles batching internally.
             intervention: A dictionary mapping sample sites to their corresponding
                 intervention values. Interventions enable counterfactual analysis by
                 modifying the specified sample sites during prediction (posterior
@@ -1460,11 +1323,18 @@ class ImpactModel(BaseModel):
                 out-of-sample data.
             return_sites: Names of variables (sites) to return. If ``None``, samples
                 :attr:`~aimz.ImpactModel.param_output` and deterministic sites.
-            batch_size: The batch size for data loading during posterior predictive
-                sampling. It also determines the chunk size used to store the samples.
-                If ``None``, it is determined automatically based on the input data
-                and number of samples. Ignored if ``X`` is a data loader, in which case
-                the data loader is expected to handle batching internally.
+            shard_axis: Multi-device sharding strategy; no effect on a single device.
+                ``"obs"`` (default) shards the input across devices and replicates the
+                posterior. ``"draw"`` shards the posterior across devices and replicates
+                the input, which must be an array, not a data loader. If the model has
+                no posterior samples, the data path is used regardless of
+                ``shard_axis``.
+            batch_size: Size of each batch, taken from the input under
+                ``shard_axis="obs"`` and from the draws under ``shard_axis="draw"``.
+                Also used as the chunk size when storing results. If ``None``, it is
+                determined automatically from the input size and number of samples.
+                Ignored if ``X`` is a data loader, in which case the data loader is
+                expected to handle batching internally.
             output_dir: The directory where the outputs will be saved. If the specified
                 directory does not exist, it will be created automatically. If ``None``,
                 a default temporary directory will be created. A timestamped
@@ -1478,49 +1348,49 @@ class ImpactModel(BaseModel):
 
         Raises:
             TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
-                argument.
+                argument, or ``shard_axis="draw"`` is used with a data loader ``X``.
+            ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``.
             NotImplementedError: If a return site's axis-1 size does not match the
-                input batch size.
+                input batch size (``shard_axis="obs"`` only).
 
         See Also:
             :meth:`~aimz.ImpactModel.cleanup` to remove the temporary directory if
             created.
         """
         _check_is_fitted(self)
+        _validate_shard_axis(shard_axis, X=X)
+        _validate_batch_size(batch_size, X=X)
+        _validate_aligned_inputs(X, y=None, kwargs=kwargs)
+        # No posterior to shard means draw-parallel has nothing to chunk, so it behaves
+        # identically to the data-parallel path.
+        if not self.posterior:
+            shard_axis = "obs"
 
         if isinstance(X, ArrayLike):
-            ndim_posterior_sample = 2
-            if self.posterior and any(
-                v.ndim == ndim_posterior_sample and v.shape[1] == len(cast("Sized", X))
-                for v in self.posterior.values()
+            _ = self._bind_kernel_args(X, kwargs=kwargs)
+            if shard_axis == "obs" and self._requires_whole_input(
+                X,
+                batch_size=batch_size,
             ):
                 msg = (
                     "One or more posterior sample shapes are not compatible with "
-                    "`.predict()` under sharded parallelism; falling back to "
-                    "`.predict_on_batch()`."
+                    "`.predict()` under `shard_axis='obs'`; rerunning with "
+                    "`shard_axis='draw'`. Pass `shard_axis='draw'` to silence this "
+                    "warning."
                 )
                 warn(msg, category=UserWarning, stacklevel=2)
-
-                return cast(
-                    "xr.DataTree",
-                    self.predict_on_batch(
-                        cast("ArrayLike", X),
-                        intervention=intervention,
-                        rng_key=rng_key,
-                        in_sample=in_sample,
-                        return_sites=return_sites
-                        or cast("KernelSpec", self._kernel_spec).return_sites,
-                        return_datatree=True,
-                        **kwargs,
-                    ),
+                return self.predict(
+                    X,
+                    intervention=intervention,
+                    rng_key=rng_key,
+                    in_sample=in_sample,
+                    return_sites=return_sites,
+                    shard_axis="draw",
+                    batch_size=batch_size,
+                    output_dir=output_dir,
+                    progress=progress,
+                    **kwargs,
                 )
-            # Validate the provided parameters against the kernel's signature
-            args_bound = (
-                signature(self.kernel).bind(**{self.param_input: X, **kwargs}).arguments
-            )
-            if self.param_output in args_bound:
-                msg = f"Specifying {self.param_output!r} is not allowed."
-                raise TypeError(msg)
 
         if rng_key is None:
             self._rng_key, rng_key = random.split(self._rng_key)
@@ -1533,51 +1403,32 @@ class ImpactModel(BaseModel):
 
         return_sites = self._coerce_return_sites(return_sites)
 
-        kwargs_array, kwargs_extra = _group_kwargs(kwargs)
-        if self._fn_sample_posterior_predictive is None:
-            self._fn_sample_posterior_predictive = _create_sharded_sampler(
-                self._mesh,
-                n_kwargs_array=len(kwargs_array),
-                n_kwargs_extra=len(kwargs_extra),
-            )
+        group = "posterior_predictive" if in_sample else "predictions"
 
         output_dir, output_subdir = self._create_output_subdir(output_dir)
 
-        dataloader, _ = _setup_inputs(
-            X=X,
-            y=None,
-            rng_key=self.rng_key,
-            batch_size=batch_size,
-            num_samples=self._num_samples,
-            shuffle=False,
-            device=self._device,
-            **kwargs,
-        )
-        n_batches = len(dataloader)
-
-        self._sample_and_write(
-            self._num_samples,
-            rng_key=rng_key,
-            return_sites=return_sites,
-            output_dir=output_subdir,
-            kernel=kernel,
-            sampler=self._fn_sample_posterior_predictive,
-            samples=self._place_posterior_on_device(self._replicated_sharding),
-            dataloader=dataloader,
-            pbar=tqdm(
-                desc=(f"Posterior predictive sampling [{', '.join(return_sites)}]"),
-                total=n_batches,
-                disable=not progress,
-                dynamic_ncols=True,
+        self._streamer.write_predictive(
+            _WriteRequest(
+                shard_axis,
+                X=X,
+                return_sites=return_sites,
+                num_samples=self._num_samples,
+                batch_size=batch_size,
+                output_dir=output_subdir,
+                progress=progress,
+                loader_rng_key=self.rng_key,
+                kwargs=kwargs,
             ),
-            strategy_cls=_select_write_strategy(dataloader),
-            **kwargs,
+            kernel=kernel,
+            rng_key=rng_key,
+            group=group,
+            posterior=self.posterior,
         )
 
         return _build_datatree(
             output_dir,
             output_subdir=output_subdir,
-            group="posterior_predictive" if in_sample else "predictions",
+            group=group,
             posterior=self.posterior,
         )
 
@@ -1664,7 +1515,7 @@ class ImpactModel(BaseModel):
             wrapper[group] = _dict_to_datatree(dt_intervention)
             dt_intervention = wrapper
 
-        group = _validate_group(dt_baseline, dt_intervention)
+        group = _validate_group(dt_baseline, dt_intervention=dt_intervention)
 
         out = xr.DataTree(name="root")
         out[group] = dt_intervention[group] - dt_baseline[group]
@@ -1690,6 +1541,7 @@ class ImpactModel(BaseModel):
         X: ArrayLike | ArrayLoader,
         y: ArrayLike | None = None,
         *,
+        shard_axis: Literal["obs", "draw"] = "obs",
         batch_size: int | None = None,
         output_dir: str | Path | None = None,
         progress: bool = True,
@@ -1702,15 +1554,22 @@ class ImpactModel(BaseModel):
 
         Args:
             X (ArrayLike | ArrayLoader): Input data. If array-like, the leading axis is
-                the sample axis. Alternatively, a data loader that holds all array-like
-                objects and handles batching internally.
-            y (ArrayLike | None): Output data. The leading axis is the sample axis. Must
-                be ``None`` if ``X`` is a data loader.
-            batch_size: The batch size for data loading during log-likelihood
-                computation. It also determines the chunk size used to store the
-                samples. If ``None``, it is determined automatically based on the input
-                data and number of samples. Ignored if ``X`` is a data loader, in which
-                case the data loader is expected to handle batching internally.
+            the observation axis. Alternatively, a data loader that holds all array-like
+            objects and handles batching internally.
+            y (ArrayLike | None): Output data. The leading axis is the observation axis.
+                Must be ``None`` if ``X`` is a data loader.
+            shard_axis: Multi-device sharding strategy; no effect on a single device.
+                ``"obs"`` (default) shards the input across devices and replicates the
+                posterior. ``"draw"`` shards the posterior across devices and replicates
+                the input, which must be an array, not a data loader. If the model has
+                no posterior samples, the data path is used regardless of
+                ``shard_axis``.
+            batch_size: Size of each batch, taken from the input under
+                ``shard_axis="obs"`` and from the draws under ``shard_axis="draw"``.
+                Also used as the chunk size when storing results. If ``None``, it is
+                determined automatically from the input size and number of samples.
+                Ignored if ``X`` is a data loader, in which case the data loader is
+                expected to handle batching internally.
             output_dir: The directory where the outputs will be saved. If the specified
                 directory does not exist, it will be created automatically. If ``None``,
                 a default temporary directory will be created. A timestamped
@@ -1723,111 +1582,64 @@ class ImpactModel(BaseModel):
             Log-likelihood values. Posterior samples are included if available.
 
         Raises:
+            TypeError: If ``shard_axis="draw"`` is used with a data loader ``X``.
+            ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``.
             NotImplementedError: If a return site's axis-1 size does not match the
-                input batch size.
+                input batch size (``shard_axis="obs"`` only).
 
         See Also:
             :meth:`~aimz.ImpactModel.cleanup` to remove the temporary directory if
             created.
         """
         _check_is_fitted(self)
+        _validate_shard_axis(shard_axis, X=X)
+        _validate_batch_size(batch_size, X=X)
+        _validate_aligned_inputs(X, y=y, kwargs=kwargs)
 
-        kwargs_array, kwargs_extra = _group_kwargs(kwargs)
-        if self._fn_log_likelihood is None:
-            self._fn_log_likelihood = _create_sharded_log_likelihood(
-                self._mesh,
-                len(kwargs_array),
-                len(kwargs_extra),
+        # No posterior to shard means draw-parallel has nothing to chunk, so it behaves
+        # identically to the data-parallel path (a single-draw result).
+        if not self.posterior:
+            shard_axis = "obs"
+
+        if shard_axis == "obs" and self._requires_whole_input(X, batch_size=batch_size):
+            msg = (
+                "One or more posterior sample shapes are not compatible with "
+                "`.log_likelihood()` under `shard_axis='obs'`; rerunning with "
+                "`shard_axis='draw'`. Pass `shard_axis='draw'` to silence this warning."
+            )
+            warn(msg, category=UserWarning, stacklevel=2)
+            return self.log_likelihood(
+                X,
+                y,
+                batch_size=batch_size,
+                shard_axis="draw",
+                output_dir=output_dir,
+                progress=progress,
+                **kwargs,
             )
 
-        output_dir, output_subdir = self._create_output_subdir(output_dir)
-
-        dataloader, _ = _setup_inputs(
-            X=X,
-            y=y,
-            rng_key=self.rng_key,
-            batch_size=batch_size,
-            num_samples=self._num_samples,
-            shuffle=False,
-            device=self._device,
-            **kwargs,
-        )
-        n_batches = len(dataloader)
-
-        site = self.param_output
-        draws = self._num_samples if self.posterior else 1
-        pbar = tqdm(
-            desc=(f"Computing log-likelihood of {site}..."),
-            total=n_batches,
-            disable=not progress,
-            dynamic_ncols=True,
-        )
-
-        zarr_group = open_group(output_subdir, mode="w")
-        strategy = _select_write_strategy(dataloader)(
-            zarr_group=zarr_group,
-            draws=draws,
-            dataloader=dataloader,
-        )
-        threads = []
-        queues = {}
-        error_queue = None
-        worker_err: tuple | None = None
-        success = False
         # Seed once so tracing succeeds even when posterior is empty or only partially
         # covers latent sites.
         kernel = seed(self.kernel, rng_seed=self.rng_key)
-        try:
-            for batch, n_pad in dataloader:
-                kwargs_batch = [
-                    v
-                    for k, v in batch.items()
-                    if k not in (self.param_input, self.param_output)
-                ]
-                arr = device_get(
-                    self._fn_log_likelihood(
-                        kernel,
-                        self._place_posterior_on_device(self._replicated_sharding),
-                        self.param_input,
-                        site,
-                        (*kwargs_array, *kwargs_extra),
-                        batch[self.param_input],
-                        batch[self.param_output],
-                        *(*kwargs_batch, *kwargs_extra.values()),
-                    ),
-                )
-                sliced = {
-                    site: arr[:, None] if arr.ndim == 1 else arr[:, : -n_pad or None],
-                }
-                strategy.create_arrays(sliced)
-                if error_queue is None:
-                    threads, queues, error_queue = _start_writer_threads(
-                        (site,),
-                        group_path=output_subdir,
-                        apply=strategy.apply,
-                        queue_size=_determine_writer_queue_size(
-                            n_batches,
-                            item_nbytes=max(1, int(sliced[site].nbytes)),
-                        ),
-                    )
-                strategy.enqueue(queues, sliced)
-                if not error_queue.empty():
-                    worker_err = error_queue.get()
-                    break
-                pbar.update()
-            if worker_err is None:
-                pbar.set_description("Computation complete, writing in progress...")
-                _shutdown_writer_threads(threads, queues=queues)
-                success = True
-        finally:
-            if not success:
-                logger.warning("Cleaning up output directory: %s", output_subdir)
-                _shutdown_writer_threads(threads, queues=queues)
-                rmtree(output_subdir, ignore_errors=True)
-            pbar.close()
-        if worker_err is not None:
-            _, exc, tb = worker_err
-            raise exc.with_traceback(tb)
+
+        output_dir, output_subdir = self._create_output_subdir(output_dir)
+
+        self._streamer.write_log_likelihood(
+            _WriteRequest(
+                shard_axis,
+                X=X,
+                return_sites=(self.param_output,),
+                num_samples=self._num_samples,
+                batch_size=batch_size,
+                output_dir=output_subdir,
+                progress=progress,
+                loader_rng_key=self.rng_key,
+                kwargs=kwargs,
+            ),
+            kernel=kernel,
+            posterior=self.posterior,
+            y=y,
+        )
 
         return _build_datatree(
             output_dir,

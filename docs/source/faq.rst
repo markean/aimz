@@ -49,7 +49,7 @@ No.
 Most conventional models with global latents and a plate-based structure work out of the box.
 The core requirement is that every sample site in the model must have a **static shape** that does not change with the data.
 
-On multi-device systems, :meth:`~aimz.ImpactModel.predict` uses `data parallelism <https://jax.readthedocs.io/en/latest/distributed_data_loading.html#data-parallelism>`_: the input data is sharded across devices along axis 0 (the observation dimension), while posterior samples are **replicated** on every device.
+On multi-device systems, :meth:`~aimz.ImpactModel.predict` by default uses `data parallelism <https://jax.readthedocs.io/en/latest/distributed_data_loading.html#data-parallelism>`_: the input data is sharded across devices along axis 0 (the observation axis), while posterior samples are **replicated** on every device.
 The forward sampler used internally also requires every traced site to have a fixed shape across all sample iterations.
 
 Several modeling patterns can violate this requirement.
@@ -57,7 +57,7 @@ The two most common are:
 
 * **Local latent variables**
 
-  A :external:func:`~numpyro.primitives.sample` call inside a :external:class:`~numpyro.primitives.plate` without ``obs=`` produces a posterior whose shape grows with the plate size (e.g., ``(num_samples, n_obs)``).
+  A :external:func:`~numpyro.primitives.sample` call inside a :external:class:`~numpyro.primitives.plate` without ``obs=`` produces a posterior whose shape grows with the plate size along its second (observation) axis — for example ``(num_samples, n_obs)``, or ``(num_samples, n_obs, k)`` for a multi-output site.
   Because ``n_obs`` can differ between training and prediction, the replicated-posterior contract breaks.
 
 * **The** :external:func:`~numpyro.contrib.control_flow.scan` **primitive**
@@ -65,11 +65,22 @@ The two most common are:
   :external:func:`~numpyro.contrib.control_flow.scan` is commonly used for sequential or autoregressive models (e.g., state-space models, time-series forecasting).
   The number of sites it creates typically grows with the sequence length, making the trace shape dynamic for the same reason.
 
-When this incompatibility is detected, :meth:`~aimz.ImpactModel.predict` issues a warning and automatically falls back to :meth:`~aimz.ImpactModel.predict_on_batch`, which processes data in a single batch without sharding.
+When an observation-aligned posterior sample shape is detected as incompatible with the default ``shard_axis="obs"``, :meth:`~aimz.ImpactModel.predict` and :meth:`~aimz.ImpactModel.log_likelihood` issue a warning and automatically rerun under ``shard_axis="draw"``, described below.
 However, if the posterior shapes are fundamentally incompatible with the new input, the forward pass will still fail with a shape mismatch.
 
+For **local latent variables**, you can instead keep the streamed, multi-device path by passing ``shard_axis="draw"`` to :meth:`~aimz.ImpactModel.predict`, :meth:`~aimz.ImpactModel.sample_posterior_predictive`, :meth:`~aimz.ImpactModel.log_likelihood`, or :meth:`~aimz.ImpactModel.sample_prior_predictive`.
+This selects draw-parallel sharding — a multi-device, memory-bounded analog of :external:class:`numpyro.infer.Predictive` with ``parallel=True``: the drawn samples are sharded across devices in chunks while the whole input is held **resident** on every device.
+The observation axis is therefore never split, so a local latent of shape ``(num_samples, n_obs)`` (or higher-rank ``(num_samples, n_obs, ...)``) always matches the full input — regardless of how it is written (inside a :external:class:`~numpyro.primitives.plate` or as a manually expanded distribution), with no plate requirement.
+Because the input is held resident, ``shard_axis="draw"`` requires an in-memory array (not a data loader), and in this mode ``batch_size`` is the number of drawn samples processed per chunk.
+As a rule of thumb, prefer ``shard_axis="draw"`` when the model has local latents or when the input is small relative to the number of draws; prefer the default ``shard_axis="obs"`` when the input is large or arrives through a data loader.
+
+The default ``shard_axis="obs"`` keeps the data-parallel behavior described above; for a model with a local latent, :meth:`~aimz.ImpactModel.predict` and :meth:`~aimz.ImpactModel.log_likelihood` warn and rerun the computation under draw-parallel, so passing ``shard_axis="draw"`` explicitly simply silences the warning.
+Draw-parallel sharding does not lift the static-shape requirement, so :external:func:`~numpyro.contrib.control_flow.scan`-based models remain unsupported.
+
+:meth:`~aimz.ImpactModel.sample_prior_predictive` has no posterior to shard: under ``shard_axis="draw"`` it draws a complete fresh prior sample per chunk against the whole input (request latents via ``return_sites``), while ``shard_axis="obs"`` keeps the observation-streaming path for models with only global latents.
+
 Note that a model with nested plates whose :external:func:`~numpyro.primitives.sample` sites are all observed (``obs=``) or whose latent shapes are fixed remains compatible.
-In contrast, a model with a single plate containing one unobserved :external:func:`~numpyro.primitives.sample` site triggers the fallback.
+In contrast, a model with a single plate containing one unobserved :external:func:`~numpyro.primitives.sample` site triggers the draw-parallel rerun.
 The following examples illustrate the compatibility with :meth:`~aimz.ImpactModel.predict`:
 
 .. code-block:: python
@@ -90,8 +101,9 @@ The following examples illustrate the compatibility with :meth:`~aimz.ImpactMode
             sample("y", dist.Normal(mu), obs=y)
 
 
-    # Falls back to .predict_on_batch(): `mu` is a local latent
-    # with posterior shape (num_samples, X.shape[0])
+    # Warns and reruns under shard_axis="draw" with shard_axis="obs" (the default):
+    # `mu` is a local latent with posterior shape (num_samples, X.shape[0]).
+    # Pass shard_axis="draw" explicitly to silence the warning.
     def kernel(X, y=None):
         ...
         with plate("obs", X.shape[0]):
@@ -111,7 +123,7 @@ Future recipes or example galleries may be provided separately, but the library 
 
 What kinds of data can aimz handle?
 -----------------------------------
-aimz accepts NumPy or JAX arrays of any shape with at least one dimension; the leading axis is treated as the sample axis.
+aimz accepts NumPy or JAX arrays of any shape with at least one dimension; the leading axis is treated as the observation axis.
 This covers tabular inputs (``(n, d)``), 1D inputs (``(n,)``), and higher-rank inputs such as sequences (``(n, seq_len, d)``) or images (``(n, h, w, c)``).
 Multiple named arrays are supported as long as they share the same leading-axis size.
 The output variable has the same flexibility — it can be 1D for scalar targets, 2D for multi-output regression, or higher-rank as the model requires — provided its leading axis matches the input.

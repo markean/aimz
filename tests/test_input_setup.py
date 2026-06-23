@@ -19,7 +19,7 @@ import pytest
 from jax import local_device_count, make_mesh, random
 from jax.sharding import AxisType, NamedSharding, PartitionSpec
 
-from aimz.utils.data._input_setup import MAX_ELEMENTS, _setup_inputs
+from aimz.utils.data._input_setup import MAX_BYTES, _setup_inputs
 
 
 def test_batch_size_capped_when_exceeding_threshold() -> None:
@@ -33,7 +33,9 @@ def test_batch_size_capped_when_exceeding_threshold() -> None:
     device = NamedSharding(mesh, spec=PartitionSpec("obs"))
 
     n = 10
-    num_samples = MAX_ELEMENTS
+    # Mirror the implementation's dtype-aware element budget.
+    max_elements = MAX_BYTES // jnp.result_type(float).itemsize
+    num_samples = max_elements
     X = jnp.ones((n, 2))
 
     loader, _ = _setup_inputs(
@@ -45,7 +47,7 @@ def test_batch_size_capped_when_exceeding_threshold() -> None:
         device=device,
     )
 
-    # batch_size = MAX_ELEMENTS // num_samples = MAX_ELEMENTS // MAX_ELEMENTS = 1.
+    # batch_size = max_elements // num_samples = max_elements // max_elements = 1.
     # Round down to nearest multiple of num_devices: 1 - 1 % num_devices = 0.
     # Floor at num_devices to avoid zero: max(0, num_devices) = num_devices.
     assert loader.batch_size == num_devices

@@ -49,7 +49,11 @@ class BaseModel(ABC):
         self._kernel = kernel
         self._param_input = param_input
         self._param_output = param_output
-        _validate_kernel_signature(self._kernel, self._param_input, self._param_output)
+        _validate_kernel_signature(
+            self._kernel,
+            param_input=self._param_input,
+            param_output=self._param_output,
+        )
 
     @abstractmethod
     def fit(self, X, y, **kwargs) -> Self:
