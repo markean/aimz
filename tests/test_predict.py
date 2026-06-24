@@ -97,6 +97,16 @@ def test_predict_rejects_unsupported_size(
         )
 
 
+def test_predict_rejects_unknown_return_site(
+    synthetic_data: tuple[Array, Array],
+    im_lm_svi_fitted: ImpactModel,
+) -> None:
+    """`.predict()` rejects a return site absent from the kernel trace."""
+    X, _ = synthetic_data
+    with pytest.raises(ValueError, match=r"Unknown return site\(s\): 'typo'"):
+        im_lm_svi_fitted.predict(X=X, return_sites="typo", progress=False)
+
+
 class TestKernelParameterValidation:
     """Test class for validating parameter compatibility with the kernel."""
 

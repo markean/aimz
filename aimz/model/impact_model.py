@@ -391,20 +391,33 @@ class ImpactModel(BaseModel):
         self,
         return_sites: str | Iterable[str] | None,
     ) -> tuple[str, ...]:
-        """Return a normalized tuple of site names.
+        """Return a normalized, validated tuple of site names.
 
         Args:
             return_sites: User-provided site name(s) or ``None``.
 
         Returns:
             A tuple of site names.
-        """
-        if return_sites is None:
-            return cast("KernelSpec", self._kernel_spec).return_sites
-        if isinstance(return_sites, str):
-            return (return_sites,)
 
-        return tuple(str(s) for s in return_sites)
+        Raises:
+            ValueError: If a requested site is not present in the traced kernel.
+        """
+        spec = self._kernel_spec
+        if return_sites is None:
+            return cast("KernelSpec", spec).return_sites
+        requested = (
+            (return_sites,)
+            if isinstance(return_sites, str)
+            else tuple(str(s) for s in return_sites)
+        )
+        if spec is not None and spec.traced:
+            known = set(spec.sample_sites) | set(spec.return_sites)
+            unknown = [site for site in requested if site not in known]
+            if unknown:
+                msg = f"Unknown return site(s): {', '.join(map(repr, unknown))}."
+                raise ValueError(msg)
+
+        return requested
 
     def _create_output_subdir(
         self,
