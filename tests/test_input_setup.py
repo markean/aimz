@@ -75,3 +75,18 @@ def test_y_zero_dim_raises() -> None:
             batch_size=None,
             num_samples=1,
         )
+
+
+def test_non_array_kwargs_classified_as_extra() -> None:
+    """Non-array keyword arguments are routed to extras, not the batched dataset."""
+    loader, extra = _setup_inputs(
+        X=jnp.ones((4, 2)),
+        y=None,
+        rng_key=random.key(0),
+        batch_size=2,
+        num_samples=1,
+        family="gaussian",
+    )
+
+    assert set(loader.dataset.arrays) == {"X"}
+    assert extra == {"family": "gaussian"}
