@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - When an observation-aligned posterior sample shape is detected as incompatible with the default `shard_axis="obs"`, {meth}`~aimz.ImpactModel.predict` now warns and reruns under the new `shard_axis="draw"` scheme instead of falling back to the in-memory {meth}`~aimz.ImpactModel.predict_on_batch`, keeping results streamed to disk and memory-bounded. {meth}`~aimz.ImpactModel.log_likelihood`, which previously failed with a raw shape-broadcasting error for such posteriors, behaves the same way ([#224](https://github.com/markean/aimz/issues/224)).
 - The auto-computed `batch_size` budget is now denominated in bytes rather than a fixed element count. The element cap is derived at call time by dividing the byte budget by the output dtype's item size ([#227](https://github.com/markean/aimz/issues/227)).
 
+### Fixed
+
+- Keyword arguments to the disk-backed methods whose values are strings or mappings are no longer mistaken for array inputs. Previously such a value was routed into the observation-axis batching pipeline and raised a misleading leading-axis error ([#229](https://github.com/markean/aimz/issues/229)).
+
 ## [v0.12.0](https://github.com/markean/aimz/releases/tag/v0.12.0) - 2026-05-23
 
 ### Changed
