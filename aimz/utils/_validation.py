@@ -78,7 +78,8 @@ def _validate_group(dt_baseline: xr.DataTree, dt_intervention: xr.DataTree) -> s
         The group name (``predictions`` or ``posterior_predictive``).
 
     Raises:
-        ValueError: If the group is not found in ``dt_intervention``.
+        ValueError: If the chosen group is missing from ``dt_baseline`` or
+            ``dt_intervention``.
     """
     group = (
         "predictions"
@@ -86,10 +87,16 @@ def _validate_group(dt_baseline: xr.DataTree, dt_intervention: xr.DataTree) -> s
         else "posterior_predictive"
     )
 
-    if group not in dt_intervention.children:
-        sub = group
+    if group not in dt_baseline.children:
         msg = (
-            f"Group {sub!r} not found in `dt_intervention`. Available "
+            f"Group {group!r} not found in `dt_baseline`. Available "
+            f"groups: {', '.join(map(repr, dt_baseline.children))}"
+        )
+        raise ValueError(msg)
+
+    if group not in dt_intervention.children:
+        msg = (
+            f"Group {group!r} not found in `dt_intervention`. Available "
             f"groups: {', '.join(map(repr, dt_intervention.children))}"
         )
         raise ValueError(msg)

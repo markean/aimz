@@ -157,17 +157,25 @@ def test_estimate_effect_group_mismatch_raises(
     synthetic_data: tuple[Array, Array],
     im_lm_svi_fitted: ImpactModel,
 ) -> None:
-    """Mismatched groups between baseline and intervention raise ``ValueError``."""
+    """A predictive group missing from either side raises ``ValueError``."""
     X, _ = synthetic_data
 
-    dt_baseline = im_lm_svi_fitted.predict_on_batch(X)
-    dt_intervention = im_lm_svi_fitted.predict_on_batch(X, in_sample=False)
-
+    # Group present in the baseline but missing from the intervention.
     with pytest.raises(
         ValueError,
         match=r"Group 'posterior_predictive' not found in `dt_intervention`.",
     ):
         im_lm_svi_fitted.estimate_effect(
-            output_baseline=dt_baseline,
-            output_intervention=dt_intervention,
+            output_baseline=im_lm_svi_fitted.predict_on_batch(X),
+            output_intervention=im_lm_svi_fitted.predict_on_batch(X, in_sample=False),
+        )
+
+    # Group missing from the baseline (prior-predictive has no posterior_predictive).
+    with pytest.raises(
+        ValueError,
+        match=r"Group 'posterior_predictive' not found in `dt_baseline`.",
+    ):
+        im_lm_svi_fitted.estimate_effect(
+            output_baseline=im_lm_svi_fitted.sample_prior_predictive_on_batch(X),
+            output_intervention=im_lm_svi_fitted.predict_on_batch(X),
         )
