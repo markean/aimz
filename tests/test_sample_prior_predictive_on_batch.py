@@ -17,7 +17,6 @@
 import jax.numpy as jnp
 import numpyro.distributions as dist
 import pytest
-import xarray as xr
 from jax import Array, random
 from numpyro import sample
 from numpyro.infer import SVI, Trace_ELBO
