@@ -29,7 +29,7 @@ It consumes an :class:`~aimz.utils.data.ArrayDataset` and produces an iterator o
 * ``batch_dict`` maps each field name to a (possibly padded) mini-batch array.
 * ``n_pad`` is the number of synthetic examples added so the (possibly last) batch size is divisible by the number of local devices.
   When no device is specified (``device=None``), no padding is performed and ``n_pad`` is always ``0``.
-  If set, batch is padded (if needed) then moved via :func:`jax.device_put`.
+  If set, batch is padded (if needed) then moved via :external:func:`jax.device_put`.
   Padding uses :external:func:`jax.numpy.pad` with ``mode="edge"`` (it repeats the last row) so shapes align for sharded computations; callers can ignore those rows (track via ``n_pad``).
   The ``batch_size`` must be a positive integer, and if using a device or sharding it is best to choose a multiple of :external:func:`jax.local_device_count()` to avoid padding.
 
@@ -93,14 +93,27 @@ If the user pass raw arrays instead, :meth:`~aimz.ImpactModel.fit` may internall
     # Set up variational inference strategy
     vi = SVI(model, ...)
 
-    # Initialize ImpactModel with a model, random key, and SVI object
-    im = ImpactModel(model, rng_key=random.key(0), svi=vi)
+    # Initialize ImpactModel with a model, random key, and inference object
+    im = ImpactModel(model, rng_key=random.key(0), inference=vi)
 
-    # Use a prepared ArrayLoader for explicit batching/shuffling
+    # Build one loader for both fit and predict. Loaders do not shuffle by default,
+    # so prediction output stays aligned with the input order.
+    loader = ArrayLoader(
+        ArrayDataset(X=X, y=y),
+        rng_key=random.key(0),
+        batch_size=10,
+    )
+
+    # Explicit batching for fit
     im.fit(loader, epochs=10)
 
-    # Predictions also accept a loader for consistent batching
+    # Predictions accept the same loader for consistent batching
     preds = im.predict(loader)
+
+.. note::
+
+    :class:`~aimz.utils.data.ArrayLoader` does not shuffle by default (``shuffle=False``), which is what prediction requires: streamed output is written in input order, so a ``shuffle=True`` loader would misalign the results with the input rows.
+    Enable ``shuffle=True`` only for training/fit loops.
 
 
 Custom Training Loops with :meth:`~aimz.ImpactModel.train_on_batch`
@@ -135,7 +148,7 @@ Any iterable that yields a mapping (field name -> array) per batch works with a 
 
     # PyTorch DataLoader example (CPU -> JAX conversion per batch)
     dataset = TensorDataset(X, y)
-    loader = DataLoader(dataset, batch_size=10, shuffle=True)
+    loader = DataLoader(dataset, batch_size=10)
 
     losses = []
     for epoch in range(num_epochs):
