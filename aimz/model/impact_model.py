@@ -1271,8 +1271,7 @@ class ImpactModel(BaseModel):
         if intervention is None:
             kernel = self.kernel
         else:
-            rng_key, rng_subkey = random.split(rng_key)
-            kernel = seed(do(self.kernel, data=intervention), rng_seed=rng_subkey)
+            kernel = do(self.kernel, data=intervention)
 
         samples = device_get(
             _sample_forward(
@@ -1411,8 +1410,7 @@ class ImpactModel(BaseModel):
         if intervention is None:
             kernel = self.kernel
         else:
-            rng_key, rng_subkey = random.split(rng_key)
-            kernel = seed(do(self.kernel, data=intervention), rng_seed=rng_subkey)
+            kernel = do(self.kernel, data=intervention)
 
         return_sites = self._coerce_return_sites(return_sites)
 
