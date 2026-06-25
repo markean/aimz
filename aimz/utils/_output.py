@@ -202,11 +202,6 @@ def _shutdown_writer_threads(
 ) -> None:
     """Signal writer threads to stop and wait for their completion.
 
-    Idempotent: a sentinel is only sent to a still-running thread, and completion is
-    awaited via ``thread.join()`` (not ``queue.join()``). A repeated call therefore
-    cannot enqueue an unconsumed sentinel and block forever -- which happens when an
-    interrupt lands during the success-path shutdown and the ``finally`` re-runs it.
-
     Args:
         threads: List of writer threads to join.
         queues: Mapping of site names to their respective queues.
