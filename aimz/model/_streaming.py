@@ -127,9 +127,7 @@ class _OutputStreamer:
             ctx: Stable sharding configuration for the owning model.
         """
         self._ctx = ctx
-        # Sharded sampling/log-likelihood callables, built lazily and cached by
-        # ``(kind, shard_axis)`` so new kinds or strategies need no new slot.
-        self._fn_cache: dict[tuple[str, str], Callable] = {}
+        self._fn_cache: dict[tuple[str, str, int, int], Callable] = {}
         self._posterior_device_cache: dict[Sharding | None, dict[str, Array]] = {}
         self._posterior_device_src: dict[str, Array] | None = None
 
@@ -141,12 +139,14 @@ class _OutputStreamer:
         n_kwargs_array: int,
         n_kwargs_extra: int,
     ) -> Callable:
-        """Build a sharded callable once and cache it by ``(kind, shard_axis)``.
+        """Build a sharded callable once and cache it.
 
-        Returns the cached callable, building it with ``factory`` (which selects the
-        partition specs) on first use.
+        Keyed by ``(kind, shard_axis, n_kwargs_array, n_kwargs_extra)``: the kwarg
+        counts are baked into the ``shard_map`` ``in_specs``, so a call with a different
+        arity needs its own callable rather than reusing a stale one. The callable is
+        built with ``factory`` (which selects the partition specs) on first use.
         """
-        key = (kind, shard_axis)
+        key = (kind, shard_axis, n_kwargs_array, n_kwargs_extra)
         fn = self._fn_cache.get(key)
         if fn is None:
             fn = factory(
