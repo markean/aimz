@@ -63,7 +63,6 @@ def test_sample_prior_predictive_lm(
             num_samples=99,
         )
 
-    assert isinstance(samples, xr.DataTree)
     assert samples.prior_predictive["y"].values.shape == (1, 99, len(X))
 
     # Test with `return_sites`

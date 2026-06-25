@@ -19,6 +19,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from inspect import Parameter, getfullargspec, signature
 from typing import TYPE_CHECKING
+from warnings import warn
 
 import jax.numpy as jnp
 import numpy as np
@@ -68,7 +69,10 @@ def _is_fitted(model: ImpactModel) -> bool:
 
 
 def _validate_group(dt_baseline: xr.DataTree, dt_intervention: xr.DataTree) -> str:
-    """Validate the groups in ``dt_baseline`` and ``dt_intervention``.
+    """Select the shared predictive group and check the two scenarios are comparable.
+
+    Picks ``predictions`` if present in ``dt_baseline``, otherwise
+    ``posterior_predictive``, and verifies it exists in both trees.
 
     Args:
         dt_baseline: Precomputed output for the baseline scenario.
@@ -80,6 +84,8 @@ def _validate_group(dt_baseline: xr.DataTree, dt_intervention: xr.DataTree) -> s
     Raises:
         ValueError: If the chosen group is missing from ``dt_baseline`` or
             ``dt_intervention``.
+        UserWarning: If the chosen group's dimension sizes differ between the two
+            scenarios (the effect subtraction would then inner-join to the overlap).
     """
     group = (
         "predictions"
@@ -100,6 +106,14 @@ def _validate_group(dt_baseline: xr.DataTree, dt_intervention: xr.DataTree) -> s
             f"groups: {', '.join(map(repr, dt_intervention.children))}"
         )
         raise ValueError(msg)
+
+    if dict(dt_baseline[group].sizes) != dict(dt_intervention[group].sizes):
+        msg = (
+            f"Baseline and intervention have different dimension sizes in group "
+            f"{group!r}: {dict(dt_baseline[group].sizes)} vs "
+            f"{dict(dt_intervention[group].sizes)}."
+        )
+        warn(msg, category=UserWarning, stacklevel=3)
 
     return group
 

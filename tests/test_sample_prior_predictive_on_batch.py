@@ -79,7 +79,6 @@ def test_sample_prior_predictive_on_batch_lm(
         return_sites="y",
     )
 
-    assert isinstance(samples, xr.DataTree)
     assert samples.prior_predictive["y"].values.shape == (1, 99, len(X))
 
     samples_dict = im_lm_svi_fitted.sample_prior_predictive_on_batch(

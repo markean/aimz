@@ -179,3 +179,20 @@ def test_estimate_effect_group_mismatch_raises(
             output_baseline=im_lm_svi_fitted.sample_prior_predictive_on_batch(X),
             output_intervention=im_lm_svi_fitted.predict_on_batch(X),
         )
+
+
+def test_estimate_effect_warns_on_size_mismatch(
+    synthetic_data: tuple[Array, Array],
+    im_lm_svi_fitted: ImpactModel,
+) -> None:
+    """A dimension-size mismatch between the scenarios warns."""
+    X, _ = synthetic_data
+
+    base = im_lm_svi_fitted.predict_on_batch(X)
+    intervention = im_lm_svi_fitted.predict_on_batch(X[:80])
+
+    with pytest.warns(UserWarning, match="different dimension sizes"):
+        im_lm_svi_fitted.estimate_effect(
+            output_baseline=base,
+            output_intervention=intervention,
+        )

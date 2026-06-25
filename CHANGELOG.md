@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Interrupting a disk-backed run ({meth}`~aimz.ImpactModel.predict`, {meth}`~aimz.ImpactModel.log_likelihood`, {meth}`~aimz.ImpactModel.sample_prior_predictive`) with `Ctrl-C` during the write phase no longer hangs; the interrupt now exits and the partially-written output directory is removed ([#235](https://github.com/markean/aimz/issues/235)).
 - On multi-device hosts, calling a disk-backed method again with a different number of array or keyword arguments no longer fails with a sharding structure error ([#237](https://github.com/markean/aimz/issues/237)).
 - {meth}`~aimz.ImpactModel.predict` / {meth}`~aimz.ImpactModel.predict_on_batch` interventions (and {meth}`~aimz.ImpactModel.estimate_effect`) no longer reuse one likelihood-noise draw across all posterior draws, fixing under-dispersed intervention predictions and intervals ([#239](https://github.com/markean/aimz/issues/239)).
+- {meth}`~aimz.ImpactModel.estimate_effect` now warns when the baseline and intervention scenarios have different dimension sizes, instead of silently computing the effect on their overlap ([#241](https://github.com/markean/aimz/issues/241)).
 
 ## [v0.12.0](https://github.com/markean/aimz/releases/tag/v0.12.0) - 2026-05-23
 
