@@ -18,7 +18,6 @@ from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
-import xarray as xr
 from jax import Array, random
 
 from aimz import ImpactModel
