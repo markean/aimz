@@ -518,12 +518,14 @@ def _write_loop(
             pbar.update()
         if worker_err is None:
             pbar.set_description("Writing in progress...")
-            _shutdown_writer_threads(threads, queues=queues)
-            success = True
+        success = worker_err is None
     finally:
+        _shutdown_writer_threads(threads, queues=queues)
+        if success and error_queue is not None and not error_queue.empty():
+            worker_err = error_queue.get()
+            success = False
         if not success:
             logger.warning("Cleaning up output directory: %s", output_dir)
-            _shutdown_writer_threads(threads, queues=queues)
             rmtree(output_dir, ignore_errors=True)
         pbar.close()
     if worker_err is not None:
