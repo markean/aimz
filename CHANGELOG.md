@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - {meth}`~aimz.ImpactModel.predict` / {meth}`~aimz.ImpactModel.predict_on_batch` interventions (and {meth}`~aimz.ImpactModel.estimate_effect`) no longer reuse one likelihood-noise draw across all posterior draws, fixing under-dispersed intervention predictions and intervals ([#239](https://github.com/markean/aimz/issues/239)).
 - {meth}`~aimz.ImpactModel.estimate_effect` now warns when the baseline and intervention scenarios have different dimension sizes, instead of silently computing the effect on their overlap ([#241](https://github.com/markean/aimz/issues/241)).
 - A background writer-thread failure while streaming results to disk now raises instead of being swallowed; previously disk-backed methods could return a silently zero-filled or truncated result ([#243](https://github.com/markean/aimz/issues/243)).
+- {meth}`~aimz.ImpactModel.sample_prior_predictive` under the default `shard_axis="obs"` now forwards non-array keyword arguments to the model when drawing prior samples; previously they were dropped, so those samples used the kernel's default values (silently wrong) or raised a `TypeError` for a required argument ([#245](https://github.com/markean/aimz/issues/245)).
 
 ## [v0.12.0](https://github.com/markean/aimz/releases/tag/v0.12.0) - 2026-05-23
 
