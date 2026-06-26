@@ -115,6 +115,11 @@ If the user pass raw arrays instead, :meth:`~aimz.ImpactModel.fit` may internall
     :class:`~aimz.utils.data.ArrayLoader` does not shuffle by default (``shuffle=False``), which is what prediction requires: streamed output is written in input order, so a ``shuffle=True`` loader would misalign the results with the input rows.
     Enable ``shuffle=True`` only for training/fit loops.
 
+.. note::
+
+    A loader's dataset fields are bound to the kernel's parameters by name: the input field must match :attr:`~aimz.ImpactModel.param_input` (``"X"`` by default), the output field used by :meth:`~aimz.ImpactModel.log_likelihood` must match :attr:`~aimz.ImpactModel.param_output`, and any additional array fields must be named after the kernel parameters they supply.
+    Provide such extra arrays as loader fields rather than as keyword arguments alongside the loader.
+
 
 Custom Training Loops with :meth:`~aimz.ImpactModel.train_on_batch`
 -------------------------------------------------------------------

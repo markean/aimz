@@ -193,3 +193,40 @@ class TestArrayLoader:
             "fitting with a data loader can match, if the rng_key is properly set."
         )
         ImpactModel.cleanup_models()
+
+    def test_predict_with_loader_extra_array_binds_by_name(
+        self,
+        synthetic_data: tuple[Array, Array],
+        im_lm_with_kwargs_svi_fitted: ImpactModel,
+    ) -> None:
+        """A loader carrying an extra array field binds it by name, matching kwargs."""
+        X, y = synthetic_data
+        im = im_lm_with_kwargs_svi_fitted
+        rng_key = random.key(7)
+        ref = im.predict(X, c=y, rng_key=rng_key, batch_size=len(X), progress=False)
+        loader = ArrayLoader(
+            ArrayDataset(X=X, c=y),
+            rng_key=random.key(0),
+            batch_size=len(X),
+        )
+        via = im.predict(loader, rng_key=rng_key, progress=False)
+
+        assert jnp.allclose(
+            ref.posterior_predictive["y"].values,
+            via.posterior_predictive["y"].values,
+        )
+
+    def test_predict_loader_binding_guards(
+        self,
+        synthetic_data: tuple[Array, Array],
+        im_lm_with_kwargs_svi_fitted: ImpactModel,
+    ) -> None:
+        """Misusing a data loader's array fields raises clear errors."""
+        X, y = synthetic_data
+        im = im_lm_with_kwargs_svi_fitted
+        loader = ArrayLoader(ArrayDataset(X=X, c=y), rng_key=random.key(0))
+        with pytest.raises(ValueError, match="not supported alongside a data loader"):
+            im.predict(loader, c=y, progress=False)
+        no_input = ArrayLoader(ArrayDataset(c=y), rng_key=random.key(0))
+        with pytest.raises(ValueError, match="no field named 'X'"):
+            im.predict(no_input, progress=False)
