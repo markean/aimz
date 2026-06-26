@@ -294,7 +294,7 @@ class _OutputStreamer:
                 rng_keys=random.split(rng_subkey, num=req.num_samples),
                 return_sites=None,
                 samples=None,
-                model_kwargs=batch,
+                model_kwargs={**batch, **kwargs_extra},
             )
             samples = {k: v for k, v in samples.items() if k not in req.return_sites}
             if self._ctx.replicated_sharding is not None:

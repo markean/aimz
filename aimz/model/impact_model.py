@@ -590,10 +590,9 @@ class ImpactModel(BaseModel):
                 is used and split as needed.
             return_sites: Names of variables (sites) to return. If ``None``, samples
                 :attr:`~aimz.ImpactModel.param_output` and deterministic sites.
-            shard_axis: Multi-device sharding strategy; no effect on a single device.
-                ``"obs"`` (default) shards the input across devices and replicates the
-                drawn samples. ``"draw"`` shards the drawn samples across devices and
-                replicates the input.
+            shard_axis: Multi-device sharding strategy. ``"obs"`` (default) shards the
+                input across devices and replicates the drawn samples. ``"draw"`` shards
+                the drawn samples across devices and replicates the input.
             batch_size: Size of each batch, taken from the input under
                 ``shard_axis="obs"`` and from the draws under ``shard_axis="draw"``.
                 Also used as the chunk size when storing results. If ``None``, it is
