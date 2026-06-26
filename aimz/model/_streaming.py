@@ -38,6 +38,7 @@ from aimz.utils._output import (
     _SliceWriteStrategy,
     _write_loop,
 )
+from aimz.utils.data import ArrayLoader
 from aimz.utils.data._input_setup import _resolve_batch_size, _setup_inputs
 from aimz.utils.data._sharding import (
     _create_sharded_log_likelihood,
@@ -53,8 +54,6 @@ if TYPE_CHECKING:
     import numpy as np
     from jax.sharding import Mesh, Sharding
     from jax.typing import ArrayLike
-
-    from aimz.utils.data import ArrayLoader
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +144,17 @@ class _OutputStreamer:
         counts are baked into the ``shard_map`` ``in_specs``, so a call with a different
         arity needs its own callable rather than reusing a stale one. The callable is
         built with ``factory`` (which selects the partition specs) on first use.
+
+        Args:
+            kind: Cache namespace for the callable (e.g. ``"predict"``,
+                ``"prior_predictive"``, ``"log_likelihood"``).
+            shard_axis: Multi-device sharding strategy the callable is built for.
+            factory: Builder that creates the sharded callable from the mesh and arity.
+            n_kwargs_array: Number of array-like keyword arguments.
+            n_kwargs_extra: Number of non-array (replicated) keyword arguments.
+
+        Returns:
+            The sharded callable for the given key, built on first use and cached.
         """
         key = (kind, shard_axis, n_kwargs_array, n_kwargs_extra)
         fn = self._fn_cache.get(key)
@@ -158,6 +168,57 @@ class _OutputStreamer:
             self._fn_cache[key] = fn
 
         return fn
+
+    def _resolve_kwarg_key(
+        self,
+        req: _WriteRequest,
+    ) -> tuple[tuple[str, ...], int, dict]:
+        """Resolve the ordered kwarg names, array count, and extras for a stream.
+
+        The names drive both the ``shard_map`` in-spec arity and the by-name binding
+        in ``produce``, so they come from a single source and cannot drift. Array
+        arguments come from the data loader's dataset fields when ``req.X`` is an
+        :class:`~aimz.utils.data.ArrayLoader`; otherwise from the call kwargs. Non-array
+        extras always come from the call kwargs.
+
+        Args:
+            req: The streamed write job.
+
+        Returns:
+            - The ordered ``kwargs_key`` (array names then extra names).
+            - The number of array arguments.
+            - The extras dict (the non-array call kwargs).
+
+        Raises:
+            ValueError: If array keyword arguments are passed alongside a data loader,
+                or the loader has no field matching
+                :attr:`~aimz.ImpactModel.param_input`.
+        """
+        kwargs_array, kwargs_extra = _group_kwargs(req.kwargs)
+        if isinstance(req.X, ArrayLoader):
+            if kwargs_array:
+                msg = (
+                    "Array keyword arguments are not supported alongside a data "
+                    "loader; include them as fields of the loader's dataset instead: "
+                    f"{sorted(kwargs_array)}."
+                )
+                raise ValueError(msg)
+            fields = req.X.dataset.arrays
+            if self._ctx.param_input not in fields:
+                msg = (
+                    f"The data loader has no field named {self._ctx.param_input!r} "
+                    "for the model input; name the input array to match `param_input`."
+                )
+                raise ValueError(msg)
+            array_names = tuple(
+                name
+                for name in fields
+                if name not in (self._ctx.param_input, self._ctx.param_output)
+            )
+        else:
+            array_names = tuple(kwargs_array)
+
+        return (*array_names, *kwargs_extra), len(array_names), kwargs_extra
 
     def _place_posterior(
         self,
@@ -227,14 +288,13 @@ class _OutputStreamer:
 
         .. _NumPyro: https://num.pyro.ai/
         """
-        kwargs_array, kwargs_extra = _group_kwargs(req.kwargs)
-        kwargs_key = (*kwargs_array, *kwargs_extra)
+        kwargs_key, n_kwargs_array, kwargs_extra = self._resolve_kwarg_key(req)
         kind = "prior_predictive" if group == "prior_predictive" else "predict"
         fn = self._cached_fn(
             kind,
             shard_axis=req.shard_axis,
             factory=_create_sharded_sampler,
-            n_kwargs_array=len(kwargs_array),
+            n_kwargs_array=n_kwargs_array,
             n_kwargs_extra=len(kwargs_extra),
         )
 
@@ -308,6 +368,7 @@ class _OutputStreamer:
             compute=compute,
             y=None,
             samples=samples,
+            kwargs_key=kwargs_key,
             rng_key=rng_key,
             pbar=pbar,
         )
@@ -334,13 +395,12 @@ class _OutputStreamer:
         .. _NumPyro: https://num.pyro.ai/
         """
         site = self._ctx.param_output
-        kwargs_array, kwargs_extra = _group_kwargs(req.kwargs)
-        kwargs_key = (*kwargs_array, *kwargs_extra)
+        kwargs_key, n_kwargs_array, kwargs_extra = self._resolve_kwarg_key(req)
         fn = self._cached_fn(
             "log_likelihood",
             shard_axis=req.shard_axis,
             factory=_create_sharded_log_likelihood,
-            n_kwargs_array=len(kwargs_array),
+            n_kwargs_array=n_kwargs_array,
             n_kwargs_extra=len(kwargs_extra),
         )
 
@@ -381,6 +441,7 @@ class _OutputStreamer:
                     posterior,
                     self._ctx.replicated_sharding,
                 ),
+                kwargs_key=kwargs_key,
                 rng_key=None,
                 pbar=pbar,
             )
@@ -391,6 +452,7 @@ class _OutputStreamer:
         compute: Callable[[_Step], dict[str, Array]],
         y: ArrayLike | None,
         samples: dict[str, Array],
+        kwargs_key: tuple[str, ...],
         rng_key: Array | None,
         pbar: tqdm,
     ) -> None:
@@ -401,9 +463,19 @@ class _OutputStreamer:
         runs ``compute``, trims the observation padding (axis 1), and drives
         ``_write_loop``. Kind-agnostic: ``compute`` carries the sampler / log-likelihood
         call. ``rng_key`` is ``None`` for log-likelihood (no per-draw keys).
+
+        Args:
+            req: The streamed write job.
+            compute: Closure that runs the sharded sampler / log-likelihood on a
+                :class:`_Step`.
+            y: Output data, for log-likelihood; ``None`` otherwise.
+            samples: The whole (replicated) posterior to condition every batch on.
+            kwargs_key: Ordered kwarg names (array names then extra names) used to bind
+                each batch's ``tail`` by name.
+            rng_key: Per-batch key source, or ``None`` for log-likelihood.
+            pbar: Progress bar to drive over the batches.
         """
         _, kwargs_extra = _group_kwargs(req.kwargs)
-        extra = tuple(kwargs_extra.values())
         dataloader, _ = _setup_inputs(
             X=req.X,
             y=y,
@@ -428,13 +500,11 @@ class _OutputStreamer:
 
         def produce(item: object) -> dict[str, np.ndarray]:
             (batch, n_pad), subkey = cast("tuple", item)
-            tail = (
-                *(
-                    v
-                    for k, v in batch.items()
-                    if k not in (self._ctx.param_input, self._ctx.param_output)
-                ),
-                *extra,
+            # Bind by name (array kwargs from the batch, extras from the call) in
+            # `kwargs_key` order, so positions match the sharded callable's in-specs.
+            tail = tuple(
+                batch[name] if name in batch else kwargs_extra[name]
+                for name in kwargs_key
             )
             step = _Step(
                 num=req.num_samples,
@@ -482,6 +552,16 @@ class _OutputStreamer:
         (axis 0), and drives ``_write_loop``. Kind-agnostic: ``compute`` carries the
         sampler / log-likelihood call. ``rng_key`` is ``None`` for log-likelihood;
         ``posterior`` is empty for prior predictive (each chunk draws fresh).
+
+        Args:
+            req: The streamed write job.
+            compute: Closure that runs the sharded sampler / log-likelihood on a
+                :class:`_Step`.
+            y: Output data, for log-likelihood; ``None`` otherwise.
+            posterior: The posterior to slice per draw chunk; empty for prior predictive
+                (each chunk draws fresh).
+            rng_key: Per-draw key source, or ``None`` for log-likelihood.
+            pbar: Progress bar to drive over the draw chunks.
         """
         batch_size = _resolve_batch_size(
             req.batch_size,
