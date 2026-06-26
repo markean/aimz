@@ -85,6 +85,8 @@ def _setup_inputs(
     *,
     X: ArrayLike | ArrayLoader,
     y: ArrayLike | None,
+    param_input: str,
+    param_output: str,
     rng_key: Array,
     batch_size: int | None,
     num_samples: int,
@@ -100,6 +102,9 @@ def _setup_inputs(
             objects and handles batching internally.
         y (ArrayLike | None): Output data. The leading axis is the observation axis.
             Must be ``None`` if ``X`` is a data loader.
+        param_input: Dataset key for ``X``, matching the kernel's input parameter so
+            each batch is keyed as the downstream lookup expects.
+        param_output: Dataset key for ``y``, matching the kernel's output parameter.
         rng_key: A pseudo-random number generator key.
         batch_size: The size of batches for data loading.
         num_samples: Number of samples to draw, which affects the size of batches.
@@ -145,8 +150,12 @@ def _setup_inputs(
                 "for optimal performance."
             )
             warn(msg, category=UserWarning, stacklevel=2)
+        # Key the dataset by the kernel's input/output parameter names (alongside the
+        # array kwargs) so each batch is keyed as the downstream lookup expects.
+        kwargs_array[param_input] = X
+        kwargs_array[param_output] = y
         loader = ArrayLoader(
-            ArrayDataset(X=X, y=y, **kwargs_array),
+            ArrayDataset(**kwargs_array),
             rng_key=rng_key,
             batch_size=batch_size,
             shuffle=shuffle,

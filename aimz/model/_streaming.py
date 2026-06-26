@@ -280,6 +280,8 @@ class _OutputStreamer:
             probe, _ = _setup_inputs(
                 X=req.X,
                 y=None,
+                param_input=self._ctx.param_input,
+                param_output=self._ctx.param_output,
                 rng_key=req.loader_rng_key,
                 batch_size=1,
                 num_samples=req.num_samples,
@@ -405,6 +407,8 @@ class _OutputStreamer:
         dataloader, _ = _setup_inputs(
             X=req.X,
             y=y,
+            param_input=self._ctx.param_input,
+            param_output=self._ctx.param_output,
             rng_key=req.loader_rng_key,
             batch_size=req.batch_size,
             num_samples=req.num_samples,

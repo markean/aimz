@@ -41,6 +41,8 @@ def test_batch_size_capped_when_exceeding_threshold() -> None:
     loader, _ = _setup_inputs(
         X=X,
         y=None,
+        param_input="X",
+        param_output="y",
         rng_key=random.key(0),
         batch_size=None,
         num_samples=num_samples,
@@ -59,6 +61,8 @@ def test_x_zero_dim_raises() -> None:
         _setup_inputs(
             X=jnp.array(1.0),
             y=None,
+            param_input="X",
+            param_output="y",
             rng_key=random.key(0),
             batch_size=None,
             num_samples=1,
@@ -71,6 +75,8 @@ def test_y_zero_dim_raises() -> None:
         _setup_inputs(
             X=jnp.ones((4, 2)),
             y=jnp.array(1.0),
+            param_input="X",
+            param_output="y",
             rng_key=random.key(0),
             batch_size=None,
             num_samples=1,
@@ -82,6 +88,8 @@ def test_non_array_kwargs_classified_as_extra() -> None:
     loader, extra = _setup_inputs(
         X=jnp.ones((4, 2)),
         y=None,
+        param_input="X",
+        param_output="y",
         rng_key=random.key(0),
         batch_size=2,
         num_samples=1,
