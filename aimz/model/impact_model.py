@@ -1080,6 +1080,11 @@ class ImpactModel(BaseModel):
         dataloader, kwargs_extra = _setup_inputs(
             X=X,
             y=y,
+            # The loader feeds `train_on_batch(**batch)`, whose parameters are `X`/`y`
+            # (it maps them to the kernel's param_input/param_output itself), so the
+            # dataset is keyed by those literal names, not the kernel's parameter names.
+            param_input="X",
+            param_output="y",
             rng_key=rng_subkey,
             batch_size=batch_size if batch_size is not None else len(cast("Sized", X)),
             num_samples=num_samples,

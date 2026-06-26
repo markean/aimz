@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - {meth}`~aimz.ImpactModel.estimate_effect` now warns when the baseline and intervention scenarios have different dimension sizes, instead of silently computing the effect on their overlap ([#241](https://github.com/markean/aimz/issues/241)).
 - A background writer-thread failure while streaming results to disk now raises instead of being swallowed; previously disk-backed methods could return a silently zero-filled or truncated result ([#243](https://github.com/markean/aimz/issues/243)).
 - {meth}`~aimz.ImpactModel.sample_prior_predictive` under the default `shard_axis="obs"` now forwards non-array keyword arguments to the model when drawing prior samples; previously they were dropped, so those samples used the kernel's default values (silently wrong) or raised a `TypeError` for a required argument ([#245](https://github.com/markean/aimz/issues/245)).
+- The disk-backed methods now work with an array input when a custom `param_input`/`param_output` is set; previously the streamed dataset was keyed by the literal names `X`/`y` ([#247](https://github.com/markean/aimz/issues/247)).
 
 ## [v0.12.0](https://github.com/markean/aimz/releases/tag/v0.12.0) - 2026-05-23
 
