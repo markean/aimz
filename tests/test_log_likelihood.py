@@ -59,6 +59,16 @@ def test_empty_posterior(
     assert out.log_likelihood["y"].sizes["draw"] == 1
 
 
+def test_log_likelihood_requires_y(
+    synthetic_data: tuple[Array, Array],
+    im_lm_svi_fitted: ImpactModel,
+) -> None:
+    """`log_likelihood()` requires `y` for an array `X`."""
+    X, _ = synthetic_data
+    with pytest.raises(ValueError, match="`y` is required"):
+        im_lm_svi_fitted.log_likelihood(X, progress=False)
+
+
 class TestBatchSize:
     """Test class related to batch size specification."""
 

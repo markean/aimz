@@ -1622,6 +1622,12 @@ class ImpactModel(BaseModel):
         _validate_shard_axis(shard_axis, X=X)
         _validate_batch_size(batch_size, X=X)
         _validate_aligned_inputs(X, y=y, kwargs=kwargs)
+        if y is None and isinstance(X, ArrayLike):
+            msg = (
+                "`y` is required for `log_likelihood()` when `X` is array-like. "
+                "Provide `y`, or give `X` as a data loader that carries it."
+            )
+            raise ValueError(msg)
 
         # No posterior to shard means draw-parallel has nothing to chunk, so it behaves
         # identically to the data-parallel path (a single-draw result).
