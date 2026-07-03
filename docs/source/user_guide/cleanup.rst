@@ -116,9 +116,9 @@ The output below shows an example :external:class:`xarray.DataTree` illustrating
 
 .. note::
 
-    Even after the ``output_dir`` is deleted, the returned :external:class:`xarray.DataTree` and all its group entries remain accessible.
-    However, any arrays that were stored on disk have **all values set to zero**, since the underlying data files have been removed.
-    Users can still inspect the structure and metadata of the :external:class:`xarray.DataTree`, but the original disk-backed values are no longer available.
+    A temporary directory is reclaimed when :meth:`~aimz.ImpactModel.cleanup` or :meth:`~aimz.ImpactModel.cleanup_models` is called, or when the model is garbage-collected.
+    Afterwards the returned :external:class:`xarray.DataTree` and all its group entries remain accessible, but any arrays that were stored on disk read back with **all values set to zero**, since the underlying data files are gone.
+    A temporary result is therefore valid only while its model is alive; pass an explicit ``output_dir`` to keep results beyond the model's lifetime.
 
 
 Cleaning Multiple Models
@@ -132,8 +132,13 @@ Example::
     from aimz.model import ImpactModel
 
     # Create multiple instances and write to temporary directories
-    im1 = ImpactModel(...).fit(...).predict(...)
-    im2 = ImpactModel(...).fit(...).predict(...)
+    im1 = ImpactModel(...)
+    im1.fit(...)
+    im1.predict(...)
+
+    im2 = ImpactModel(...)
+    im2.fit(...)
+    im2.predict(...)
 
     # Clean temporary directories for all active instances
     ImpactModel.cleanup_models()

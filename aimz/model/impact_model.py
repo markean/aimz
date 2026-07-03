@@ -200,7 +200,7 @@ class ImpactModel(BaseModel):
         return " ".join(out)
 
     def __del__(self) -> None:
-        """Clean up the temporary directory when the instance is deleted."""
+        """Clean up the temporary directory when the instance is garbage-collected."""
         with contextlib.suppress(AttributeError):
             self.cleanup()
         # Call the parent's __del__ method only if it exists and is callable
@@ -599,9 +599,12 @@ class ImpactModel(BaseModel):
                 determined automatically from the input size and number of samples.
             output_dir: The directory where the outputs will be saved. If the specified
                 directory does not exist, it will be created automatically. If ``None``,
-                a default temporary directory will be created. A timestamped
-                subdirectory will be generated within this directory to store the
-                outputs. Outputs are saved in the Zarr format.
+                a model-owned temporary directory is used. A subdirectory is generated
+                within this directory to store the outputs. The temporary directory is
+                removed by :meth:`~aimz.ImpactModel.cleanup`,
+                :meth:`~aimz.ImpactModel.cleanup_models`, or when the model is
+                garbage-collected. Pass an explicit ``output_dir`` to keep results
+                beyond the model's lifetime.
             progress: Whether to display a progress bar.
             **kwargs: Additional arguments passed to the model.
 
@@ -834,9 +837,12 @@ class ImpactModel(BaseModel):
                 expected to handle batching internally.
             output_dir: The directory where the outputs will be saved. If the specified
                 directory does not exist, it will be created automatically. If ``None``,
-                a default temporary directory will be created. A timestamped
-                subdirectory will be generated within this directory to store the
-                outputs. Outputs are saved in the Zarr format.
+                a model-owned temporary directory is used. A subdirectory is generated
+                within this directory to store the outputs. The temporary directory is
+                removed by :meth:`~aimz.ImpactModel.cleanup`,
+                :meth:`~aimz.ImpactModel.cleanup_models`, or when the model is
+                garbage-collected. Pass an explicit ``output_dir`` to keep results
+                beyond the model's lifetime.
             progress: Whether to display a progress bar.
             **kwargs: Additional arguments passed to the model.
 
@@ -1353,9 +1359,12 @@ class ImpactModel(BaseModel):
                 expected to handle batching internally.
             output_dir: The directory where the outputs will be saved. If the specified
                 directory does not exist, it will be created automatically. If ``None``,
-                a default temporary directory will be created. A timestamped
-                subdirectory will be generated within this directory to store the
-                outputs. Outputs are saved in the Zarr format.
+                a model-owned temporary directory is used. A subdirectory is generated
+                within this directory to store the outputs. The temporary directory is
+                removed by :meth:`~aimz.ImpactModel.cleanup`,
+                :meth:`~aimz.ImpactModel.cleanup_models`, or when the model is
+                garbage-collected. Pass an explicit ``output_dir`` to keep results
+                beyond the model's lifetime.
             progress: Whether to display a progress bar.
             **kwargs: Additional arguments passed to the model.
 
@@ -1587,9 +1596,12 @@ class ImpactModel(BaseModel):
                 expected to handle batching internally.
             output_dir: The directory where the outputs will be saved. If the specified
                 directory does not exist, it will be created automatically. If ``None``,
-                a default temporary directory will be created. A timestamped
-                subdirectory will be generated within this directory to store the
-                outputs. Outputs are saved in the Zarr format.
+                a model-owned temporary directory is used. A subdirectory is generated
+                within this directory to store the outputs. The temporary directory is
+                removed by :meth:`~aimz.ImpactModel.cleanup`,
+                :meth:`~aimz.ImpactModel.cleanup_models`, or when the model is
+                garbage-collected. Pass an explicit ``output_dir`` to keep results
+                beyond the model's lifetime.
             progress: Whether to display a progress bar.
             **kwargs: Additional arguments passed to the model.
 
@@ -1669,8 +1681,8 @@ class ImpactModel(BaseModel):
         If the temporary directory was never created or has already been cleaned up,
         this method does nothing. It does not delete any explicitly specified output
         directory. While the temporary directory is typically removed automatically
-        during garbage collection, this behavior is not guaranteed. Therefore, calling
-        this method explicitly is recommended to ensure timely resource release.
+        during garbage collection, this behavior is not guaranteed, so calling this
+        method explicitly is recommended for timely resource release.
 
         See Also:
             :meth:`~aimz.ImpactModel.cleanup_models` — clean temporary directories for
