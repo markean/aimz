@@ -130,9 +130,6 @@ class ImpactModel(BaseModel):
         self._posterior: dict[str, Array] | None = None
         self._init_runtime_attrs()
 
-        # Register this instance
-        ImpactModel._models.add(self)
-
     def _init_runtime_attrs(self) -> None:
         """Initialize runtime attributes."""
         self._fn_vi_update: Callable | None = None
@@ -159,6 +156,7 @@ class ImpactModel(BaseModel):
             ),
         )
         self._temp_dir: TemporaryDirectory | None = None
+        ImpactModel._models.add(self)
         logger.info(
             "Backend: %s, Devices: %d",
             default_backend(),

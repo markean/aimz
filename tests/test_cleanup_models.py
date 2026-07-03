@@ -14,6 +14,7 @@
 
 """Tests for the `.cleanup_models()` method."""
 
+import cloudpickle
 import pytest
 from jax import Array, random
 from numpyro.infer import SVI
@@ -43,3 +44,27 @@ def test_predict_after_cleanup(
 
     assert im1.temp_dir is None
     assert im2.temp_dir is None
+
+
+@pytest.mark.parametrize("vi", [lm], indirect=True)
+def test_cleanup_models_covers_unpickled_instance(
+    synthetic_data: tuple[Array, Array],
+    vi: SVI,
+) -> None:
+    """A cloudpickle-restored model re-registers, so `cleanup_models()` reaches it."""
+    X, y = synthetic_data
+
+    im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
+    im.fit_on_batch(X=X, y=y)
+
+    # cloudpickle bypasses `__init__` (only `__setstate__` runs), so the restored
+    # instance must re-register itself in `_models`.
+    restored = cloudpickle.loads(cloudpickle.dumps(im))
+    assert restored in ImpactModel._models
+
+    restored.predict(X, batch_size=3)
+    assert restored.temp_dir is not None
+
+    ImpactModel.cleanup_models()
+
+    assert restored.temp_dir is None
