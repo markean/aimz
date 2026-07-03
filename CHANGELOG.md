@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - {meth}`~aimz.ImpactModel.sample_prior_predictive` under the default `shard_axis="obs"` now forwards non-array keyword arguments to the model when drawing prior samples; previously they were dropped, so those samples used the kernel's default values (silently wrong) or raised a `TypeError` for a required argument ([#245](https://github.com/markean/aimz/issues/245)).
 - The disk-backed methods now work with an array input when a custom `param_input`/`param_output` is set; previously the streamed dataset was keyed by the literal names `X`/`y` ([#247](https://github.com/markean/aimz/issues/247)).
 - A user-built {class}`~aimz.utils.data.ArrayLoader` whose dataset carries array fields beyond the model input/output now works with the disk-backed methods, binding each field to the kernel parameter of the same name; previously such a loader failed during tracing with an error, and array arguments were matched by position rather than name ([#249](https://github.com/markean/aimz/issues/249)).
+- {meth}`~aimz.ImpactModel.log_likelihood` now raises a ValueError when called with an array `X` but no `y`, instead of a `KeyError: 'y'` ([#254](https://github.com/markean/aimz/issues/254)).
 
 ## [v0.12.0](https://github.com/markean/aimz/releases/tag/v0.12.0) - 2026-05-23
 
