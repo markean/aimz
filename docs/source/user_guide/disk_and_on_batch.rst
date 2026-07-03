@@ -20,7 +20,7 @@ The non-``*_on_batch`` methods default to a disk-backed (chunked) execution mode
 * Posterior predictive and prior predictive tensors can scale as ``(#samples x #dims x #posterior_samples x ...)``.
   Even moderate increases in any axis (time, spatial units, parameter samples) can exceed host or accelerator RAM.
 * Using ``batch_size`` with chunked iteration limits peak memory and prevents out-of-memory errors.
-* Persisted Zarr_ arrays with metadata (coords, dims, attrs) create an artifact you can reopen without rerunning inference.
+* Persisted Zarr_ arrays create an artifact you can reopen without rerunning inference. Coordinates and attributes are re-derived when the tree is rebuilt rather than stored on disk (see :ref:`reopening-persisted-outputs`).
 * The :external:class:`xarray.DataTree` + Zarr_ format integrates with scientific Python tools such as Dask_ and ArviZ_.
 * Summaries (means, HDIs, residual PPC stats) can be computed lazily over chunked storage without first materializing dense arrays.
 * One API works for both small experiments and large-scale use cases.
@@ -136,6 +136,37 @@ The example below illustrates this case.
 
     # Calling `.predict()` warns and reruns under shard_axis="draw"
     im.predict(X)
+
+
+.. _reopening-persisted-outputs:
+
+Reopening Persisted Outputs
+---------------------------
+When you pass an explicit ``output_dir``, each call writes one subdirectory containing a Zarr_ group with one array per return site.
+Only the sampled arrays and their dimension names are persisted; coordinates and attributes are not stored on disk.
+
+To reconstruct the same :external:class:`xarray.DataTree` from the files alone, mirror that read-time step:
+
+.. code-block:: python
+
+    import numpy as np
+    import xarray as xr
+
+    # The per-call directory written under `output_dir`
+    store = ...
+
+    # If relevant, add the leading `chain` axis and coordinates as aimz does on read
+    ds = xr.open_zarr(store, consolidated=False).expand_dims(dim="chain", axis=0)
+    ds = ds.assign_coords({dim: np.arange(ds.sizes[dim]) for dim in ds.sizes})
+
+    dt = xr.DataTree(name="root")
+    # Pick a group name for downstream use
+    dt["posterior_predictive"] = xr.DataTree(ds)
+
+
+The ``posterior`` subtree is likewise not stored in a predictive output: aimz attaches it from the
+in-memory model when it builds the tree. Persist the model itself (see :doc:`model_persistence`) or
+keep :meth:`~aimz.ImpactModel.sample`'s return value if you need the posterior alongside the files.
 
 
 Performance Tips
