@@ -83,6 +83,20 @@ def test_y_zero_dim_raises() -> None:
         )
 
 
+def test_x_wrong_type_raises() -> None:
+    """A non-array, non-loader ``X`` (e.g. a Python list) raises ``TypeError``."""
+    with pytest.raises(TypeError, match=r"`X` must be an array-like or a data loader"):
+        _setup_inputs(
+            X=[[1.0, 2.0], [3.0, 4.0]],
+            y=None,
+            param_input="X",
+            param_output="y",
+            rng_key=random.key(0),
+            batch_size=None,
+            num_samples=1,
+        )
+
+
 def test_non_array_kwargs_classified_as_extra() -> None:
     """Non-array keyword arguments are routed to extras, not the batched dataset."""
     loader, extra = _setup_inputs(
