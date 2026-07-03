@@ -302,6 +302,11 @@ class ImpactModel(BaseModel):
                 - params (dict): Learned parameters from inference.
                 - state (SVIState): Internal SVI state object.
                 - losses (ArrayLike): Loss values recorded during optimization.
+
+        Note:
+            This stores the result and marks the model fitted, but does not draw
+            posterior samples. Draw them with :meth:`~aimz.ImpactModel.sample` and
+            register them via :meth:`~aimz.ImpactModel.set_posterior_sample`.
         """
         if np.any(np.isnan(vi_result.losses)):
             msg = "Loss contains NaN or Inf, indicating numerical instability."
@@ -1191,6 +1196,12 @@ class ImpactModel(BaseModel):
 
         Raises:
             ValueError: If the batch shapes in ``posterior_sample`` are inconsistent.
+
+        Note:
+            The kernel is not traced when samples are set this way, so ``deterministic``
+            sites are not discovered; predictive methods return only the output site by
+            default. Request ``deterministic`` (or other) sites explicitly via
+            ``return_sites``.
         """
         batch_ndims = 1
         batch_shapes = {
