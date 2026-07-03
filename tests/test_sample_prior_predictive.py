@@ -14,6 +14,7 @@
 
 """Tests for the `.sample_prior_predictive()` method."""
 
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
@@ -112,3 +113,29 @@ def test_sample_prior_predictive_unfitted_both_shard_axes(
         assert pp["y"].shape[-1] == len(X)
     finally:
         im.cleanup()
+
+
+def test_sample_prior_predictive_cleans_subdir_on_write_failure(
+    synthetic_data: tuple[Array, Array],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failure during the write phase reclaims the output subdirectory."""
+    X, _ = synthetic_data
+    im = ImpactModel(lm, rng_key=random.key(42), inference=_make_svi(lm))
+
+    def boom(*args: object, **kwargs: object) -> None:
+        msg = "boom"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(im._streamer, "write_predictive", boom)
+
+    with TemporaryDirectory() as output_dir:
+        with pytest.raises(RuntimeError, match="boom"):
+            im.sample_prior_predictive(
+                X,
+                output_dir=output_dir,
+                batch_size=3,
+                progress=False,
+            )
+        # The just-created timestamped subdir was reclaimed, not orphaned.
+        assert not any(Path(output_dir).iterdir())
