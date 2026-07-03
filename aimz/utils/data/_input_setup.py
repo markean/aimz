@@ -167,5 +167,8 @@ def _setup_inputs(
             raise TypeError(msg)
         loader = X
         loader.device = device
+    else:
+        msg = f"`X` must be an array-like or a data loader, got {type(X).__name__!r}."
+        raise TypeError(msg)
 
     return loader, kwargs_extra
