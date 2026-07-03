@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A user-built {class}`~aimz.utils.data.ArrayLoader` whose dataset carries array fields beyond the model input/output now works with the disk-backed methods, binding each field to the kernel parameter of the same name; previously such a loader failed during tracing with an error, and array arguments were matched by position rather than name ([#249](https://github.com/markean/aimz/issues/249)).
 - {meth}`~aimz.ImpactModel.log_likelihood` now raises a ValueError when called with an array `X` but no `y`, instead of a `KeyError: 'y'` ([#254](https://github.com/markean/aimz/issues/254)).
 - The disk-backed methods now raise a clear `TypeError` when `X` is neither an array-like nor a data loader (e.g. a Python list), instead of an `UnboundLocalError` from an incomplete internal type check ([#256](https://github.com/markean/aimz/issues/256)).
+- A disk-backed method that fails before the write phase no longer leaves an orphaned subdirectory behind; the partially-created subdirectory is removed and the original error is re-raised ([#258](https://github.com/markean/aimz/issues/258)).
 
 ## [v0.12.0](https://github.com/markean/aimz/releases/tag/v0.12.0) - 2026-05-23
 

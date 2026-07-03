@@ -14,6 +14,9 @@
 
 """Tests for the `.log_likelihood()` method."""
 
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
 import pytest
 from jax import Array, random
 from numpyro.infer import SVI, Trace_ELBO
@@ -67,6 +70,33 @@ def test_log_likelihood_requires_y(
     X, _ = synthetic_data
     with pytest.raises(ValueError, match="`y` is required"):
         im_lm_svi_fitted.log_likelihood(X, progress=False)
+
+
+def test_log_likelihood_cleans_subdir_on_write_failure(
+    synthetic_data: tuple[Array, Array],
+    im_lm_svi_fitted: ImpactModel,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failure during the write phase reclaims the output subdirectory."""
+    X, y = synthetic_data
+
+    def boom(*args: object, **kwargs: object) -> None:
+        msg = "boom"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(im_lm_svi_fitted._streamer, "write_log_likelihood", boom)
+
+    with TemporaryDirectory() as output_dir:
+        with pytest.raises(RuntimeError, match="boom"):
+            im_lm_svi_fitted.log_likelihood(
+                X,
+                y=y,
+                output_dir=output_dir,
+                batch_size=3,
+                progress=False,
+            )
+        # The just-created timestamped subdir was reclaimed, not orphaned.
+        assert not any(Path(output_dir).iterdir())
 
 
 class TestBatchSize:

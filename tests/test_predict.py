@@ -14,6 +14,7 @@
 
 """Tests for the `.predict()` method."""
 
+from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import numpyro.distributions as dist
@@ -205,3 +206,27 @@ def test_predict_after_cleanup(synthetic_data: tuple[Array, Array], vi: SVI) -> 
             output_dir=tmp_dir,
             progress=False,
         )
+
+
+@pytest.mark.parametrize("vi", [lm], indirect=True)
+def test_predict_cleans_subdir_on_write_failure(
+    synthetic_data: tuple[Array, Array],
+    vi: SVI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failure during the write phase reclaims the output subdirectory."""
+    X, y = synthetic_data
+    im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
+    im.fit_on_batch(X=X, y=y)
+
+    def boom(*args: object, **kwargs: object) -> None:
+        msg = "boom"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(im._streamer, "write_predictive", boom)
+
+    with TemporaryDirectory() as output_dir:
+        with pytest.raises(RuntimeError, match="boom"):
+            im.predict(X, output_dir=output_dir, batch_size=3, progress=False)
+        # The just-created timestamped subdir was reclaimed, not orphaned.
+        assert not any(Path(output_dir).iterdir())

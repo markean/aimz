@@ -21,6 +21,7 @@ import logging
 from datetime import UTC, datetime
 from inspect import signature, stack
 from pathlib import Path
+from shutil import rmtree
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any, Literal, Self, cast
 from warnings import warn
@@ -653,23 +654,27 @@ class ImpactModel(BaseModel):
 
         output_dir, output_subdir = self._create_output_subdir(output_dir)
 
-        self._streamer.write_predictive(
-            _WriteRequest(
-                shard_axis,
-                X=X,
-                return_sites=return_sites,
-                num_samples=num_samples,
-                batch_size=batch_size,
-                output_dir=output_subdir,
-                progress=progress,
-                loader_rng_key=self.rng_key,
-                kwargs=kwargs,
-            ),
-            kernel=self.kernel,
-            rng_key=rng_key,
-            group="prior_predictive",
-            posterior=self.posterior,
-        )
+        try:
+            self._streamer.write_predictive(
+                _WriteRequest(
+                    shard_axis,
+                    X=X,
+                    return_sites=return_sites,
+                    num_samples=num_samples,
+                    batch_size=batch_size,
+                    output_dir=output_subdir,
+                    progress=progress,
+                    loader_rng_key=self.rng_key,
+                    kwargs=kwargs,
+                ),
+                kernel=self.kernel,
+                rng_key=rng_key,
+                group="prior_predictive",
+                posterior=self.posterior,
+            )
+        except BaseException:
+            rmtree(output_subdir, ignore_errors=True)
+            raise
 
         return _build_datatree(
             output_dir,
@@ -1442,23 +1447,27 @@ class ImpactModel(BaseModel):
 
         output_dir, output_subdir = self._create_output_subdir(output_dir)
 
-        self._streamer.write_predictive(
-            _WriteRequest(
-                shard_axis,
-                X=X,
-                return_sites=return_sites,
-                num_samples=self._num_samples,
-                batch_size=batch_size,
-                output_dir=output_subdir,
-                progress=progress,
-                loader_rng_key=self.rng_key,
-                kwargs=kwargs,
-            ),
-            kernel=kernel,
-            rng_key=rng_key,
-            group=group,
-            posterior=self.posterior,
-        )
+        try:
+            self._streamer.write_predictive(
+                _WriteRequest(
+                    shard_axis,
+                    X=X,
+                    return_sites=return_sites,
+                    num_samples=self._num_samples,
+                    batch_size=batch_size,
+                    output_dir=output_subdir,
+                    progress=progress,
+                    loader_rng_key=self.rng_key,
+                    kwargs=kwargs,
+                ),
+                kernel=kernel,
+                rng_key=rng_key,
+                group=group,
+                posterior=self.posterior,
+            )
+        except BaseException:
+            rmtree(output_subdir, ignore_errors=True)
+            raise
 
         return _build_datatree(
             output_dir,
@@ -1668,22 +1677,26 @@ class ImpactModel(BaseModel):
 
         output_dir, output_subdir = self._create_output_subdir(output_dir)
 
-        self._streamer.write_log_likelihood(
-            _WriteRequest(
-                shard_axis,
-                X=X,
-                return_sites=(self.param_output,),
-                num_samples=self._num_samples,
-                batch_size=batch_size,
-                output_dir=output_subdir,
-                progress=progress,
-                loader_rng_key=self.rng_key,
-                kwargs=kwargs,
-            ),
-            kernel=kernel,
-            posterior=self.posterior,
-            y=y,
-        )
+        try:
+            self._streamer.write_log_likelihood(
+                _WriteRequest(
+                    shard_axis,
+                    X=X,
+                    return_sites=(self.param_output,),
+                    num_samples=self._num_samples,
+                    batch_size=batch_size,
+                    output_dir=output_subdir,
+                    progress=progress,
+                    loader_rng_key=self.rng_key,
+                    kwargs=kwargs,
+                ),
+                kernel=kernel,
+                posterior=self.posterior,
+                y=y,
+            )
+        except BaseException:
+            rmtree(output_subdir, ignore_errors=True)
+            raise
 
         return _build_datatree(
             output_dir,
