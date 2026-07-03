@@ -5,6 +5,6 @@ updates:
     # Workflow files stored in the default location of `.github/workflows`
     # You don't need to specify `/.github/workflows` for `directory`. You can use `directory: "/"`.
     directory: "/"
-    target-branch: "develop"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
