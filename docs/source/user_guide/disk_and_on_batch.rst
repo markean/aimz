@@ -33,6 +33,10 @@ These methods build internal data loaders, iterate in chunks, and decouple sampl
 Outputs consolidate into a single :external:class:`xarray.DataTree` backed by Zarr_ files for post-hoc analysis.
 On-batch variants, in contrast, favor minimal overhead, immediate return, and greater flexibility when posterior sample shapes are not shard-friendly.
 
+.. seealso::
+
+   :doc:`sharding` explains how multi-device sharding works and how to choose the ``shard_axis`` strategy referenced throughout this page.
+
 Feature Summary
 ^^^^^^^^^^^^^^^
 ============================= ==================================== =======================================================
@@ -46,7 +50,7 @@ Return type                   :external:class:`xarray.DataTree`    :external:cla
                                                                    (via ``return_datatree=False``)
 Custom batch sizing           Yes (``batch_size``)                 No (single pass)
 Device parallelism (sharding) Yes                                  No
-Automatic rerun               Yes (incompatible shapes -> ``draw``) No (final mode)
+Automatic rerun               Yes (reruns as ``draw``)             No (final mode)
 Latency (small data)          Higher (I/O + orchestration)         Minimal
 ============================= ==================================== =======================================================
 
@@ -70,10 +74,10 @@ Quick Recommendations
 ---------------------
 * Moderate or large data, or need persisted outputs: use disk-backed (e.g., :meth:`~aimz.ImpactModel.fit`, :meth:`~aimz.ImpactModel.predict`).
 * Small data, rapid iteration, CI, or read-only / ephemeral filesystem: use on-batch (``*_on_batch``).
-* If :meth:`~aimz.ImpactModel.predict` warns that posterior sample shapes are not compatible with ``shard_axis="obs"``, it automatically reruns under ``shard_axis="draw"``; pass ``shard_axis="draw"`` explicitly to silence the warning (see :ref:`faq-model-compatibility`).
+* If :meth:`~aimz.ImpactModel.predict` warns that posterior sample shapes are not compatible with ``shard_axis="obs"``, it automatically reruns under ``shard_axis="draw"``; pass ``shard_axis="draw"`` explicitly to silence the warning.
   For posterior shapes that remain incompatible with chunked execution, call :meth:`~aimz.ImpactModel.predict_on_batch` directly.
 * Custom training loop: iterate with :meth:`~aimz.ImpactModel.train_on_batch`.
-* Need multi-device (sharding) execution: disk-backed.
+* Need multi-device (sharding) execution: disk-backed; see :doc:`sharding` for choosing ``shard_axis``.
 * Need raw NumPy/dict outputs (no :external:class:`xarray.DataTree`): on-batch with ``return_datatree=False``.
 
 .. note::

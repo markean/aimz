@@ -44,73 +44,32 @@ The library focuses on orchestration, not abstracting away core probabilistic mo
 .. _faq-model-compatibility:
 
 Can I use aimz with any `NumPyro`_ model?
----------------------------------------
+-----------------------------------------
 No.
 Most conventional models with global latents and a plate-based structure work out of the box.
 The core requirement is that every sample site in the model must have a **static shape** that does not change with the data.
-
-On multi-device systems, :meth:`~aimz.ImpactModel.predict` by default uses `data parallelism <https://jax.readthedocs.io/en/latest/distributed_data_loading.html#data-parallelism>`_: the input data is sharded across devices along axis 0 (the observation axis), while posterior samples are **replicated** on every device.
-The forward sampler used internally also requires every traced site to have a fixed shape across all sample iterations.
+The forward sampler used internally requires every traced site to have a fixed shape across all sample iterations, and the default observation-sharded execution additionally requires the posterior to be **replicable** across devices.
 
 Several modeling patterns can violate this requirement.
 The two most common are:
 
 * **Local latent variables**
 
-  A :external:func:`~numpyro.primitives.sample` call inside a :external:class:`~numpyro.primitives.plate` without ``obs=`` produces a posterior whose shape grows with the plate size along its second (observation) axis — for example ``(num_samples, n_obs)``, or ``(num_samples, n_obs, k)`` for a multi-output site.
-  Because ``n_obs`` can differ between training and prediction, the replicated-posterior contract breaks.
+  A :external:func:`~numpyro.primitives.sample` call inside a :external:class:`~numpyro.primitives.plate` without ``obs=`` produces a posterior whose shape grows with the plate size along its second (observation) axis, for example ``(num_samples, n_obs)``, or ``(num_samples, n_obs, k)`` for a multi-output site.
+  Because ``n_obs`` can differ between training and prediction, such a posterior cannot be replicated under the default observation-sharded execution.
 
 * **The** :external:func:`~numpyro.contrib.control_flow.scan` **primitive**
 
   :external:func:`~numpyro.contrib.control_flow.scan` is commonly used for sequential or autoregressive models (e.g., state-space models, time-series forecasting).
   The number of sites it creates typically grows with the sequence length, making the trace shape dynamic for the same reason.
 
-When an observation-aligned posterior sample shape is detected as incompatible with the default ``shard_axis="obs"``, :meth:`~aimz.ImpactModel.predict` and :meth:`~aimz.ImpactModel.log_likelihood` issue a warning and automatically rerun under ``shard_axis="draw"``, described below.
-However, if the posterior shapes are fundamentally incompatible with the new input, the forward pass will still fail with a shape mismatch.
+For **local latent variables**, :meth:`~aimz.ImpactModel.predict` and :meth:`~aimz.ImpactModel.log_likelihood` detect the incompatible posterior shape, warn, and automatically rerun under draw-parallel sharding (``shard_axis="draw"``), which never splits the observation axis.
+See :ref:`user-guide-sharding` for how the two sharding strategies differ, when to choose each, and a worked comparison of a compatible kernel and one that triggers the rerun.
+Draw-parallel sharding does not lift the static-shape requirement, so :external:func:`~numpyro.contrib.control_flow.scan`-based models remain unsupported, and a posterior that is fundamentally incompatible with the new input still fails with a shape mismatch.
 
-For **local latent variables**, you can instead keep the streamed, multi-device path by passing ``shard_axis="draw"`` to :meth:`~aimz.ImpactModel.predict`, :meth:`~aimz.ImpactModel.sample_posterior_predictive`, :meth:`~aimz.ImpactModel.log_likelihood`, or :meth:`~aimz.ImpactModel.sample_prior_predictive`.
-This selects draw-parallel sharding — a multi-device, memory-bounded analog of :external:class:`numpyro.infer.Predictive` with ``parallel=True``: the drawn samples are sharded across devices in chunks while the whole input is held **resident** on every device.
-The observation axis is therefore never split, so a local latent of shape ``(num_samples, n_obs)`` (or higher-rank ``(num_samples, n_obs, ...)``) always matches the full input — regardless of how it is written (inside a :external:class:`~numpyro.primitives.plate` or as a manually expanded distribution), with no plate requirement.
-Because the input is held resident, ``shard_axis="draw"`` requires an in-memory array (not a data loader), and in this mode ``batch_size`` is the number of drawn samples processed per chunk.
-As a rule of thumb, prefer ``shard_axis="draw"`` when the model has local latents or when the input is small relative to the number of draws; prefer the default ``shard_axis="obs"`` when the input is large or arrives through a data loader.
+A model with nested plates whose :external:func:`~numpyro.primitives.sample` sites are all observed (``obs=``) or whose latent shapes are fixed remains compatible; a model with a single plate containing one unobserved :external:func:`~numpyro.primitives.sample` site triggers the draw-parallel rerun.
 
-The default ``shard_axis="obs"`` keeps the data-parallel behavior described above; for a model with a local latent, :meth:`~aimz.ImpactModel.predict` and :meth:`~aimz.ImpactModel.log_likelihood` warn and rerun the computation under draw-parallel, so passing ``shard_axis="draw"`` explicitly simply silences the warning.
-Draw-parallel sharding does not lift the static-shape requirement, so :external:func:`~numpyro.contrib.control_flow.scan`-based models remain unsupported.
-
-:meth:`~aimz.ImpactModel.sample_prior_predictive` has no posterior to shard: under ``shard_axis="draw"`` it draws a complete fresh prior sample per chunk against the whole input (request latents via ``return_sites``), while ``shard_axis="obs"`` keeps the observation-streaming path for models with only global latents.
-
-Note that a model with nested plates whose :external:func:`~numpyro.primitives.sample` sites are all observed (``obs=``) or whose latent shapes are fixed remains compatible.
-In contrast, a model with a single plate containing one unobserved :external:func:`~numpyro.primitives.sample` site triggers the draw-parallel rerun.
-The following examples illustrate the compatibility with :meth:`~aimz.ImpactModel.predict`:
-
-.. code-block:: python
-
-    import numpyro.distributions as dist
-    from numpyro import plate, sample
-
-    X, y = ...
-
-
-    # Compatible with .predict(): all latents are global
-    def kernel(X, y=None):
-        ...
-        alpha = sample("alpha", dist.Normal())
-        beta = sample("beta", dist.Normal().expand([X.shape[1]]))
-        with plate("obs", X.shape[0]):
-            mu = alpha + X @ beta
-            sample("y", dist.Normal(mu), obs=y)
-
-
-    # Warns and reruns under shard_axis="draw" with shard_axis="obs" (the default):
-    # `mu` is a local latent with posterior shape (num_samples, X.shape[0]).
-    # Pass shard_axis="draw" explicitly to silence the warning.
-    def kernel(X, y=None):
-        ...
-        with plate("obs", X.shape[0]):
-            mu = sample("mu", dist.Normal())
-            sample("y", dist.Normal(mu), obs=y)
-
-If you encounter an unsupported pattern—ideally with a minimal reproducible example—please `open an issue <https://github.com/markean/aimz/issues/new>`_ or submit a PR.
+If you encounter an unsupported pattern (ideally with a minimal reproducible example), please `open an issue <https://github.com/markean/aimz/issues/new>`_ or submit a PR.
 We plan to broaden coverage based on user needs.
 
 
