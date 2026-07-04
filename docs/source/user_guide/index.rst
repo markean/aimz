@@ -6,6 +6,7 @@ User Guide
 
    installation
    disk_and_on_batch
+   sharding
    sampling
    cleanup
    model_persistence
