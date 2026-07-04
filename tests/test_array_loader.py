@@ -203,11 +203,11 @@ class TestArrayLoader:
         X, y = synthetic_data
         im = im_lm_with_kwargs_svi_fitted
         rng_key = random.key(7)
-        ref = im.predict(X, c=y, rng_key=rng_key, batch_size=len(X), progress=False)
+        ref = im.predict(X, c=y, rng_key=rng_key, batch_size=3, progress=False)
         loader = ArrayLoader(
             ArrayDataset(X=X, c=y),
             rng_key=random.key(0),
-            batch_size=len(X),
+            batch_size=3,
         )
         via = im.predict(loader, rng_key=rng_key, progress=False)
 

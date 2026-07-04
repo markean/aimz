@@ -15,7 +15,6 @@
 """MLflow autologging integration for aimz."""
 
 import logging
-import tempfile
 from collections.abc import Callable
 from inspect import getsource
 from typing import TYPE_CHECKING, cast
@@ -36,7 +35,7 @@ from mlflow.utils.autologging_utils import (
 from aimz.utils._validation import _is_arraylike
 
 if TYPE_CHECKING:
-    from numpyro.infer.svi import SVIRunResult
+    from numpyro.infer.svi import SVI, SVIRunResult
 
 FLAVOR_NAME = "aimz"
 
@@ -121,7 +120,7 @@ def autolog(
             "inference_method": type(self.inference).__name__,
         }
         if params["inference_method"] == "SVI":
-            params["optimizer"] = type(self.inference.optim).__name__
+            params["optimizer"] = type(cast("SVI", self.inference).optim).__name__
         log_params(params)
         log_fn_args_as_params(
             original,
@@ -141,39 +140,34 @@ def autolog(
             model_id = _initialize_logged_model("model", flavor=FLAVOR_NAME).model_id
             # Will only resolve `input_example` and `signature` if `log_models` is
             # `True`.
-            with tempfile.TemporaryDirectory() as temp_dir:
-                X = kwargs.get("X") if "X" in kwargs else args[0]
-                if isinstance(X, ArrayLoader):
-                    input_example = {
-                        k: np.asarray(v[:INPUT_EXAMPLE_SAMPLE_ROWS])
-                        for k, v in X.dataset.arrays.items()
-                        if k != self.param_output
-                    }
-                else:
-                    input_example = {
-                        "X": np.asarray(X)[:INPUT_EXAMPLE_SAMPLE_ROWS],
-                        **{
-                            k: np.asarray(v)[:INPUT_EXAMPLE_SAMPLE_ROWS]
-                            for k, v in kwargs.items()
-                            if k != self.param_output and _is_arraylike(v)
-                        },
-                    }
-                    if len(input_example) == 1:
-                        input_example = input_example["X"]
-                input_example, signature = resolve_input_example_and_signature(
-                    get_input_example=lambda: input_example,
-                    infer_model_signature=lambda x: infer_signature(
-                        x,
-                        params={
-                            "batch_size": INPUT_EXAMPLE_SAMPLE_ROWS,
-                            "output_dir": temp_dir,
-                            "progress": False,
-                        },
-                    ),
-                    log_input_example=log_input_examples,
-                    log_model_signature=log_model_signatures,
-                    logger=logger,
-                )
+            X = kwargs.get("X") if "X" in kwargs else args[0]
+            if isinstance(X, ArrayLoader):
+                input_example = {
+                    k: np.asarray(v[:INPUT_EXAMPLE_SAMPLE_ROWS])
+                    for k, v in X.dataset.arrays.items()
+                    if k not in ("y", self.param_output) and v is not None
+                }
+            else:
+                input_example = {
+                    "X": np.asarray(X)[:INPUT_EXAMPLE_SAMPLE_ROWS],
+                    **{
+                        k: np.asarray(v)[:INPUT_EXAMPLE_SAMPLE_ROWS]
+                        for k, v in kwargs.items()
+                        if k not in ("y", "rng_key") and _is_arraylike(v)
+                    },
+                }
+                if len(input_example) == 1:
+                    input_example = input_example["X"]
+            input_example, signature = resolve_input_example_and_signature(
+                get_input_example=lambda: input_example,
+                infer_model_signature=lambda x: infer_signature(
+                    x,
+                    params={"progress": False},
+                ),
+                log_input_example=log_input_examples,
+                log_model_signature=log_model_signatures,
+                logger=logger,
+            )
             registered_model_name = get_autologging_config(
                 FLAVOR_NAME,
                 config_key="registered_model_name",

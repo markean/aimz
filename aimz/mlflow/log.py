@@ -35,7 +35,7 @@ def log_model(
     code_paths: list | None = None,
     registered_model_name: str | None = None,
     signature: ModelSignature | None = None,
-    input_example: ModelInputExample = None,
+    input_example: ModelInputExample | None = None,
     await_registration_for: int | None = DEFAULT_AWAIT_MAX_SLEEP_SECONDS,
     pip_requirements: Iterable[str] | str | None = None,
     extra_pip_requirements: Iterable[str] | str | None = None,

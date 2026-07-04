@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import tempfile
 from importlib.metadata import version
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -33,9 +32,6 @@ from mlflow.models import (
 from mlflow.models.model import MLMODEL_FILE_NAME
 from mlflow.models.utils import _save_example
 from mlflow.utils import _get_fully_qualified_class_name
-from mlflow.utils.autologging_utils import (
-    INPUT_EXAMPLE_SAMPLE_ROWS,
-)
 from mlflow.utils.docstring_utils import LOG_MODEL_PARAM_DOCS, format_docstring
 from mlflow.utils.environment import (
     _CONDA_ENV_FILE_NAME,
@@ -105,7 +101,7 @@ def save_model(
     code_paths: list | None = None,
     mlflow_model: Model | None = None,
     signature: ModelSignature | None = None,
-    input_example: ModelInputExample = None,
+    input_example: ModelInputExample | None = None,
     pip_requirements: Iterable[str] | str | None = None,
     extra_pip_requirements: Iterable[str] | str | None = None,
     metadata: dict | None = None,
@@ -145,15 +141,7 @@ def save_model(
         path=str(path),
     )
     if signature is None and saved_example is not None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            signature = infer_signature(
-                input_example,
-                params={
-                    "batch_size": INPUT_EXAMPLE_SAMPLE_ROWS,
-                    "output_dir": temp_dir,
-                    "progress": False,
-                },
-            )
+        signature = infer_signature(input_example, params={"progress": False})
     if signature is not None:
         mlflow_model.signature = signature
     if metadata is not None:
