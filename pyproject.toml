@@ -15,10 +15,10 @@ authors = [
 maintainers = [{ name = "Eunseop Kim", email = "markean@pm.me" }]
 requires-python = ">=3.11"
 dependencies = [
-    "dask>=2025.10",
+    "dask>=2026.1",
     "jax>=0.10",
     "numpyro>=0.21",
-    "xarray>=2025.10",
+    "xarray>=2026.1",
     "zarr>=3,<4",
 ]
 classifiers = [
@@ -34,18 +34,24 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-dev = ["pre-commit>=4.5", "pytest>=9", "pytest-cov>=7", "ruff>=0.15"]
-gpu = ["jax[cuda13]>=0.9"]
-mlflow = ["mlflow>=3.5"]
+dev = [
+    "mlflow>=3.9",
+    "pre-commit>=4.6",
+    "pytest>=9.1",
+    "pytest-cov>=7.1",
+    "ruff>=0.15",
+]
+gpu = ["jax[cuda13]>=0.10"]
+mlflow = ["mlflow>=3.9"]
 docs = [
     "arviz_base>=1; python_version >= '3.12'",
     "arviz_plots>=1; python_version >= '3.12'",
     "arviz_stats>=1; python_version >= '3.12'",
     "flax>=0.12",
     "jupyter-sphinx>=0.5",
-    "mlflow>=3.5",
+    "mlflow>=3.9",
     "myst-parser>=5",
-    "pydata-sphinx-theme>=0.16",
+    "pydata-sphinx-theme>=0.17",
     "sphinx>=9",
     "sphinx-copybutton>=0.5",
     "sphinx-design>=0.7",
@@ -54,9 +60,6 @@ docs = [
 [project.urls]
 source = "https://github.com/markean/aimz"
 documentation = "https://aimz.readthedocs.io/"
-
-[tool.coverage.run]
-omit = ["aimz/mlflow/*"]
 
 [tool.ruff]
 line-length = 88
