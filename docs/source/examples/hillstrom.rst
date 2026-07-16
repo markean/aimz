@@ -275,7 +275,7 @@ Calling :meth:`~aimz.ImpactModel.fit_on_batch` runs the configured inference eng
         inference=MCMC(
             NUTS(conversion_model),
             num_warmup=500,
-            num_samples=500,
+            num_samples=250,
             num_chains=2,
         ),
     )
@@ -521,7 +521,7 @@ We fit the hurdle model using the same MCMC configuration as before.
         inference=MCMC(
             NUTS(spend_model),
             num_warmup=500,
-            num_samples=500,
+            num_samples=250,
             num_chains=2,
         ),
     )
