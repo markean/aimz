@@ -38,6 +38,7 @@ from aimz.utils._output import (
     _SliceWriteStrategy,
     _write_loop,
 )
+from aimz.utils._validation import _is_arraylike
 from aimz.utils.data import ArrayLoader
 from aimz.utils.data._input_setup import _resolve_batch_size, _setup_inputs
 from aimz.utils.data._sharding import (
@@ -52,6 +53,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     import numpy as np
+    import numpy.typing as npt
     from jax.sharding import Mesh, Sharding
     from jax.typing import ArrayLike
 
@@ -335,9 +337,25 @@ class _OutputStreamer:
         if group == "prior_predictive":
             # Single-element, unsharded probe draws the global prior samples once; the
             # return sites are dropped so they are redrawn per batch. Prior samples are
-            # redrawn every call, so this is a one-shot (not cached) placement.
+            # redrawn every call, so this is a one-shot (not cached) placement. The
+            # probe is built from a single-row slice so the whole input is not converted
+            # to host just to draw one batch.
+            if isinstance(req.X, ArrayLoader):
+                X_probe, kwargs_probe = req.X, req.kwargs
+            else:
+                # Anything non-array-like is passed through unsliced so that
+                # `_setup_inputs` rejects it with its usual error.
+                X_probe = (
+                    cast("Array | npt.NDArray", req.X)[:1]
+                    if _is_arraylike(req.X)
+                    else req.X
+                )
+                kwargs_probe = {
+                    k: cast("Array | npt.NDArray", v)[:1] if _is_arraylike(v) else v
+                    for k, v in req.kwargs.items()
+                }
             probe, _ = _setup_inputs(
-                X=req.X,
+                X=X_probe,
                 y=None,
                 param_input=self._ctx.param_input,
                 param_output=self._ctx.param_output,
@@ -346,7 +364,7 @@ class _OutputStreamer:
                 num_samples=req.num_samples,
                 shuffle=False,
                 device=None,
-                **req.kwargs,
+                **kwargs_probe,
             )
             batch, _ = next(iter(probe))
             rng_key, rng_subkey = random.split(rng_key)
