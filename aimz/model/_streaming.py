@@ -405,7 +405,8 @@ class _OutputStreamer:
 
         Args:
             req: The streamed write job (its single return site is the output site).
-            kernel: Probabilistic model with `NumPyro`_ primitives, already seeded.
+            kernel: Probabilistic model with `NumPyro`_ primitives, seeded by the
+                caller when tracing needs to sample latent sites (empty posterior).
             posterior: The posterior to condition on.
             y: Output data.
 
