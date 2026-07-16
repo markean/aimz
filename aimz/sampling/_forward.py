@@ -18,7 +18,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from jax import Array, lax
+from jax import Array, lax, vmap
+from jax.core import Tracer
 from numpyro.handlers import mask, seed, substitute, trace
 
 if TYPE_CHECKING:
@@ -41,6 +42,13 @@ def _sample_forward(
     with ``random.split(rng_key, num=num_samples)``, while the draw-parallel sharded
     path forwards its device-local slice of the host-split keys (so draws stay
     deterministic across mesh sizes).
+
+    Under a trace (e.g. when called inside :external:func:`jax.jit`), draws run as a
+    single fused :external:func:`jax.lax.map` loop in the compiled program. Called
+    eagerly, draws are instead vectorized with :external:func:`jax.vmap`: eager
+    ``lax.map`` would compile and cache a program keyed on the identity of a
+    per-call closure, so repeated eager calls would each retain a new compilation,
+    growing the cache without bound.
 
     Args:
         model: A probabilistic model with NumPyro primitives.
@@ -85,4 +93,7 @@ def _sample_forward(
 
         return {k: v["value"] for k, v in model_trace.items() if k in sites}
 
-    return lax.map(_trace_one_sample, xs=(rng_keys, samples or {}))
+    if isinstance(rng_keys, Tracer):
+        return lax.map(_trace_one_sample, xs=(rng_keys, samples or {}))
+
+    return vmap(_trace_one_sample)((rng_keys, samples or {}))
