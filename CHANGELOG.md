@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file and are best
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- A host-backed posterior is now placed on the default device once and cached, instead of being re-transferred on every {meth}`~aimz.ImpactModel.predict_on_batch` call and on every batch of the single-device data-parallel path of {meth}`~aimz.ImpactModel.predict` and {meth}`~aimz.ImpactModel.log_likelihood`. The placed copy stays device-resident until the posterior is replaced ([#267](https://github.com/markean/aimz/issues/267)).
+- Loss history stored by {meth}`~aimz.ImpactModel.fit` and {meth}`~aimz.ImpactModel.fit_on_batch` (`vi_result.losses`) is now a host-backed NumPy array rather than a JAX device array. Values are unchanged, and the {attr}`~aimz.ImpactModel.vi_result` setter continues to accept any array-like losses ([#268](https://github.com/markean/aimz/issues/268)).
+
+### Fixed
+
+- The numerical-instability warning for the loss history is emitted once per fit instead of twice ({meth}`~aimz.ImpactModel.fit` and {meth}`~aimz.ImpactModel.fit_on_batch` duplicated the {attr}`~aimz.ImpactModel.vi_result` setter's check), and the check now also detects Inf losses, as its message has stated ([#269](https://github.com/markean/aimz/issues/269)).
+
 ## [v0.13.0](https://github.com/markean/aimz/releases/tag/v0.13.0) - 2026-07-03
 
 ### Added

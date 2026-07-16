@@ -160,28 +160,25 @@ Any iterable that yields a mapping (field name -> array) per batch works with a 
         for X_batch, y_batch in loader:
             batch = {"X": jnp.asarray(X_batch), "y": jnp.asarray(y_batch)}
             _, loss = im.train_on_batch(**batch)
-            losses.append(loss)
+            losses.append(jax.device_get(loss))
 
 
 After a manual training loop you can populate the model state so downstream calls (prediction, posterior predictive sampling) work the same as after :meth:`~aimz.ImpactModel.fit`:
 
-1. Set :attr:`~aimz.ImpactModel.vi_result` to a structure containing the final parameters and loss history.
+1. Set :attr:`~aimz.ImpactModel.vi_result` to a structure containing the final parameters, the internal SVI state, and the loss history.
 2. Draw posterior samples with :meth:`~aimz.ImpactModel.sample` (``return_datatree=False`` to get a raw dictionary instead of a :external:class:`~xarray.DataTree`).
 3. Register the samples  via :meth:`~aimz.ImpactModel.set_posterior_sample`.
 
 .. code-block:: python
 
-    from typing import NamedTuple
+    from numpyro.infer.svi import SVIRunResult
 
-    from jax import Array
-
-
-    class SVIRunResult(NamedTuple):
-        params: dict[str, Array]
-        losses: list[float]
-
-    # Store final VI parameters and the collected loss trace (assumes `losses` list built above)
-    im.vi_result = SVIRunResult(im.inference.get_params(im._vi_state), losses)
+    # Store final VI parameters, the internal SVI state, and the collected loss trace
+    im.vi_result = SVIRunResult(
+        im.inference.get_params(im._vi_state),
+        im._vi_state,
+        losses,
+    )
 
     # Obtain posterior samples
     posterior_sample = im.sample(return_datatree=False)

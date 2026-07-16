@@ -220,7 +220,7 @@ class _OutputStreamer:
 
         return (*array_names, *kwargs_extra), len(array_names), kwargs_extra
 
-    def _place_posterior(
+    def place_posterior(
         self,
         posterior: dict[str, Array] | None,
         sharding: Sharding | None,
@@ -228,18 +228,19 @@ class _OutputStreamer:
         """Return the posterior placed on devices, cached by ``sharding``.
 
         The cache is rebuilt whenever ``posterior`` is replaced (by identity); each
-        distinct placement coexists in the same cache. Used by the data-parallel path to
-        replicate the posterior once across calls; the draw-parallel path places its
-        per-chunk slices itself.
+        distinct placement coexists in the same cache. Used by the data-parallel path
+        to replicate the posterior once across calls and to keep a host-backed posterior
+        device-resident; the draw-parallel path places its per-chunk slices itself.
 
         Args:
             posterior: The posterior samples to place, or empty/``None`` when unset.
-            sharding: Placement to commit the posterior to, or ``None`` to leave it in
-                place (e.g. single-device).
+            sharding: Placement to commit the posterior to, or ``None`` to place it on
+                the default device (e.g. single-device).
 
         Returns:
             The posterior samples by variable name, placed on devices, or an empty
-            dict when no posterior samples are set.
+            dict when no posterior samples are set. The placement stays cached (and
+            device-resident) until ``posterior`` is replaced.
         """
         if not posterior:
             return {}
@@ -250,13 +251,11 @@ class _OutputStreamer:
             self._posterior_device_src = posterior
         cache = self._posterior_device_cache
         if sharding not in cache:
-            # sharding=None (no mesh): leave in place; device_put(..., None) would
-            # force a copy of a host-backed posterior to the default device.
-            cache[sharding] = (
-                posterior
-                if sharding is None
-                else device_put(posterior, device=sharding)
-            )
+            # sharding=None (no mesh): device_put converts a host-backed (NumPy)
+            # posterior to the default device once, instead of it being re-transferred
+            # on every downstream jit call; device-backed arrays pass through without a
+            # copy.
+            cache[sharding] = device_put(posterior, device=sharding)
 
         return cache[sharding]
 
@@ -362,7 +361,7 @@ class _OutputStreamer:
             if self._ctx.replicated_sharding is not None:
                 samples = device_put(samples, device=self._ctx.replicated_sharding)
         else:
-            samples = self._place_posterior(posterior, self._ctx.replicated_sharding)
+            samples = self.place_posterior(posterior, self._ctx.replicated_sharding)
         self._write_data(
             req,
             compute=compute,
@@ -437,7 +436,7 @@ class _OutputStreamer:
                 req,
                 compute=compute,
                 y=y,
-                samples=self._place_posterior(
+                samples=self.place_posterior(
                     posterior,
                     self._ctx.replicated_sharding,
                 ),
