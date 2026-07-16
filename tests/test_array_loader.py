@@ -184,11 +184,11 @@ class TestArrayLoader:
             .values
         )
 
-        assert jnp.allclose(losses_without_dataloader, losses_with_dataloader), (
+        assert np.allclose(losses_without_dataloader, losses_with_dataloader), (
             "Losses from fitting with raw arrays vs. fitting with a data loader "
             "can match, if the rng_key is properly set."
         )
-        assert jnp.allclose(mean_pred_without_dataloader, mean_pred_with_dataloader), (
+        assert np.allclose(mean_pred_without_dataloader, mean_pred_with_dataloader), (
             "Posterior predictive samples from fitting with raw arrays vs. "
             "fitting with a data loader can match, if the rng_key is properly set."
         )
@@ -211,7 +211,7 @@ class TestArrayLoader:
         )
         via = im.predict(loader, rng_key=rng_key, progress=False)
 
-        assert jnp.allclose(
+        assert np.allclose(
             ref.posterior_predictive["y"].values,
             via.posterior_predictive["y"].values,
         )

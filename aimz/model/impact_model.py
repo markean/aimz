@@ -307,7 +307,7 @@ class ImpactModel(BaseModel):
             posterior samples. Draw them with :meth:`~aimz.ImpactModel.sample` and
             register them via :meth:`~aimz.ImpactModel.set_posterior_sample`.
         """
-        if np.any(np.isnan(vi_result.losses)):
+        if not np.all(np.isfinite(vi_result.losses)):
             msg = "Loss contains NaN or Inf, indicating numerical instability."
             warn(msg, category=RuntimeWarning, stacklevel=2)
 
@@ -988,20 +988,19 @@ class ImpactModel(BaseModel):
         if isinstance(self.inference, SVI):
             self._num_samples = num_samples
             logger.info("Performing variational inference optimization")
-            self.vi_result: SVIRunResult = self.inference.run(
+            vi_result = self.inference.run(
                 rng_subkey,
                 num_steps=num_steps,
                 progress_bar=progress,
                 init_state=self._vi_state,
                 **args_bound,
             )
+            self.vi_result: SVIRunResult = SVIRunResult(
+                params=vi_result.params,
+                state=vi_result.state,
+                losses=device_get(vi_result.losses),
+            )
             self._vi_state = self.vi_result.state
-            if np.any(np.isnan(self.vi_result.losses)):
-                warn(
-                    "Loss contains NaN or Inf, indicating numerical instability.",
-                    category=RuntimeWarning,
-                    stacklevel=2,
-                )
             logger.info("Drawing posterior samples (num_samples=%d)", self._num_samples)
             rng_key, rng_subkey = random.split(rng_key)
             self._posterior = _sample_forward(
@@ -1021,8 +1020,8 @@ class ImpactModel(BaseModel):
             self._num_samples = (
                 next(iter(self.posterior.values())).shape[0] if self.posterior else 0
             )
-
-        self._is_fitted = True
+            # The SVI path is already marked by the `vi_result` setter
+            self._is_fitted = True
 
         return self
 
@@ -1108,10 +1107,10 @@ class ImpactModel(BaseModel):
         )
 
         logger.info("Performing variational inference optimization")
-        losses: list[float] = []
+        losses: list[npt.NDArray] = []
         rng_key, rng_subkey = random.split(rng_key)
         for epoch in range(epochs):
-            losses_epoch: list[float] = []
+            losses_epoch: list[npt.NDArray] = []
             pbar = tqdm(
                 dataloader,
                 desc=f"Epoch {epoch + 1}/{epochs}",
@@ -1128,22 +1127,19 @@ class ImpactModel(BaseModel):
                 loss_batch = device_get(loss)
                 losses_epoch.append(loss_batch)
                 pbar.set_postfix({"loss": f"{float(loss_batch):.4f}"})
-            losses_epoch_arr = jnp.stack(losses_epoch)
-            losses.extend(losses_epoch_arr)
+            # Host-side bookkeeping: the per-step losses are already on the host, so
+            # stacking or accumulating them as device arrays would only add
+            # host-to-device round trips and retain one device scalar per step.
+            losses.extend(losses_epoch)
             tqdm.write(
                 f"Epoch {epoch + 1}/{epochs} - "
-                f"Average loss: {float(jnp.mean(losses_epoch_arr)):.4f}",
+                f"Average loss: {float(np.mean(losses_epoch)):.4f}",
             )
         self.vi_result = SVIRunResult(
             params=self.inference.get_params(self._vi_state),
             state=self._vi_state,
-            losses=jnp.asarray(losses),
+            losses=np.asarray(losses),
         )
-        if np.any(np.isnan(cast("SVIRunResult", self.vi_result).losses)):
-            msg = "Loss contains NaN or Inf, indicating numerical instability."
-            warn(msg, category=RuntimeWarning, stacklevel=2)
-
-        self._is_fitted = True
 
         logger.info(
             "Drawing posterior samples (num_samples=%d)",
@@ -1302,7 +1298,7 @@ class ImpactModel(BaseModel):
                 kernel,
                 rng_keys=random.split(rng_key, num=self._num_samples),
                 return_sites=self._coerce_return_sites(return_sites),
-                samples=self.posterior,
+                samples=self._streamer.place_posterior(self.posterior, sharding=None),
                 model_kwargs=args_bound,
             ),
         )
