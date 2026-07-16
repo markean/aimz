@@ -1671,9 +1671,13 @@ class ImpactModel(BaseModel):
                 **kwargs,
             )
 
-        # Seed once so tracing succeeds even when posterior is empty or only partially
-        # covers latent sites.
-        kernel = seed(self.kernel, rng_seed=self.rng_key)
+        # With no posterior, the single-draw result samples every latent site from the
+        # prior, which requires a seeded kernel. A posterior from fitting covers every
+        # latent site, so no key is consumed and the bare kernel keeps a stable identity
+        # for the compilation cache; a partial posterior raises an error.
+        kernel = (
+            self.kernel if self.posterior else seed(self.kernel, rng_seed=self.rng_key)
+        )
 
         output_dir, output_subdir = self._create_output_subdir(output_dir)
 

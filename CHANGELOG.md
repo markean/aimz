@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The numerical-instability warning for the loss history is emitted once per fit instead of twice ({meth}`~aimz.ImpactModel.fit` and {meth}`~aimz.ImpactModel.fit_on_batch` duplicated the {attr}`~aimz.ImpactModel.vi_result` setter's check), and the check now also detects Inf losses, as its message has stated ([#269](https://github.com/markean/aimz/issues/269)).
 - Calling {meth}`~aimz.ImpactModel.train_on_batch` (or {meth}`~aimz.ImpactModel.fit`) on the same model with a different set of non-array keyword arguments than an earlier call no longer reuses a stale compiled update function whose static arguments were derived from the first call. Each distinct set of non-array argument names now gets its own cached update function ([#271](https://github.com/markean/aimz/issues/271)).
+- {meth}`~aimz.ImpactModel.log_likelihood` no longer triggers unnecessary JAX recompilation when evaluating a fitted posterior. The kernel is now seeded only when no posterior is supplied and a single prior draw is required. Incomplete posteriors now raise an error instead of silently conditioning on frozen prior draws for missing latent sites ([#273](https://github.com/markean/aimz/issues/273)).
 
 ## [v0.13.0](https://github.com/markean/aimz/releases/tag/v0.13.0) - 2026-07-03
 
