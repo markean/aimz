@@ -132,7 +132,7 @@ class ImpactModel(BaseModel):
 
     def _init_runtime_attrs(self) -> None:
         """Initialize runtime attributes."""
-        self._fn_vi_update: Callable | None = None
+        self._fn_vi_update: dict[tuple[str, ...], Callable] = {}
         self._num_devices = local_device_count()
         if self._num_devices > 1:
             mesh = make_mesh(
@@ -915,14 +915,20 @@ class ImpactModel(BaseModel):
             if rng_key is None:
                 self._rng_key, rng_key = random.split(self._rng_key)
             self._vi_state = cast("SVI", self.inference).init(rng_key, **batch)
-        if self._fn_vi_update is None:
-            _, kwargs_extra = _group_kwargs(kwargs)
-            self._fn_vi_update = jit(
+        # Cache one jitted update per set of non-array kwarg names: the names are baked
+        # into `static_argnames`, so a call with different extras needs its own wrapper
+        # rather than reusing a stale one.
+        _, kwargs_extra = _group_kwargs(kwargs)
+        fn_key = tuple(sorted(kwargs_extra))
+        fn_vi_update = self._fn_vi_update.get(fn_key)
+        if fn_vi_update is None:
+            fn_vi_update = jit(
                 cast("SVI", self.inference).update,
-                static_argnames=tuple(kwargs_extra),
+                static_argnames=fn_key,
             )
+            self._fn_vi_update[fn_key] = fn_vi_update
 
-        self._vi_state, loss = self._fn_vi_update(self._vi_state, **batch)
+        self._vi_state, loss = fn_vi_update(self._vi_state, **batch)
 
         return self._vi_state, loss
 
