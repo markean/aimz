@@ -123,7 +123,8 @@ class ArrayLoader:
         indices = self.indices
         if self.shuffle:
             self.rng_key, subkey = random.split(self.rng_key)
-            indices = np.asarray(random.permutation(subkey, len(self.dataset)))
+            seed = np.asarray(random.key_data(subkey))
+            indices = np.random.default_rng(seed).permutation(len(self.dataset))
         for start in range(0, len(self.dataset), self.batch_size):
             end = start + self.batch_size
             batch_idx = indices[start:end]
