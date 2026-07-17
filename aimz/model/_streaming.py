@@ -81,7 +81,7 @@ class _WriteRequest:
     return_sites: tuple[str, ...]
     num_samples: int
     batch_size: int | None
-    output_dir: Path
+    artifact_path: Path
     progress: bool
     loader_rng_key: Array
     kwargs: dict[str, object]
@@ -270,7 +270,7 @@ class _OutputStreamer:
         group: str,
         posterior: dict[str, Array] | None,
     ) -> None:
-        """Write predictive samples (predict / prior predictive) to ``req.output_dir``.
+        """Write predictive samples to ``req.artifact_path``.
 
         Builds the predictive ``compute`` — one sharded-sampler call per item — and
         dispatches to the strategy streamer. ``shard_axis="draw"`` chunks the draw axis;
@@ -398,7 +398,7 @@ class _OutputStreamer:
         posterior: dict[str, Array] | None,
         y: ArrayLike | None,
     ) -> None:
-        """Write the log-likelihood of ``y`` under ``kernel`` to ``req.output_dir``.
+        """Write the log-likelihood to ``req.artifact_path``.
 
         Builds the log-likelihood ``compute`` — one sharded call per item, keyed by the
         output site — and dispatches to the strategy streamer.
@@ -474,7 +474,7 @@ class _OutputStreamer:
         rng_key: Array | None,
         pbar: tqdm,
     ) -> None:
-        """Stream over data-parallel batches and write to ``req.output_dir``.
+        """Stream over data-parallel batches and write to ``req.artifact_path``.
 
         Shards the observation axis across devices and conditions every batch on the
         whole (replicated) ``samples``. For each batch it assembles a :class:`_Step`,
@@ -543,9 +543,9 @@ class _OutputStreamer:
             items=zip(dataloader, subkeys, strict=True),
             n_items=n_batches,
             return_sites=req.return_sites,
-            output_dir=req.output_dir,
+            artifact_path=req.artifact_path,
             strategy=_select_write_strategy(
-                open_group(req.output_dir, mode="w"),
+                open_group(req.artifact_path, mode="w"),
                 dataloader=dataloader,
             ),
             produce=produce,
@@ -561,7 +561,7 @@ class _OutputStreamer:
         rng_key: Array | None,
         pbar: tqdm,
     ) -> None:
-        """Stream over draw chunks and write to ``req.output_dir``.
+        """Stream over draw chunks and write to ``req.artifact_path``.
 
         Shards the draw axis across devices and holds the whole input resident:
         replicates the input/output/array-kwargs once, splits the per-draw keys once,
@@ -643,9 +643,9 @@ class _OutputStreamer:
             items=range(0, req.num_samples, batch_size),
             n_items=-(-req.num_samples // batch_size),
             return_sites=req.return_sites,
-            output_dir=req.output_dir,
+            artifact_path=req.artifact_path,
             strategy=_SliceWriteStrategy(
-                zarr_group=open_group(req.output_dir, mode="w"),
+                zarr_group=open_group(req.artifact_path, mode="w"),
                 total=req.num_samples,
                 batch_size=batch_size,
                 axis=0,

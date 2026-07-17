@@ -173,9 +173,9 @@ class ImpactModel(BaseModel):
             f"Output parameter: '{self.param_output}'",
             f"Fitted: {getattr(self, '_is_fitted', False)}",
         ]
-        outdir = getattr(self, "temp_dir", None)
-        if outdir:
-            out.append(f"Output directory: {outdir}")
+        temp_dir = getattr(self, "temp_dir", None)
+        if temp_dir:
+            out.append(f"Temporary directory: {temp_dir}")
 
         return "\n".join(out)
 
@@ -278,7 +278,7 @@ class ImpactModel(BaseModel):
 
     @property
     def temp_dir(self) -> str | None:
-        """Temporary directory path, or ``None`` if not set."""
+        """Path of the model's temporary directory, or ``None`` if none exists."""
         return self._temp_dir.name if self._temp_dir else None
 
     @property
@@ -423,20 +423,22 @@ class ImpactModel(BaseModel):
 
         return requested
 
-    def _create_output_subdir(
+    def _create_artifact_path(
         self,
         output_dir: str | Path | None,
-    ) -> tuple[Path, Path]:
-        """Create a subdirectory for storing output.
+    ) -> Path:
+        """Create the artifact path for one disk-backed call.
 
-        This function is called for its side effect: it creates a subdirectory within
-        the specified output directory with a timestamp.
+        This function is called for its side effect: it creates a timestamped
+        subdirectory within the specified output directory.
 
         Args:
             output_dir: Base directory where the output subdirectory will be created.
 
         Returns:
-            The paths to the output directory and the created subdirectory.
+            The created call-specific artifact path (``<UTC-timestamp>_<caller>``
+            under the resolved base directory); recorded on returned trees as the
+            ``artifact_path`` attribute.
         """
         if output_dir is None:
             if self._temp_dir is None:
@@ -457,10 +459,10 @@ class ImpactModel(BaseModel):
             if frame.frame.f_locals.get("self") is not self:
                 break
             caller = frame.function
-        output_subdir = output_dir / f"{timestamp}_{caller}"
-        output_subdir.mkdir(parents=False, exist_ok=False)
+        artifact_path = output_dir / f"{timestamp}_{caller}"
+        artifact_path.mkdir(parents=False, exist_ok=False)
 
-        return output_dir, output_subdir
+        return artifact_path
 
     def _requires_whole_input(
         self,
@@ -604,8 +606,10 @@ class ImpactModel(BaseModel):
             output_dir: The directory where the outputs will be saved. If the specified
                 directory does not exist, it will be created automatically. If ``None``,
                 a model-owned temporary directory is used. A subdirectory is generated
-                within this directory to store the outputs. The temporary directory is
-                removed by :meth:`~aimz.ImpactModel.cleanup`,
+                within this directory to store the outputs; its path is recorded in
+                the returned tree's ``artifact_path`` attribute (on the root and the
+                group node). The temporary directory is removed by
+                :meth:`~aimz.ImpactModel.cleanup`,
                 :meth:`~aimz.ImpactModel.cleanup_models`, or when the model is
                 garbage-collected. Pass an explicit ``output_dir`` to keep results
                 beyond the model's lifetime.
@@ -650,7 +654,7 @@ class ImpactModel(BaseModel):
         if rng_key is None:
             self._rng_key, rng_key = random.split(self._rng_key)
 
-        output_dir, output_subdir = self._create_output_subdir(output_dir)
+        artifact_path = self._create_artifact_path(output_dir)
 
         try:
             self._streamer.write_predictive(
@@ -660,7 +664,7 @@ class ImpactModel(BaseModel):
                     return_sites=return_sites,
                     num_samples=num_samples,
                     batch_size=batch_size,
-                    output_dir=output_subdir,
+                    artifact_path=artifact_path,
                     progress=progress,
                     loader_rng_key=self.rng_key,
                     kwargs=kwargs,
@@ -671,12 +675,11 @@ class ImpactModel(BaseModel):
                 posterior=self.posterior,
             )
         except BaseException:
-            rmtree(output_subdir, ignore_errors=True)
+            rmtree(artifact_path, ignore_errors=True)
             raise
 
         return _build_datatree(
-            output_dir,
-            output_subdir=output_subdir,
+            artifact_path,
             group="prior_predictive",
             posterior=self.posterior,
         )
@@ -846,8 +849,10 @@ class ImpactModel(BaseModel):
             output_dir: The directory where the outputs will be saved. If the specified
                 directory does not exist, it will be created automatically. If ``None``,
                 a model-owned temporary directory is used. A subdirectory is generated
-                within this directory to store the outputs. The temporary directory is
-                removed by :meth:`~aimz.ImpactModel.cleanup`,
+                within this directory to store the outputs; its path is recorded in
+                the returned tree's ``artifact_path`` attribute (on the root and the
+                group node). The temporary directory is removed by
+                :meth:`~aimz.ImpactModel.cleanup`,
                 :meth:`~aimz.ImpactModel.cleanup_models`, or when the model is
                 garbage-collected. Pass an explicit ``output_dir`` to keep results
                 beyond the model's lifetime.
@@ -1376,8 +1381,10 @@ class ImpactModel(BaseModel):
             output_dir: The directory where the outputs will be saved. If the specified
                 directory does not exist, it will be created automatically. If ``None``,
                 a model-owned temporary directory is used. A subdirectory is generated
-                within this directory to store the outputs. The temporary directory is
-                removed by :meth:`~aimz.ImpactModel.cleanup`,
+                within this directory to store the outputs; its path is recorded in
+                the returned tree's ``artifact_path`` attribute (on the root and the
+                group node). The temporary directory is removed
+                by :meth:`~aimz.ImpactModel.cleanup`,
                 :meth:`~aimz.ImpactModel.cleanup_models`, or when the model is
                 garbage-collected. Pass an explicit ``output_dir`` to keep results
                 beyond the model's lifetime.
@@ -1445,7 +1452,7 @@ class ImpactModel(BaseModel):
 
         group = "posterior_predictive" if in_sample else "predictions"
 
-        output_dir, output_subdir = self._create_output_subdir(output_dir)
+        artifact_path = self._create_artifact_path(output_dir)
 
         try:
             self._streamer.write_predictive(
@@ -1455,7 +1462,7 @@ class ImpactModel(BaseModel):
                     return_sites=return_sites,
                     num_samples=self._num_samples,
                     batch_size=batch_size,
-                    output_dir=output_subdir,
+                    artifact_path=artifact_path,
                     progress=progress,
                     loader_rng_key=self.rng_key,
                     kwargs=kwargs,
@@ -1466,12 +1473,11 @@ class ImpactModel(BaseModel):
                 posterior=self.posterior,
             )
         except BaseException:
-            rmtree(output_subdir, ignore_errors=True)
+            rmtree(artifact_path, ignore_errors=True)
             raise
 
         return _build_datatree(
-            output_dir,
-            output_subdir=output_subdir,
+            artifact_path,
             group=group,
             posterior=self.posterior,
         )
@@ -1511,7 +1517,10 @@ class ImpactModel(BaseModel):
 
         Returns:
             The estimated impact of an intervention. Posterior samples are included if
-            available.
+            available. When a scenario's output was streamed to disk, the effect tree
+            records that scenario's call-specific artifact path in an
+            ``artifact_path_baseline`` / ``artifact_path_intervention`` root attribute;
+            in-memory results set neither.
 
         Raises:
             ValueError: If neither ``output_baseline`` nor ``args_baseline`` is
@@ -1565,18 +1574,16 @@ class ImpactModel(BaseModel):
         out[group] = dt_intervention[group] - dt_baseline[group]
         if self.posterior:
             out["posterior"] = _dict_to_datatree(self.posterior)
-        # Propagate an output directory attribute to the effect result.
-        # Precedence:
-        #   1) intervention output_dir (if present)
-        #   2) baseline output_dir (if present)
-        #   3) model temporary directory (if it exists)
-        output_dir_attr = (
-            dt_intervention.attrs.get("output_dir")
-            or dt_baseline.attrs.get("output_dir")
-            or (self.temp_dir if self.temp_dir is not None else None)
-        )
-        if output_dir_attr is not None:
-            out.attrs["output_dir"] = output_dir_attr
+        # Record each scenario's artifact path when the scenario was computed by a
+        # disk-backed method. In-memory (on_batch / *_on_batch) results carry no
+        # artifact attrs.
+        for suffix, tree in (
+            ("baseline", dt_baseline),
+            ("intervention", dt_intervention),
+        ):
+            artifact_path = tree.attrs.get("artifact_path")
+            if artifact_path is not None:
+                out.attrs[f"artifact_path_{suffix}"] = artifact_path
 
         return out
 
@@ -1617,8 +1624,10 @@ class ImpactModel(BaseModel):
             output_dir: The directory where the outputs will be saved. If the specified
                 directory does not exist, it will be created automatically. If ``None``,
                 a model-owned temporary directory is used. A subdirectory is generated
-                within this directory to store the outputs. The temporary directory is
-                removed by :meth:`~aimz.ImpactModel.cleanup`,
+                within this directory to store the outputs; its path is recorded in
+                the returned tree's ``artifact_path`` attribute (on the root and the
+                group node). The temporary directory is removed
+                by :meth:`~aimz.ImpactModel.cleanup`,
                 :meth:`~aimz.ImpactModel.cleanup_models`, or when the model is
                 garbage-collected. Pass an explicit ``output_dir`` to keep results
                 beyond the model's lifetime.
@@ -1679,7 +1688,7 @@ class ImpactModel(BaseModel):
             self.kernel if self.posterior else seed(self.kernel, rng_seed=self.rng_key)
         )
 
-        output_dir, output_subdir = self._create_output_subdir(output_dir)
+        artifact_path = self._create_artifact_path(output_dir)
 
         try:
             self._streamer.write_log_likelihood(
@@ -1689,7 +1698,7 @@ class ImpactModel(BaseModel):
                     return_sites=(self.param_output,),
                     num_samples=self._num_samples,
                     batch_size=batch_size,
-                    output_dir=output_subdir,
+                    artifact_path=artifact_path,
                     progress=progress,
                     loader_rng_key=self.rng_key,
                     kwargs=kwargs,
@@ -1699,12 +1708,11 @@ class ImpactModel(BaseModel):
                 y=y,
             )
         except BaseException:
-            rmtree(output_subdir, ignore_errors=True)
+            rmtree(artifact_path, ignore_errors=True)
             raise
 
         return _build_datatree(
-            output_dir,
-            output_subdir=output_subdir,
+            artifact_path,
             group="log_likelihood",
             posterior=self.posterior,
         )
@@ -1723,9 +1731,10 @@ class ImpactModel(BaseModel):
             all tracked model instances.
         """
         if hasattr(self, "_temp_dir") and self._temp_dir is not None:
-            logger.info("Temporary directory cleaned up at: %s", self._temp_dir.name)
+            temp_dir = self._temp_dir.name
             self._temp_dir.cleanup()
             self._temp_dir = None
+            logger.info("Temporary directory cleaned up at: %s", temp_dir)
 
     @classmethod
     def cleanup_models(cls) -> None:

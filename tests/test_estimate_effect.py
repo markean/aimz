@@ -79,11 +79,11 @@ def test_estimate_effect_argument_validation(
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
-def test_estimate_effect_output_dir_lazy_args(
+def test_estimate_effect_artifact_paths_lazy_args(
     synthetic_data: tuple[Array, Array],
     vi: SVI,
 ) -> None:
-    """Ensure lazy (args_*) inputs work and baseline `output_dir` is propagated."""
+    """Ensure lazy (args_*) inputs work and both scenarios' artifact paths recorded."""
     X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
     im.fit(X=X, y=y, batch_size=len(X))
@@ -105,8 +105,15 @@ def test_estimate_effect_output_dir_lazy_args(
             },
         )
 
-    # Confirm the temporary output directory propagated to effect result
-    assert effect.attrs.get("output_dir") == str(Path(im.temp_dir).resolve())
+    # Each internally computed scenario records its own call-specific subdirectory.
+    # The subdir suffix is the outermost user-called method: `estimate_effect`.
+    path_baseline = Path(effect.attrs["artifact_path_baseline"])
+    path_intervention = Path(effect.attrs["artifact_path_intervention"])
+    assert path_baseline != path_intervention
+    for path in (path_baseline, path_intervention):
+        assert path.is_dir()
+        assert path.parent == Path(im.temp_dir).resolve()
+        assert path.name.endswith("_estimate_effect")
     im.cleanup()
 
 

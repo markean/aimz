@@ -177,7 +177,7 @@ def _validate_aligned_inputs(
 ) -> None:
     """Validate array inputs share one leading-axis size, for either parallel path.
 
-    Called from the streaming entry points before any output directory is created. A
+    Called from the streaming entry points before any artifact path is created. A
     data loader is skipped. For an array ``X``, then ``X``, ``y`` (if given), and every
     array-like kwarg must be at least 1-D and share ``X``'s leading-axis size.
 

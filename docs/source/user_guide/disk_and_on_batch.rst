@@ -146,7 +146,7 @@ The example below illustrates this case.
 
 Reopening Persisted Outputs
 ---------------------------
-When you pass an explicit ``output_dir``, each call writes one subdirectory containing a Zarr_ group with one array per return site.
+When you pass an explicit ``output_dir``, each call writes one subdirectory containing a Zarr_ group with one array per return site; its path is recorded in the returned tree's ``artifact_path`` attribute (the attribute is recorded for temporary-root outputs as well).
 Only the sampled arrays and their dimension names are persisted; coordinates and attributes are not stored on disk.
 
 To reconstruct the same :external:class:`xarray.DataTree` from the files alone, mirror that read-time step:
@@ -156,7 +156,7 @@ To reconstruct the same :external:class:`xarray.DataTree` from the files alone, 
     import numpy as np
     import xarray as xr
 
-    # The per-call directory written under `output_dir`
+    # The per-call directory written under `output_dir` (the tree's `artifact_path`)
     store = ...
 
     # If relevant, add the leading `chain` axis and coordinates as aimz does on read
