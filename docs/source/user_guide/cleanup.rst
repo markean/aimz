@@ -10,18 +10,18 @@ Creation Logic
 --------------
 When a disk‑writing method is called with ``output_dir=None`` (the default), the model creates a process‑scoped temporary root directory (via :class:`tempfile.TemporaryDirectory`) the first time such a call occurs.
 Each invocation then writes to a timestamped subdirectory under that root, ensuring that earlier results are never overwritten.
-Subdirectories follow the pattern ``<caller_name>_<UTC-timestamp>/``, where ``<caller_name>`` is the name of the method that triggered the write operation.
-This root directory is stored in the :attr:`~aimz.ImpactModel.temp_dir` attribute and reused for subsequent calls until the user invoke :meth:`~aimz.ImpactModel.cleanup`.
+Subdirectories follow the pattern ``<UTC-timestamp>_<caller_name>/``, where ``<caller_name>`` is the name of the method that triggered the write operation.
+This root directory is stored in the :attr:`~aimz.ImpactModel.temp_dir` attribute and reused for subsequent calls until the user invokes :meth:`~aimz.ImpactModel.cleanup`.
 
 Example Layout (implicit temp root)::
 
     /tmp/tmpz00u5kxk/       # model.temp_dir (root, reused until cleanup)
-        sample_prior_predictive_20250926T185250223698Z/
-        log_likelihood_20250926T185359570134Z/
-        predict_20250926T185419208087Z/
+        20250926T185250223698Z_sample_prior_predictive/
+        20250926T185359570134Z_log_likelihood/
+        20250926T185419208087Z_predict/
 
 If the user provides ``output_dir``, that directory becomes the root, and it will be created if it does not already exist.
-The same timestamped subdirectory pattern is used there (e.g., ``my_runs/20250917T013040Z``).
+The same timestamped subdirectory pattern is used there (e.g., ``my_runs/20250917T013040123456Z_predict``).
 An explicit ``output_dir`` is **not** deleted by :meth:`~aimz.ImpactModel.cleanup`, since it is assumed that the user intends to manage its lifecycle manually.
 
 
@@ -44,14 +44,12 @@ Although :class:`tempfile.TemporaryDirectory` *attempts* automatic removal upon 
 Large artifacts can accumulate quickly; calling :meth:`~aimz.ImpactModel.cleanup` ensures prompt reclamation of disk space.
 
 
-Accessing Output Directories
-----------------------------
-Every disk-writing method returns an :external:class:`xarray.DataTree` containing the paths where results are stored as attributes:
-
-* ``tree.attrs["output_dir"]`` – the root directory (either the temporary root or the user-provided directory).
-* ``tree[<group>].attrs["output_dir"]`` – the timestamped subdirectory containing the Zarr_ data for that group.
-
-The output below shows an example :external:class:`xarray.DataTree` illustrating the output directory paths.
+Accessing Artifact Paths
+------------------------
+Every disk-writing method records the call's artifact path — the timestamped subdirectory holding the Zarr_ store with the results — in the ``artifact_path`` attribute, set on both the root tree and the group node (``tree.attrs["artifact_path"]`` and ``tree[<group>].attrs["artifact_path"]``).
+The enclosing base directory is simply ``Path(artifact_path).parent``, and the temporary root (when no ``output_dir`` was given) is also available via :attr:`~aimz.ImpactModel.temp_dir`.
+:meth:`~aimz.ImpactModel.estimate_effect` records the artifact paths of its two scenarios under ``artifact_path_baseline`` and ``artifact_path_intervention`` when the corresponding outputs were streamed to disk.
+The output below shows an example :external:class:`xarray.DataTree` illustrating the artifact paths.
 
 .. jupyter-execute::
     :hide-code:

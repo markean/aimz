@@ -39,17 +39,16 @@ def _make_attrs() -> dict[str, str]:
 
 
 def _build_datatree(
-    output_dir: Path,
-    output_subdir: Path,
+    artifact_path: Path,
     group: str,
     posterior: Mapping[str, Array | npt.NDArray] | None = None,
 ) -> xr.DataTree:
     """Build the aimz output DataTree from a Zarr group.
 
     Args:
-        output_dir: Top-level output directory; stored on the root tree's attrs.
-        output_subdir: Subdirectory holding the Zarr group; read with
-            :external:func:`~xarray.open_zarr` and stored on the group's attrs.
+        artifact_path: Call-specific path holding the Zarr group; read with
+            :external:func:`~xarray.open_zarr` and recorded (as ``str``) in the
+            ``artifact_path`` attribute on both the root tree and the ``group`` node.
         group: Group name to attach the loaded dataset under (e.g.
             ``"log_likelihood"``, ``"prior_predictive"``).
         posterior: Optional posterior samples; when provided, added as a ``"posterior"``
@@ -59,7 +58,7 @@ def _build_datatree(
         A DataTree rooted at ``"root"`` with the loaded dataset attached under ``group``
         and, optionally, a ``"posterior"`` subtree.
     """
-    ds = open_zarr(output_subdir, consolidated=False).expand_dims(dim="chain", axis=0)
+    ds = open_zarr(artifact_path, consolidated=False).expand_dims(dim="chain", axis=0)
     ds = ds.assign_coords(
         {k: np.arange(ds.sizes[k]) for k in ds.sizes},
     ).assign_attrs(_make_attrs())
@@ -68,8 +67,8 @@ def _build_datatree(
     if posterior:
         out["posterior"] = _dict_to_datatree(posterior)
     out[group] = xr.DataTree(ds)
-    out[group].attrs["output_dir"] = str(output_subdir)
-    out.attrs["output_dir"] = str(output_dir)
+    out[group].attrs["artifact_path"] = str(artifact_path)
+    out.attrs["artifact_path"] = str(artifact_path)
 
     return out
 

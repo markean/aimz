@@ -465,7 +465,7 @@ def _write_loop(
     items: Iterable,
     n_items: int,
     return_sites: tuple[str, ...],
-    output_dir: Path,
+    artifact_path: Path,
     strategy: _WriteStrategy,
     produce: Callable[[object], dict[str, np.ndarray]],
     pbar: tqdm,
@@ -480,14 +480,14 @@ def _write_loop(
         items: Items to iterate (batches paired with keys, or draw-chunk starts).
         n_items: Number of items (used to size the writer queues).
         return_sites: Names of variables (sites) to write.
-        output_dir: Directory where outputs will be saved.
+        artifact_path: Call-specific path where the Zarr group is written.
         strategy: Write strategy that creates and enqueues each item's site arrays.
         produce: Maps one item to its mapping of site name to array.
         pbar: Progress bar instance to display progress.
 
     Raises:
         Exception: Any exception raised during production or writing is logged, the
-            output directory is cleaned up, and the exception is re-raised.
+            artifacts at ``artifact_path`` are removed, and the exception is re-raised.
     """
     threads = []
     queues = {}
@@ -501,7 +501,7 @@ def _write_loop(
             if error_queue is None:
                 threads, queues, error_queue = _start_writer_threads(
                     return_sites,
-                    group_path=output_dir,
+                    group_path=artifact_path,
                     apply=strategy.apply,
                     queue_size=_determine_writer_queue_size(
                         n_items,
@@ -525,8 +525,8 @@ def _write_loop(
             worker_err = error_queue.get()
             success = False
         if not success:
-            logger.warning("Cleaning up output directory: %s", output_dir)
-            rmtree(output_dir, ignore_errors=True)
+            rmtree(artifact_path, ignore_errors=True)
+            logger.warning("Cleaned up artifact path: %s", artifact_path)
         pbar.close()
     if worker_err is not None:
         _, exc, tb = worker_err
