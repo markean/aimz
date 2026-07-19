@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aimz"
-version = "0.13.0"
+version = "0.14.dev0"
 description = "Scalable probabilistic impact modeling"
 readme = "README.md"
 license = "Apache-2.0"
@@ -35,21 +35,21 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = [
-    "mlflow>=3.9",
+    "mlflow>=3.10",
     "pre-commit>=4.6",
     "pytest>=9.1",
     "pytest-cov>=7.1",
     "ruff>=0.15",
 ]
 gpu = ["jax[cuda13]>=0.10"]
-mlflow = ["mlflow>=3.9"]
+mlflow = ["mlflow>=3.10"]
 docs = [
     "arviz_base>=1; python_version >= '3.12'",
     "arviz_plots>=1; python_version >= '3.12'",
     "arviz_stats>=1; python_version >= '3.12'",
     "flax>=0.12",
     "jupyter-sphinx>=0.5",
-    "mlflow>=3.9",
+    "mlflow>=3.10",
     "myst-parser>=5",
     "pydata-sphinx-theme>=0.17",
     "sphinx>=9",
@@ -76,6 +76,7 @@ per-file-ignores = { "aimz/model/_core.py" = [
 ], "aimz/mlflow*" = [
     "ANN202",  # missing-return-type-private-function
     "ARG001",  # unused-function-argument
+    "BLE001",  # blind-except
     "PLR0913", # too-many-arguments
     "PLC0415", # import-outside-top-level
 ], "docs*" = [

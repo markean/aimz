@@ -15,6 +15,7 @@
 """Tests for the MLflow integration."""
 
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import pytest
@@ -25,12 +26,17 @@ from aimz import ImpactModel
 from aimz.utils.data import ArrayDataset, ArrayLoader
 from tests.conftest import lm
 
+if TYPE_CHECKING:
+    import xarray as xr
+
 pytest.importorskip("mlflow")
 
 import mlflow.models
 import mlflow.pyfunc
+from mlflow.exceptions import MlflowException
 
 from aimz.mlflow import (
+    _get_input_example,
     autolog,
     get_default_conda_env,
     load_model,
@@ -65,15 +71,22 @@ def test_pyfunc_round_trip_predicts(
     wrapper's :meth:`~aimz.ImpactModel.predict` delegation.
     """
     X, _ = synthetic_data
-    save_model(im_lm_svi_fitted, tmp_path / "model", input_example=np.asarray(X[:5]))
+    save_model(
+        im_lm_svi_fitted,
+        tmp_path / "model",
+        input_example=(np.asarray(X[:5]), {"progress": False}),
+    )
 
     loaded = mlflow.pyfunc.load_model(str(tmp_path / "model"))
 
     assert isinstance(loaded.get_raw_model(), ImpactModel)
+    # Signature inference swallows all exceptions upstream; assert it actually
+    # produced a signature, or a broken wrapper wiring would pass silently.
+    assert loaded.metadata.signature is not None
 
     # The tensor signature enforces a NumPy input; `progress` defaults to False from the
-    # signature (MLflow injects it), so no params are needed here.
-    out = loaded.predict(np.asarray(X))
+    # signature params (MLflow injects it), so no params are needed here.
+    out = cast("xr.DataTree", loaded.predict(np.asarray(X)))
 
     assert out["posterior_predictive"]["y"].sizes["y_dim_0"] == len(X)
 
@@ -93,7 +106,10 @@ def test_pyfunc_predict_with_dict_input(
 
     loaded = mlflow.pyfunc.load_model(str(tmp_path / "model"))
 
-    out = loaded.predict({"X": np.asarray(X), "batch_size": 3, "progress": False})
+    out = cast(
+        "xr.DataTree",
+        loaded.predict({"X": np.asarray(X), "batch_size": 3, "progress": False}),
+    )
 
     assert out["posterior_predictive"]["y"].sizes["y_dim_0"] == len(X)
 
@@ -108,6 +124,24 @@ def test_load_model_returns_raw_impact_model(
     reloaded = load_model(str(tmp_path / "model"))
 
     assert isinstance(reloaded, ImpactModel)
+
+
+def test_load_model_disallowed_when_pickle_deserialization_disabled(
+    im_lm_svi_fitted: ImpactModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Loading raises when ``MLFLOW_ALLOW_PICKLE_DESERIALIZATION`` is disabled.
+
+    No other test exercises the gate: every other load runs with the permissive
+    default, so a dropped gate would otherwise go unnoticed.
+    """
+    save_model(im_lm_svi_fitted, tmp_path / "model")
+
+    monkeypatch.setenv("MLFLOW_ALLOW_PICKLE_DESERIALIZATION", "false")
+
+    with pytest.raises(MlflowException, match="pickle is disallowed"):
+        load_model(str(tmp_path / "model"))
 
 
 def test_save_model_with_conda_env_and_metadata(
@@ -170,6 +204,70 @@ def test_autolog_logs_model_when_rng_key_passed(
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
+def test_autolog_input_example_snapshot_copies_multi_input(
+    synthetic_data: tuple[Array, Array],
+    vi: SVI,
+) -> None:
+    """A multi-array fit call yields a dict example copied before training.
+
+    The label and PRNG key are excluded, and the example rows are copies, so
+    in-place changes to the training arrays after the snapshot (i.e. during
+    training) cannot leak into the logged example.
+    """
+    X, y = synthetic_data
+    im = ImpactModel(lm, rng_key=random.key(0), inference=vi)
+    z = np.zeros(len(X), dtype=np.float32)
+
+    example = _get_input_example(
+        im,
+        (),
+        {"X": np.asarray(X), "y": np.asarray(y), "z": z, "rng_key": random.key(1)},
+    )
+
+    assert isinstance(example, dict)
+    assert set(example) == {"X", "z"}
+    z[:] = -1.0
+    assert example["z"][0] == 0.0
+
+
+@pytest.mark.parametrize("vi", [lm], indirect=True)
+def test_autolog_logs_elbo_history_dataset_and_model_params(
+    synthetic_data: tuple[Array, Array],
+    vi: SVI,
+) -> None:
+    """The ELBO curve, training dataset, and params are logged once, model-linked."""
+    num_steps = 10
+    X, y = synthetic_data
+    autolog()
+    try:
+        im = ImpactModel(lm, rng_key=random.key(0), inference=vi)
+        with mlflow.start_run() as run:
+            im.fit_on_batch(X=X, y=y, num_steps=num_steps)
+        client = mlflow.MlflowClient()
+        history = client.get_metric_history(run.info.run_id, "elbo_loss")
+        run_data = client.get_run(run.info.run_id)
+        logged = mlflow.search_logged_models(
+            experiment_ids=[run.info.experiment_id],
+            output_format="list",
+        )
+    finally:
+        autolog(disable=True)
+
+    # One point per SVI step, with no duplicated final-loss entry
+    assert sorted(m.step for m in history) == list(range(num_steps))
+    # The metrics are also attached to the logged model entity
+    assert sum(m.key == "elbo_loss" for m in logged[0].metrics or []) == num_steps
+    # The training data is logged as a run input tagged as the train context
+    dataset_inputs = run_data.inputs.dataset_inputs
+    assert len(dataset_inputs) == 1
+    assert [t.value for t in dataset_inputs[0].tags] == ["train"]
+    # The training parameters are attached to the logged model entity as well
+    assert logged[0].params["num_steps"] == str(num_steps)
+    # num_samples is attached post-fit via a separate log_model_params call
+    assert logged[0].params["num_samples"] == str(im._num_samples)
+
+
+@pytest.mark.parametrize("vi", [lm], indirect=True)
 def test_autolog_logs_model_with_loader_input(
     synthetic_data: tuple[Array, Array],
     vi: SVI,
@@ -194,3 +292,22 @@ def test_autolog_logs_model_with_loader_input(
         autolog(disable=True)
 
     assert len(logged) == 1
+
+
+def test_save_model_signature_false_disables_inference(
+    im_lm_svi_fitted: ImpactModel,
+    synthetic_data: tuple[Array, Array],
+    tmp_path: Path,
+) -> None:
+    """``signature=False`` disables inference even when an example is provided."""
+    X, _ = synthetic_data
+    save_model(
+        im_lm_svi_fitted,
+        tmp_path / "model",
+        signature=False,
+        input_example=np.asarray(X[:5]),
+    )
+
+    model = mlflow.models.Model.load(str(tmp_path / "model"))
+
+    assert model.signature is None

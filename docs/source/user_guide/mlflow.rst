@@ -7,7 +7,7 @@ This page shows how to use the ``aimz.mlflow`` subpackage, including autologging
 
 The integration offers two complementary layers:
 
-1. Autologging via :func:`~aimz.mlflow.autolog` that patches :meth:`~aimz.ImpactModel.fit` to record parameters, metrics, artifacts, and an MLflow Model.
+1. Autologging via :func:`~aimz.mlflow.autolog` that patches :meth:`~aimz.ImpactModel.fit` and :meth:`~aimz.ImpactModel.fit_on_batch` to record parameters, metrics, datasets, artifacts, and an MLflow Model.
 2. Low-level helpers (:func:`~aimz.mlflow.save_model`, :func:`~aimz.mlflow.log_model`, :func:`~aimz.mlflow.load_model`) that mirror the MLflow flavor contract and enable manual control.
 
 .. note::
@@ -51,9 +51,15 @@ Parameters
 * ``optimizer`` (the class name of the optimizer stored in the ``optim`` attribute of ``inference``)
 * ``num_samples`` (recorded post-fit)
 
+Parameters are recorded on the run and attached to the logged model entity (if a model artifact is logged).
+
 Metrics
 ~~~~~~~
-* Final ELBO loss logged as ``elbo_loss`` (and again attached to the model version if a model artifact is logged)
+* The ELBO loss curve logged step-aware as ``elbo_loss``, one point per optimization step, attached to both the run and the logged model entity (if a model artifact is logged)
+
+Datasets
+~~~~~~~~
+* The training data passed to :meth:`~aimz.ImpactModel.fit` is logged as a run input linked to the logged model (disable with ``log_datasets=False``)
 
 Artifacts
 ~~~~~~~~~
@@ -69,13 +75,13 @@ Artifacts
   - Conda / requirements / Python environment descriptors (for reproducibility)
   - Optional input example and signature (if ``log_input_examples`` or ``log_model_signatures`` are enabled and ``log_models=True``), where:
 
-    + An input example is created from the first few rows of the data passed to :meth:`~aimz.ImpactModel.fit`.
+    + An input example is copied from the first few rows of the data passed to :meth:`~aimz.ImpactModel.fit`, before training starts.
     + If the first positional argument (``X``) is an :class:`~aimz.utils.data.ArrayLoader`, the example is built from its underlying arrays except for the output variable.
-    + A signature is inferred with :func:`mlflow.models.infer_signature` using a short forward pass through :meth:`~aimz.ImpactModel.predict`.
+    + A signature is inferred by running a short forward pass through :meth:`~aimz.ImpactModel.predict` on the input example, with the ``progress`` parameter recorded in the signature so it can be passed at inference time.
 
 
 .. note::
-   The autologging implementation may evolve (e.g., logging intermediate ELBO values). Pin versions in production pipelines for stability.
+   The autologging implementation may evolve. Pin versions in production pipelines for stability.
 
 
 Custom Logging
@@ -91,12 +97,22 @@ Here is an example to save and reload a model manually:
     # Train the model
     im = ImpactModel(...).fit(X, y)
 
-    # Save the model to a local path
-    save_model(im, path="./model_aimz", input_example=X)
+    # Save the model to a local path; the signature is inferred by running the
+    # model on the input example. Pass a (data, params) tuple to also record
+    # prediction parameters in the signature.
+    save_model(im, path="./model_aimz", input_example=(X, {"progress": False}))
 
     # Reload the model and make predictions
     loaded_model = load_model("./model_aimz")
     preds = loaded_model.predict(X_new)
+
+Pass ``signature=False`` to disable signature inference entirely.
+Extra files can be bundled into the model directory with the ``extra_files`` argument of :func:`~aimz.mlflow.save_model` and :func:`~aimz.mlflow.log_model`.
+
+.. note::
+   aimz models are serialized with ``cloudpickle``.
+   Loading honors MLflow's ``MLFLOW_ALLOW_PICKLE_DESERIALIZATION`` environment variable: if it is set to ``false``, loading pickled models is refused.
+   Only load models from sources you trust.
 
 Logging directly to an active MLflow run:
 
@@ -120,10 +136,10 @@ Logging directly to an active MLflow run:
         mlflow.log_metric("training_time_sec", 120.5)
 
         # Log the model
-        model_info = log_model(im)
+        model_info = log_model(im, name="model")
 
 
-    # Reload the model from the MLflow registry for inference
+    # Reload the logged model from the MLflow tracking server for inference
     model_uri = f"models:/{model_info.model_id}"
     loaded_model = load_model(model_uri)
 
@@ -161,5 +177,5 @@ Helper functions:
 * :func:`~aimz.mlflow.get_default_pip_requirements`
 * :func:`~aimz.mlflow.get_default_conda_env`
 
-provide the minimal set of packages—optionally including ``cloudpickle``—needed to unpickle the model.
+provide the minimal set of packages (optionally including ``cloudpickle``) needed to unpickle the model.
 Additional dependencies required for inference may be automatically added by inspecting the model during saving.
