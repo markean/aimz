@@ -163,6 +163,20 @@ def test_save_model_with_conda_env_and_metadata(
     assert (tmp_path / "model" / "conda.yaml").exists()
 
 
+def test_save_model_with_extra_files(
+    im_lm_svi_fitted: ImpactModel,
+    tmp_path: Path,
+) -> None:
+    """``extra_files`` are forwarded and recorded in the flavor configuration."""
+    extra = tmp_path / "notes.txt"
+    extra.write_text("hello")
+
+    save_model(im_lm_svi_fitted, tmp_path / "model", extra_files=[str(extra)])
+
+    model = mlflow.models.Model.load(str(tmp_path / "model"))
+    assert "extra_files" in model.flavors["aimz"]
+
+
 def test_save_model_with_pip_requirements_and_constraints(
     im_lm_svi_fitted: ImpactModel,
     tmp_path: Path,

@@ -55,6 +55,7 @@ from mlflow.utils.autologging_utils import (
     MlflowAutologgingQueueingClient,
     autologging_integration,
     batch_metrics_logger,
+    get_autologging_config,
     get_mlflow_run_params_for_fn_args,
     resolve_input_example_and_signature,
     safe_patch,
@@ -578,9 +579,12 @@ def autolog(
 
         - parameters specified in :meth:`~aimz.ImpactModel.fit` and
           :meth:`~aimz.ImpactModel.fit_on_batch`, together with ``param_input``,
-          ``param_output``, ``inference_method``, and ``optimizer``.
-        - the evidence lower bound (ELBO) loss on each optimization step.
+          ``param_output``, ``inference_method``, and, for ``SVI`` inference,
+          ``optimizer``.
+        - the evidence lower bound (ELBO) loss on each optimization step
+          (``SVI`` inference only).
         - the source code of the kernel function used by the model.
+        - the training dataset as a run input, if applicable.
         - trained model, including:
             - an example of valid input.
             - inferred signature of the inputs and outputs of the model.
@@ -612,9 +616,10 @@ def autolog(
         exclusive: If ``True``, autologged content is not logged to user-created fluent
             runs. If ``False``, autologged content is logged to the active fluent run,
             which may be user-created.
-        disable_for_unsupported_versions: If ``True``, disable autologging for versions
-            of aimz that have not been tested against this version of the MLflow client
-            or are incompatible.
+        disable_for_unsupported_versions: Accepted for parity with MLflow's built-in
+            autologging integrations. MLflow's version-compatibility gate only
+            applies to flavors shipped with MLflow, so this flag currently has no
+            effect for aimz.
         silent: If ``True``, suppress all event logs and warnings from MLflow during
             aimz autologging. If ``False``, show all events and warnings during aimz
             autologging.
@@ -714,7 +719,6 @@ def autolog(
                 input_example_exc,
                 log_input_examples=log_input_examples,
                 log_model_signatures=log_model_signatures,
-                registered_model_name=registered_model_name,
             )
 
         param_logging_operations.await_completion()
@@ -766,7 +770,7 @@ def _run_params(
     if params["inference_method"] == "SVI":
         params["optimizer"] = type(cast("SVI", model.inference).optim).__name__
 
-    unlogged_params = ["X", "y", "num_samples", "progress", "kwargs"]
+    unlogged_params = ["X", "y", "rng_key", "num_samples", "progress", "kwargs"]
     params_to_log_for_fn = get_mlflow_run_params_for_fn_args(
         original,
         args,
@@ -798,11 +802,14 @@ def _get_input_example(
 
     X = kwargs["X"] if "X" in kwargs else args[0]
     if isinstance(X, ArrayLoader):
-        return {
+        input_example = {
             k: np.array(v[:INPUT_EXAMPLE_SAMPLE_ROWS])
             for k, v in X.dataset.arrays.items()
             if k not in ("y", model.param_output) and v is not None
         }
+        if len(input_example) == 1:
+            return next(iter(input_example.values()))
+        return input_example
     input_example = {
         "X": np.array(np.asarray(X)[:INPUT_EXAMPLE_SAMPLE_ROWS]),
         **{
@@ -813,6 +820,7 @@ def _get_input_example(
     }
     if len(input_example) == 1:
         return input_example["X"]
+
     return input_example
 
 
@@ -824,7 +832,6 @@ def _log_model_with_signature(
     *,
     log_input_examples: bool,
     log_model_signatures: bool,
-    registered_model_name: str | None,
 ) -> None:
     """Log the fitted model, resolving its input example and signature.
 
@@ -837,8 +844,6 @@ def _log_model_with_signature(
             if any.
         log_input_examples: Whether to log the input example along with the model.
         log_model_signatures: Whether to log the model signature along with the model.
-        registered_model_name: If given, the model is registered as a new model
-            version of the registered model with this name.
     """
 
     def get_input_example() -> dict[str, np.ndarray] | np.ndarray | None:
@@ -864,6 +869,11 @@ def _log_model_with_signature(
         _logger,
     )
 
+    registered_model_name = get_autologging_config(
+        FLAVOR_NAME,
+        "registered_model_name",
+        None,
+    )
     log_model(
         model,
         name="model",

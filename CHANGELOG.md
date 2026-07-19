@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- {mod}`aimz.mlflow`: `extra_files`, `signature=False`, and `**kwargs` passthrough on the saving/logging APIs, plus `log_datasets`, `exclusive`, and `disable_for_unsupported_versions` options on {func}`~aimz.mlflow.autolog` ([#XXX](https://github.com/markean/aimz/issues/XXX)).
+- {mod}`aimz.mlflow`: `extra_files` and `signature=False` on the saving/logging APIs, `**kwargs` passthrough to `mlflow.models.Model.log` on {func}`~aimz.mlflow.log_model`, plus `log_datasets`, `exclusive`, and `disable_for_unsupported_versions` options on {func}`~aimz.mlflow.autolog ([#281](https://github.com/markean/aimz/issues/281)).
 
 ### Changed
 
@@ -17,9 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Loss history stored by {meth}`~aimz.ImpactModel.fit` and {meth}`~aimz.ImpactModel.fit_on_batch` (`vi_result.losses`) is now a host-backed NumPy array rather than a JAX device array. Values are unchanged, and the {attr}`~aimz.ImpactModel.vi_result` setter continues to accept any array-like losses ([#268](https://github.com/markean/aimz/issues/268)).
 - The disk-backed methods now record the call's artifact path in an `artifact_path` attribute on both the root and the group node of the returned {class}`xarray.DataTree`. The former `output_dir` attribute is removed; the temporary root remains available via {attr}`~aimz.ImpactModel.temp_dir` ([#277](https://github.com/markean/aimz/issues/277)).
 - {class}`~aimz.utils.data.ArrayLoader` with `shuffle=True` now generates each epoch's permutation on the host with NumPy, seeded from the loader's JAX key, instead of running `jax.random.permutation` and transferring the result. Shuffling remains fully deterministic given `rng_key`, but the specific shuffle order differs from previous releases ([#279](https://github.com/markean/aimz/issues/279)).
-- {func}`~aimz.mlflow.save_model` and {func}`~aimz.mlflow.log_model` now infer the model signature by running the model on the input example, validating the example and recording an output schema. Previously the signature was inferred from the input example alone, without input validation or an output schema, and with a `progress` parameter always injected ([#XXX](https://github.com/markean/aimz/issues/XXX)).
-- {func}`~aimz.mlflow.autolog` now logs the full ELBO loss steps, the training dataset, and the training parameters, all linked to the logged model ([#XXX](https://github.com/markean/aimz/issues/XXX)).
-- {func}`~aimz.mlflow.save_model` now pickles with `pickle.DEFAULT_PROTOCOL`, and {func}`~aimz.mlflow.load_model` honors MLflow's `MLFLOW_ALLOW_PICKLE_DESERIALIZATION` environment variable ([#XXX](https://github.com/markean/aimz/issues/XXX)).
+- {func}`~aimz.mlflow.save_model` and {func}`~aimz.mlflow.log_model` now infer the model signature by running the model on the input example, validating the example and recording an output schema. Previously the signature was inferred from the input example alone, without input validation or an output schema, and with a `progress` parameter always injected ([#281](https://github.com/markean/aimz/issues/281)).
+- {func}`~aimz.mlflow.autolog` now logs the full ELBO loss steps, the training dataset, and the training parameters, all linked to the logged model ([#281](https://github.com/markean/aimz/issues/281)).
+- {func}`~aimz.mlflow.save_model` now pickles with `pickle.DEFAULT_PROTOCOL`, and {func}`~aimz.mlflow.load_model` honors MLflow's `MLFLOW_ALLOW_PICKLE_DESERIALIZATION` environment variable ([#281](https://github.com/markean/aimz/issues/281)).
 
 ### Removed
 
