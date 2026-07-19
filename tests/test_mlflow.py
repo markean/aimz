@@ -114,36 +114,6 @@ def test_pyfunc_predict_with_dict_input(
     assert out["posterior_predictive"]["y"].sizes["y_dim_0"] == len(X)
 
 
-def test_load_model_returns_raw_impact_model(
-    im_lm_svi_fitted: ImpactModel,
-    tmp_path: Path,
-) -> None:
-    """:func:`~aimz.mlflow.load_model` reloads the underlying :class:`ImpactModel`."""
-    save_model(im_lm_svi_fitted, tmp_path / "model")
-
-    reloaded = load_model(str(tmp_path / "model"))
-
-    assert isinstance(reloaded, ImpactModel)
-
-
-def test_load_model_disallowed_when_pickle_deserialization_disabled(
-    im_lm_svi_fitted: ImpactModel,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Loading raises when ``MLFLOW_ALLOW_PICKLE_DESERIALIZATION`` is disabled.
-
-    No other test exercises the gate: every other load runs with the permissive
-    default, so a dropped gate would otherwise go unnoticed.
-    """
-    save_model(im_lm_svi_fitted, tmp_path / "model")
-
-    monkeypatch.setenv("MLFLOW_ALLOW_PICKLE_DESERIALIZATION", "false")
-
-    with pytest.raises(MlflowException, match="pickle is disallowed"):
-        load_model(str(tmp_path / "model"))
-
-
 def test_save_model_with_conda_env_and_metadata(
     im_lm_svi_fitted: ImpactModel,
     tmp_path: Path,
@@ -193,6 +163,79 @@ def test_save_model_with_pip_requirements_and_constraints(
 
     assert (tmp_path / "model" / "requirements.txt").exists()
     assert (tmp_path / "model" / "constraints.txt").exists()
+
+
+def test_save_model_signature_false_disables_inference(
+    im_lm_svi_fitted: ImpactModel,
+    synthetic_data: tuple[Array, Array],
+    tmp_path: Path,
+) -> None:
+    """``signature=False`` disables inference even when an example is provided."""
+    X, _ = synthetic_data
+    save_model(
+        im_lm_svi_fitted,
+        tmp_path / "model",
+        signature=False,
+        input_example=np.asarray(X[:5]),
+    )
+
+    model = mlflow.models.Model.load(str(tmp_path / "model"))
+
+    assert model.signature is None
+
+
+def test_load_model_returns_raw_impact_model(
+    im_lm_svi_fitted: ImpactModel,
+    tmp_path: Path,
+) -> None:
+    """:func:`~aimz.mlflow.load_model` reloads the underlying :class:`ImpactModel`."""
+    save_model(im_lm_svi_fitted, tmp_path / "model")
+
+    reloaded = load_model(str(tmp_path / "model"))
+
+    assert isinstance(reloaded, ImpactModel)
+
+
+def test_load_model_disallowed_when_pickle_deserialization_disabled(
+    im_lm_svi_fitted: ImpactModel,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Loading raises when ``MLFLOW_ALLOW_PICKLE_DESERIALIZATION`` is disabled.
+
+    No other test exercises the gate: every other load runs with the permissive
+    default, so a dropped gate would otherwise go unnoticed.
+    """
+    save_model(im_lm_svi_fitted, tmp_path / "model")
+
+    monkeypatch.setenv("MLFLOW_ALLOW_PICKLE_DESERIALIZATION", "false")
+
+    with pytest.raises(MlflowException, match="pickle is disallowed"):
+        load_model(str(tmp_path / "model"))
+
+
+def test_load_model_rejects_unrecognized_serialization_format(
+    im_lm_svi_fitted: ImpactModel,
+    tmp_path: Path,
+) -> None:
+    """Loading fails fast when the flavor config declares an unknown format.
+
+    Exercises the only reader of the ``serialization_format`` flavor key: a model
+    written by a future aimz version (or a tampered MLmodel file) must raise a
+    structured error instead of blindly unpickling ``model.pkl``.
+    """
+    save_model(im_lm_svi_fitted, tmp_path / "model")
+    mlmodel = mlflow.models.Model.load(str(tmp_path / "model"))
+    mlmodel.flavors["aimz"]["serialization_format"] = "unsupported_format"
+    mlmodel.save(str(tmp_path / "model" / "MLmodel"))
+
+    with pytest.raises(
+        MlflowException,
+        match="Unrecognized serialization format",
+    ) as exc_info:
+        load_model(str(tmp_path / "model"))
+
+    assert exc_info.value.error_code == "INVALID_PARAMETER_VALUE"
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
@@ -306,22 +349,3 @@ def test_autolog_logs_model_with_loader_input(
         autolog(disable=True)
 
     assert len(logged) == 1
-
-
-def test_save_model_signature_false_disables_inference(
-    im_lm_svi_fitted: ImpactModel,
-    synthetic_data: tuple[Array, Array],
-    tmp_path: Path,
-) -> None:
-    """``signature=False`` disables inference even when an example is provided."""
-    X, _ = synthetic_data
-    save_model(
-        im_lm_svi_fitted,
-        tmp_path / "model",
-        signature=False,
-        input_example=np.asarray(X[:5]),
-    )
-
-    model = mlflow.models.Model.load(str(tmp_path / "model"))
-
-    assert model.signature is None
