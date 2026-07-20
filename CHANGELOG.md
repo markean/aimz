@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - {func}`~aimz.mlflow.save_model` and {func}`~aimz.mlflow.log_model` now infer the model signature by running the model on the input example, validating the example and recording an output schema. Previously the signature was inferred from the input example alone, without input validation or an output schema, and with a `progress` parameter always injected ([#281](https://github.com/markean/aimz/issues/281)).
 - {func}`~aimz.mlflow.autolog` now logs the full ELBO loss steps, the training dataset, and the training parameters, all linked to the logged model ([#281](https://github.com/markean/aimz/issues/281)).
 - {func}`~aimz.mlflow.save_model` now pickles with `pickle.DEFAULT_PROTOCOL`, and {func}`~aimz.mlflow.load_model` honors MLflow's `MLFLOW_ALLOW_PICKLE_DESERIALIZATION` environment variable ([#281](https://github.com/markean/aimz/issues/281)).
+- The disk-backed methods now pipeline the streaming loop: the next batch's (or draw chunk's) computation is dispatched before the previous result is collected, overlapping device compute with result transfer and disk writes. Results are unchanged; the benefit is on accelerator backends, and peak device memory for streamed outputs roughly doubles (at most two in-flight chunks) ([#284](https://github.com/markean/aimz/issues/284)).
 
 ### Removed
 

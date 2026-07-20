@@ -27,7 +27,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, NamedTuple, cast
 
-from jax import Array, device_get, device_put, random
+from jax import Array, device_get, device_put, random, tree
 from tqdm.auto import tqdm
 from zarr import open_group
 
@@ -178,7 +178,7 @@ class _OutputStreamer:
         """Resolve the ordered kwarg names, array count, and extras for a stream.
 
         The names drive both the ``shard_map`` in-spec arity and the by-name binding
-        in ``produce``, so they come from a single source and cannot drift. Array
+        in ``dispatch``, so they come from a single source and cannot drift. Array
         arguments come from the data loader's dataset fields when ``req.X`` is an
         :class:`~aimz.utils.data.ArrayLoader`; otherwise from the call kwargs. Non-array
         extras always come from the call kwargs.
@@ -477,10 +477,11 @@ class _OutputStreamer:
         """Stream over data-parallel batches and write to ``req.artifact_path``.
 
         Shards the observation axis across devices and conditions every batch on the
-        whole (replicated) ``samples``. For each batch it assembles a :class:`_Step`,
-        runs ``compute``, trims the observation padding (axis 1), and drives
-        ``_write_loop``. Kind-agnostic: ``compute`` carries the sampler / log-likelihood
-        call. ``rng_key`` is ``None`` for log-likelihood (no per-draw keys).
+        whole (replicated) ``samples``. For each batch it assembles a :class:`_Step`
+        and dispatches ``compute`` (asynchronous); collection blocks on the result and
+        trims the observation padding (axis 1). ``_write_loop`` keeps consecutive
+        batches in flight, so the next batch computes while the previous one is pulled
+        to host and written.
 
         Args:
             req: The streamed write job.
@@ -516,7 +517,7 @@ class _OutputStreamer:
             if self._ctx.replicated_sharding is not None:
                 subkeys = device_put(subkeys, device=self._ctx.replicated_sharding)
 
-        def produce(item: object) -> dict[str, np.ndarray]:
+        def dispatch(item: object) -> tuple[dict[str, Array], int]:
             (batch, n_pad), subkey = cast("tuple", item)
             # Bind by name (array kwargs from the batch, extras from the call) in
             # `kwargs_key` order, so positions match the sharded callable's in-specs.
@@ -532,11 +533,17 @@ class _OutputStreamer:
                 y=batch.get(self._ctx.param_output),
                 tail=tail,
             )
-            dict_arr = device_get(compute(step))
+            out = compute(step)
+            tree.map(lambda arr: arr.copy_to_host_async(), out)
+
+            return out, n_pad
+
+        def finalize(pending: object) -> dict[str, np.ndarray]:
+            out, n_pad = cast("tuple[dict[str, Array], int]", pending)
 
             return {
                 site: arr[:, None] if arr.ndim == 1 else arr[:, : -n_pad or None]
-                for site, arr in dict_arr.items()
+                for site, arr in device_get(out).items()
             }
 
         _write_loop(
@@ -548,7 +555,8 @@ class _OutputStreamer:
                 open_group(req.artifact_path, mode="w"),
                 dataloader=dataloader,
             ),
-            produce=produce,
+            dispatch=dispatch,
+            finalize=finalize,
             pbar=pbar,
         )
 
@@ -566,10 +574,10 @@ class _OutputStreamer:
         Shards the draw axis across devices and holds the whole input resident:
         replicates the input/output/array-kwargs once, splits the per-draw keys once,
         and for each chunk slices a posterior chunk (``_prepare_draw_chunk``), assembles
-        a :class:`_Step`, runs ``compute``, trims to the chunk's true draw count
-        (axis 0), and drives ``_write_loop``. Kind-agnostic: ``compute`` carries the
-        sampler / log-likelihood call. ``rng_key`` is ``None`` for log-likelihood;
-        ``posterior`` is empty for prior predictive (each chunk draws fresh).
+        a :class:`_Step`, and dispatches ``compute`` (asynchronous); collection blocks
+        on the result and trims to the chunk's true draw count (axis 0).
+        ``_write_loop`` keeps consecutive chunks in flight, so the next chunk computes
+        while the previous one is pulled to host and written.
 
         Args:
             req: The streamed write job.
@@ -617,7 +625,7 @@ class _OutputStreamer:
             random.split(rng_key, num=req.num_samples) if rng_key is not None else None
         )
 
-        def produce(item: object) -> dict[str, np.ndarray]:
+        def dispatch(item: object) -> tuple[dict[str, Array], int]:
             start = cast("int", item)
             stop = min(start + batch_size, req.num_samples)
             chunk_samples, chunk_keys, per_device = _prepare_draw_chunk(
@@ -636,8 +644,17 @@ class _OutputStreamer:
                 y=y_dev,
                 tail=tail,
             )
+            out = compute(step)
+            # Start the device-to-host copy as soon as each result is ready, so
+            # `finalize` only waits on it instead of initiating it.
+            tree.map(lambda arr: arr.copy_to_host_async(), out)
 
-            return {s: a[: stop - start] for s, a in device_get(compute(step)).items()}
+            return out, stop - start
+
+        def finalize(pending: object) -> dict[str, np.ndarray]:
+            out, n_draws = cast("tuple[dict[str, Array], int]", pending)
+
+            return {s: a[:n_draws] for s, a in device_get(out).items()}
 
         _write_loop(
             items=range(0, req.num_samples, batch_size),
@@ -650,6 +667,7 @@ class _OutputStreamer:
                 batch_size=batch_size,
                 axis=0,
             ),
-            produce=produce,
+            dispatch=dispatch,
+            finalize=finalize,
             pbar=pbar,
         )
