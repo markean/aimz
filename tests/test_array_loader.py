@@ -70,6 +70,11 @@ class TestArrayDataset:
 class TestArrayLoader:
     """Tests class to ensure compatibility and correct handling."""
 
+    @staticmethod
+    def _shuffled_batches(loader: ArrayLoader) -> np.ndarray:
+        """Concatenate one epoch's batches of `y` into a single array."""
+        return np.concatenate([batch["y"] for batch, _ in loader])
+
     def test_legacy_prng_key(self) -> None:
         """A legacy uint32 PRNGKey raises a UserWarning."""
         y = jnp.array([1, 2, 3])
@@ -102,6 +107,40 @@ class TestArrayLoader:
             match=r"Padding 1D arrays is only supported along axis 0.",
         ):
             loader.pad_array(y, n_pad=1, axis=1)
+
+    def test_shuffle_is_deterministic_given_key(self) -> None:
+        """Loaders built with the same key yield identical shuffled batches."""
+        y = np.arange(100)
+        loaders = [
+            ArrayLoader(
+                ArrayDataset(y=y),
+                rng_key=random.key(42),
+                batch_size=7,
+                shuffle=True,
+            )
+            for _ in range(2)
+        ]
+
+        np.testing.assert_array_equal(
+            self._shuffled_batches(loaders[0]),
+            self._shuffled_batches(loaders[1]),
+        )
+
+    def test_shuffle_epochs_are_distinct_permutations(self) -> None:
+        """Each epoch contains every row exactly once, in a fresh order."""
+        y = np.arange(100)
+        loader = ArrayLoader(
+            ArrayDataset(y=y),
+            rng_key=random.key(42),
+            batch_size=7,
+            shuffle=True,
+        )
+
+        epochs = [self._shuffled_batches(loader) for _ in range(2)]
+
+        for epoch in epochs:
+            np.testing.assert_array_equal(np.sort(epoch), y)
+        assert not np.array_equal(epochs[0], epochs[1])
 
     @pytest.mark.parametrize("vi", [lm], indirect=True)
     def test_fit_dataloader_y_not_none_error(

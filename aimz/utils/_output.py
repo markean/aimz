@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import logging
+from collections import deque
 from os import cpu_count
 from queue import Queue
 from shutil import rmtree
@@ -33,7 +34,7 @@ from zarr import open_group
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping
+    from collections.abc import Callable, Iterable, Iterator, Mapping
     from pathlib import Path
     from types import ModuleType
 
@@ -44,8 +45,44 @@ if TYPE_CHECKING:
     from aimz.utils.data import ArrayLoader
 
 
+# Maximum in-flight compute steps in `_write_loop`. Depth 2 dispatches the next step
+# before collecting the previous one, overlapping device compute with device-to-host
+# transfer and the host-side write work; each in-flight step holds one output chunk on
+# device, so raising this raises peak device memory proportionally.
+_PIPELINE_DEPTH = 2
 _QUEUE_SIZE_MAX = 128
 _QUEUE_SIZE_FALLBACK_CAP = 4
+
+
+def _iter_pipelined(
+    items: Iterable,
+    dispatch: Callable[[object], object],
+    finalize: Callable[[object], dict[str, np.ndarray]],
+) -> Iterator[dict[str, np.ndarray]]:
+    """Dispatch up to :data:`_PIPELINE_DEPTH` items ahead and finalize them in order.
+
+    ``dispatch`` launches an item's computation (JAX dispatch is asynchronous, so it
+    returns without waiting) and ``finalize`` blocks on the result, so keeping a
+    bounded queue of in-flight steps lets the device compute item N+1 while the
+    consumer collects and writes item N. Items are finalized in dispatch (FIFO)
+    order.
+
+    Args:
+        items: Items to iterate (batches paired with keys, or draw-chunk starts).
+        dispatch: Launches one item's computation and returns its in-flight handle.
+        finalize: Blocks on an in-flight handle and returns its mapping of site name
+            to array.
+
+    Yields:
+        Each item's mapping of site name to (post-slice) array, in item order.
+    """
+    pending: deque = deque()
+    for item in items:
+        pending.append(dispatch(item))
+        if len(pending) >= _PIPELINE_DEPTH:
+            yield finalize(pending.popleft())
+    while pending:
+        yield finalize(pending.popleft())
 
 
 def _determine_writer_queue_size(num_items: int, item_nbytes: int) -> int:
@@ -467,14 +504,17 @@ def _write_loop(
     return_sites: tuple[str, ...],
     artifact_path: Path,
     strategy: _WriteStrategy,
-    produce: Callable[[object], dict[str, np.ndarray]],
+    dispatch: Callable[[object], object],
+    finalize: Callable[[object], dict[str, np.ndarray]],
     pbar: tqdm,
 ) -> None:
     """Produce per-item site arrays and write them concurrently to disk.
 
-    Shared by the data- and draw-parallel write paths. For each item from ``items``,
-    ``produce`` returns the (post-slice) per-site arrays; array creation/enqueuing is
-    delegated to ``strategy`` and writing to background threads.
+    Shared by the data- and draw-parallel write paths. Items are produced through
+    :func:`_iter_pipelined`, which keeps consecutive items' computations in flight on
+    the device and finalizes them in item order — preserving the write order the
+    strategies rely on. Array creation/enqueuing is delegated to ``strategy`` and
+    writing to background threads.
 
     Args:
         items: Items to iterate (batches paired with keys, or draw-chunk starts).
@@ -482,7 +522,9 @@ def _write_loop(
         return_sites: Names of variables (sites) to write.
         artifact_path: Call-specific path where the Zarr group is written.
         strategy: Write strategy that creates and enqueues each item's site arrays.
-        produce: Maps one item to its mapping of site name to array.
+        dispatch: Launches one item's computation and returns its in-flight handle.
+        finalize: Blocks on an in-flight handle and returns its mapping of site name
+            to array.
         pbar: Progress bar instance to display progress.
 
     Raises:
@@ -495,8 +537,7 @@ def _write_loop(
     worker_err: tuple | None = None
     success = False
     try:
-        for item in items:
-            sliced = produce(item)
+        for sliced in _iter_pipelined(items, dispatch=dispatch, finalize=finalize):
             strategy.create_arrays(sliced)
             if error_queue is None:
                 threads, queues, error_queue = _start_writer_threads(
