@@ -19,7 +19,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import jax.numpy as jnp
-from jax import Array, lax
+from jax import Array, default_backend, lax, vmap
 from numpyro.handlers import substitute, trace
 
 if TYPE_CHECKING:
@@ -82,6 +82,12 @@ def _log_likelihood(
     through the model's arguments is scored as-is, and the trace stays free of
     subsampling randomness.
 
+    On CPU, draws run as a single fused :external:func:`jax.lax.map` loop whose
+    temporary memory stays constant in the number of draws and observations. On
+    accelerator backends (GPU/TPU), draws are vectorized with
+    :external:func:`jax.vmap`: a sequential per-draw loop underutilizes the device,
+    and the ``draws x batch`` temporaries live in per-device memory.
+
     Args:
         model: A probabilistic model with NumPyro primitives.
         samples: A dictionary of posterior samples to substitute into the model, where
@@ -110,4 +116,7 @@ def _log_likelihood(
     if not samples:
         return {k: v[None, ...] for k, v in _loglik_one_sample({}).items()}
 
-    return lax.map(_loglik_one_sample, xs=samples)
+    if default_backend() == "cpu":
+        return lax.map(_loglik_one_sample, xs=samples)
+
+    return vmap(_loglik_one_sample)(samples)
