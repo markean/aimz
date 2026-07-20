@@ -17,6 +17,8 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import jax.numpy as jnp
+import numpy as np
 import pytest
 from jax import Array, random
 from numpyro.infer import SVI, Trace_ELBO
@@ -60,6 +62,55 @@ def test_empty_posterior(
     out = im_lm_svi_fitted.log_likelihood(X=X, y=y, progress=False)
 
     assert out.log_likelihood["y"].sizes["draw"] == 1
+
+
+def test_subsampled_kernel(
+    synthetic_data: tuple[Array, Array],
+    im_lm_subsample_svi_fitted: ImpactModel,
+) -> None:
+    """A kernel subsampling inside a plate is evaluated without an rng key.
+
+    Subsample indices are pinned deterministically rather than drawn at random, so
+    the bare (unseeded) kernel traces cleanly and every passed observation is scored
+    on both sharding paths.
+    """
+    X, y = synthetic_data
+    im = im_lm_subsample_svi_fitted
+
+    out = im.log_likelihood(X=X, y=y, batch_size=30, progress=False)
+    out_draw = im.log_likelihood(
+        X=X,
+        y=y,
+        shard_axis="draw",
+        batch_size=250,
+        progress=False,
+    )
+
+    assert out.log_likelihood["y"].shape == (1, 1000, len(X))
+    assert np.isfinite(out.log_likelihood["y"].values).all()
+    # Plate indices never gather here, so the sharding paths agree.
+    assert np.allclose(
+        out.log_likelihood["y"].values,
+        out_draw.log_likelihood["y"].values,
+        atol=1e-6,
+    )
+
+
+def test_subsampled_kernel_batch_exceeds_plate(
+    synthetic_data: tuple[Array, Array],
+    im_lm_subsample_svi_fitted: ImpactModel,
+) -> None:
+    """A batch larger than the declared plate size is rejected loudly."""
+    X, y = synthetic_data
+    X_big, y_big = jnp.tile(X, (6, 1)), jnp.tile(y, 6)
+
+    with pytest.raises(ValueError, match="declares size=100"):
+        im_lm_subsample_svi_fitted.log_likelihood(
+            X=X_big,
+            y=y_big,
+            batch_size=600,
+            progress=False,
+        )
 
 
 def test_log_likelihood_requires_y(

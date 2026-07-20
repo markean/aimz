@@ -18,11 +18,56 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import jax.numpy as jnp
 from jax import Array, lax
 from numpyro.handlers import substitute, trace
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
+
+    from numpyro._typing import Message
+
+
+def _pin_subsample_indices(msg: Message) -> Array | None:
+    """Provide deterministic indices for subsample plate sites.
+
+    Log-likelihood evaluation passes each data batch to the model explicitly. For
+    kernels that consume the batch through the model's arguments, the indices of a
+    ``numpyro.plate`` site with ``subsample_size`` set smaller than ``size`` only
+    determine broadcasting shapes. Drawing them randomly would require an rng key that a
+    bare (unseeded) kernel does not have; pinning them to ``arange`` keeps tracing
+    seed-free.
+
+    Kernels that instead gather rows from a closed-over full-size array via the
+    plate's indices (``with plate(...) as idx``, or ``numpyro.subsample``) are not
+    supported by batched evaluation: the pinned indices always select the leading
+    rows.
+
+    Args:
+        msg: A NumPyro effect-handler site message.
+
+    Returns:
+        Deterministic indices for a subsample plate site, or ``None`` to leave the site
+        unchanged.
+
+    Raises:
+        ValueError: If the batch is larger than the plate size, which would require
+            out-of-range indices.
+    """
+    if msg["type"] != "plate":
+        return None
+    size, subsample_size = msg["args"]
+    if subsample_size is None or subsample_size == size:
+        return None
+    if subsample_size > size:
+        err_msg = (
+            f"Plate site {msg['name']!r} declares size={size}, but the evaluated "
+            f"batch has {subsample_size} observations. Evaluate at most `size` "
+            "observations per batch, or declare a plate size covering the data."
+        )
+        raise ValueError(err_msg)
+
+    return jnp.arange(subsample_size)
 
 
 def _log_likelihood(
@@ -31,6 +76,11 @@ def _log_likelihood(
     model_kwargs: Mapping[str, object] | None,
 ) -> dict[str, Array]:
     """Compute per-site log-likelihood at observed sites for each posterior draw.
+
+    Kernels that subsample inside a ``numpyro.plate`` (``subsample_size``) get
+    deterministic plate indices (see :func:`_pin_subsample_indices`): the batch passed
+    through the model's arguments is scored as-is, and the trace stays free of
+    subsampling randomness.
 
     Args:
         model: A probabilistic model with NumPyro primitives.
@@ -47,7 +97,8 @@ def _log_likelihood(
     """
 
     def _loglik_one_sample(sample: dict[str, Array]) -> dict[str, Array]:
-        substituted_model = substitute(model, sample) if sample else model
+        pinned_model = substitute(model, substitute_fn=_pin_subsample_indices)
+        substituted_model = substitute(pinned_model, sample) if sample else pinned_model
         model_trace = trace(substituted_model).get_trace(**(model_kwargs or {}))
 
         return {
