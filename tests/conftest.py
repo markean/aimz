@@ -125,6 +125,21 @@ def mlm(X: Array, y: Array | None = None) -> None:
         sample("y", dist.Normal(X @ w, sigma).to_event(1), obs=y)
 
 
+def lm_subsample(X: Array, y: Array | None = None) -> None:
+    """Linear regression consuming subsampled batches through its arguments.
+
+    The plate declares the full data size of the ``synthetic_data`` fixture, with
+    ``subsample_size`` tracking the batch passed in.
+    """
+    n_features = X.shape[1]
+    w = sample("w", dist.Normal(jnp.zeros(n_features), jnp.ones(n_features)))
+    b = sample("b", dist.Normal(0, 1))
+    sigma = sample("sigma", dist.Exponential(1.0))
+    with numpyro.plate("data", size=100, subsample_size=X.shape[0]):
+        mu = jnp.dot(X, w) + b
+        sample("y", dist.Normal(mu, sigma), obs=y)
+
+
 def latent_variable_model(X: Array, y: Array | None = None) -> None:
     """Latent variable model."""
     z = numpyro.sample(
@@ -165,6 +180,22 @@ def im_lm_svi_fitted(synthetic_data: tuple[Array, Array]) -> Iterator[ImpactMode
     X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), inference=_make_svi(lm))
     im.fit(X=X, y=y, batch_size=len(X), progress=False)
+    yield im
+    im.cleanup()
+
+
+@pytest.fixture(scope="module")
+def im_lm_subsample_svi_fitted(
+    synthetic_data: tuple[Array, Array],
+) -> Iterator[ImpactModel]:
+    """`lm_subsample` fitted with SVI on subsampled batches. For read-only tests."""
+    X, y = synthetic_data
+    im = ImpactModel(
+        lm_subsample,
+        rng_key=random.key(42),
+        inference=_make_svi(lm_subsample),
+    )
+    im.fit(X=X, y=y, batch_size=20, progress=False)
     yield im
     im.cleanup()
 
