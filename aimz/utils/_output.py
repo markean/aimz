@@ -18,10 +18,11 @@ from __future__ import annotations
 
 import logging
 from collections import deque
+from contextlib import suppress
 from os import cpu_count
 from queue import Queue
 from shutil import rmtree
-from threading import Thread
+from threading import Event, Thread
 from typing import TYPE_CHECKING, Protocol, cast
 
 try:
@@ -52,6 +53,13 @@ if TYPE_CHECKING:
 _PIPELINE_DEPTH = 2
 _QUEUE_SIZE_MAX = 128
 _QUEUE_SIZE_FALLBACK_CAP = 4
+# Ceiling on the automatically chosen writer-thread pool size. Guards against
+# oversubscribing cores/disk; the effective count is further bounded by the write
+# strategy's own ceiling and the number of items.
+_WRITER_COUNT_MAX = 8
+# Sentinel a concurrency-safe strategy returns from ``max_writers`` to signal "no
+# strategy-imposed limit"; the effective cap is then the item count and CPU/ceiling.
+_WRITER_COUNT_UNBOUNDED = 2**31 - 1
 
 
 def _iter_pipelined(
@@ -103,6 +111,32 @@ def _determine_writer_queue_size(num_items: int, item_nbytes: int) -> int:
     return max(1, min(_QUEUE_SIZE_MAX, num_items, queue_size))
 
 
+def _determine_writer_count(
+    max_writers: int,
+    num_items: int,
+    requested: int | None = None,
+) -> int:
+    """Determine the writer-thread pool size for a stream.
+
+    Without an explicit request the count defaults to the CPU count, capped by
+    :data:`_WRITER_COUNT_MAX`. The result is always bounded by the strategy's own
+    ceiling (``max_writers``; ``1`` for an order-sensitive strategy) and by
+    ``num_items`` (never more writers than there are items to write), and floored at 1.
+
+    Args:
+        max_writers: The write strategy's ceiling on concurrent writers.
+        num_items: Total number of items the producer will emit.
+        requested: Explicit writer count, or ``None`` to choose automatically.
+
+    Returns:
+        The number of writer threads to start.
+    """
+    auto = min(cpu_count() or 1, _WRITER_COUNT_MAX)
+    n = auto if requested is None else requested
+
+    return max(1, min(n, max_writers, num_items))
+
+
 def _create_site_array(
     zarr_group: Group,
     site: str,
@@ -144,107 +178,129 @@ def _create_site_array(
 
 
 def _writer(
-    site: str,
     queue: Queue,
     group_path: Path,
     error_queue: Queue,
+    stop: Event,
     apply: Callable[[Array, object], None],
 ) -> None:
-    """Background worker that writes queued batches to a Zarr array.
+    """Background worker that writes queued ``(site, payload)`` items to Zarr.
 
-    Runs in a loop, retrieving items from the queue and writing each into the site's
-    dataset via ``apply``. It exits when a ``None`` sentinel is received. If opening the
-    group or a write fails, the error is logged, its details are put into
-    ``error_queue``, and the queue is drained (including the sentinel) so
-    :func:`_shutdown_writer_threads`'s ``queue.join()`` can finish.
+    One of a shared pool of interchangeable workers that all consume the same queue, so
+    a worker is not bound to a single site: each item names the site to write. Runs in a
+    loop, retrieving items and writing each into its site's array via ``apply``, exiting
+    when a ``None`` sentinel is received. Concurrency safety rests on the strategy: the
+    pool is only sized above one for order-independent, disjoint-write strategies (see
+    :meth:`_WriteStrategy.max_writers`).
+
+    If opening the group or a write fails, the error is logged, its details are put into
+    ``error_queue``, and the shared ``stop`` event is set so every worker switches to
+    drain mode — subsequent items are discarded (still marked done, so the bounded
+    producer cannot block and ``queue.join()`` can finish) rather than written into a
+    store that is being torn down.
 
     Args:
-        site: The name of the sample site (also the Zarr array name).
-        queue: The queue to retrieve queued batches from.
+        queue: The shared queue of ``(site, payload)`` items (and ``None`` sentinels).
         group_path: The path of the Zarr group.
-        error_queue: The queue to collect errors raised by the writer thread.
-        apply: Writes one queued item into the site's Zarr array; the only behavior that
-            differs between write strategies.
+        error_queue: The queue to collect errors raised by the writer threads, each as a
+            ``(site, exc, traceback)`` tuple (``site`` is ``None`` for an open failure).
+        stop: Shared event; set on the first error to put the pool into drain mode.
+        apply: Writes one queued payload into a site's Zarr array; the only behavior
+            that differs between write strategies.
     """
+    group = None
     try:
         group = open_group(group_path, mode="r+")
     except Exception as exc:
-        logger.exception("Error opening output group for site '%s'", site)
-        error_queue.put((site, exc, exc.__traceback__))
-        while True:
-            leftover = queue.get()
-            queue.task_done()
-            if leftover is None:
-                break
-        return
+        # `stop.set()` first — it cannot fail, so the pool always enters drain mode
+        # even if reporting or logging below raises (e.g. under memory pressure); the
+        # suppress keeps this worker alive to drain the queue regardless.
+        stop.set()
+        with suppress(Exception):
+            error_queue.put((None, exc, exc.__traceback__))
+            logger.exception("Error opening output group")
 
     while True:
         item = queue.get()
-        if item is None:
-            queue.task_done()
-            break
-
         try:
-            apply(cast("Array", group[site]), item)
-        except Exception as exc:
-            logger.exception("Error writing to site '%s'", site)
-            error_queue.put((site, exc, exc.__traceback__))
-            # Drain remaining items including sentinel so queue.join() can finish
-            while True:
-                leftover = queue.get()
-                queue.task_done()
-                if leftover is None:
-                    break
-            break
+            if item is None:
+                return
+            if stop.is_set():
+                # Drain mode: discard the payload but keep the queue moving so the
+                # bounded producer never blocks and the sentinels are still consumed.
+                continue
+            site, payload = cast("tuple[str, object]", item)
+            try:
+                apply(cast("Array", cast("Group", group)[site]), payload)
+            except Exception as exc:
+                stop.set()
+                with suppress(Exception):
+                    error_queue.put((site, exc, exc.__traceback__))
+                    logger.exception("Error writing to site '%s'", site)
         finally:
             queue.task_done()
 
 
 def _start_writer_threads(
-    sites: tuple[str, ...],
     group_path: Path,
     apply: Callable[[Array, object], None],
+    n_writers: int,
     queue_size: int,
-) -> tuple[list[Thread], dict[str, Queue], Queue]:
-    """Start writer threads and their corresponding queues for each site.
+) -> tuple[list[Thread], Queue, Queue, Event]:
+    """Start a shared pool of writer threads consuming one queue.
 
     Args:
-        sites: Names of the return sites.
         group_path: The path to the Zarr group where data will be written.
-        apply: Writes one queued item into a site's Zarr array.
-        queue_size: Maximum size of each queue (per site).
+        apply: Writes one queued payload into a site's Zarr array.
+        n_writers: Number of writer threads in the pool.
+        queue_size: Maximum size of the shared work queue.
 
     Returns:
-        A tuple containing a list of threads and a dictionary mapping each site to its
-        corresponding queue.
+        A tuple of the worker threads, the shared work queue, the shared error queue,
+        and the shared stop event.
     """
-    queues: dict[str, Queue] = {site: Queue(queue_size) for site in sites}
-    threads = []
+    queue: Queue = Queue(queue_size)
     error_queue: Queue = Queue()
-    for site, queue in queues.items():
-        thread = Thread(
-            target=_writer,
-            args=(site, queue, group_path, error_queue),
-            kwargs={"apply": apply},
-        )
-        thread.start()
-        threads.append(thread)
+    stop = Event()
+    threads = []
+    try:
+        for _ in range(n_writers):
+            thread = Thread(
+                target=_writer,
+                args=(queue, group_path, error_queue, stop),
+                kwargs={"apply": apply},
+            )
+            thread.start()
+            threads.append(thread)
+    except BaseException:
+        # A mid-pool `Thread.start()` failure (e.g. hitting a thread limit) would
+        # otherwise orphan the already-started non-daemon workers on a queue the
+        # caller never receives, blocking interpreter exit; unwind them first.
+        for _ in threads:
+            queue.put(None)
+        for thread in threads:
+            thread.join()
+        raise
 
-    return threads, queues, error_queue
+    return threads, queue, error_queue, stop
 
 
 def _shutdown_writer_threads(
     threads: list[Thread],
-    queues: dict[str, Queue],
+    queue: Queue | None,
 ) -> None:
-    """Signal writer threads to stop and wait for their completion.
+    """Signal the writer pool to stop and wait for its completion.
+
+    One ``None`` sentinel is enqueued per worker; each worker consumes exactly one and
+    exits, so any residual items (already ahead of the sentinels in the FIFO queue) are
+    consumed first. Safe to call when no pool was started (``queue is None``).
 
     Args:
-        threads: List of writer threads to join.
-        queues: Mapping of site names to their respective queues.
+        threads: The worker threads to join.
+        queue: The shared work queue, or ``None`` if no pool was started.
     """
-    for queue, thread in zip(queues.values(), threads, strict=True):
-        if thread.is_alive():
+    if queue is not None:
+        for _ in threads:
             queue.put(None)
     for thread in threads:
         thread.join()
@@ -293,6 +349,15 @@ class _WriteStrategy(Protocol):
     (draw-parallel), ``axis=1`` streams the observation axis (data-parallel).
     """
 
+    @property
+    def max_writers(self) -> int:
+        """Maximum number of concurrent writer threads this strategy tolerates.
+
+        ``1`` means the strategy is order-sensitive and must be written by a single
+        consumer; a larger value means writes are order-independent and may be spread
+        across a pool of workers.
+        """
+
     def apply(self, array: Array, item: object) -> None:
         """Write one queued item into a site's Zarr array.
 
@@ -311,13 +376,16 @@ class _WriteStrategy(Protocol):
 
     def enqueue(
         self,
-        queues: dict[str, Queue],
+        queue: Queue,
         site_arrays: Mapping[str, np.ndarray],
     ) -> None:
-        """Put a batch's per-site arrays onto their writer queues.
+        """Put a batch's per-site payloads onto the shared writer queue.
+
+        Each payload is enqueued as a ``(site, payload)`` item so any worker in the pool
+        can route it to the right Zarr array.
 
         Args:
-            queues: Per-site writer queues, keyed by site name.
+            queue: The shared writer queue.
             site_arrays: Mapping of site name to the (post-slice) sample array
                 emitted for the current batch.
         """
@@ -327,7 +395,12 @@ class _AppendWriteStrategy(_WriteStrategy):
     """Grow each site's Zarr array by appending batches along the streamed axis.
 
     Requires no size information up front; the streamed-axis size emerges from the
-    batches as they arrive.
+    batches as they arrive. ``array.append`` mutates the array's length metadata and is
+    order-sensitive, so this strategy is **not** concurrency-safe: it must be written by
+    a single consumer (:attr:`max_writers` is ``1``). A single shared worker preserves
+    per-site append order via FIFO consumption; the cost is that cross-site appends,
+    which the previous one-thread-per-site model ran concurrently, are now serialized.
+    This path is only selected for a data loader without a knowable length.
     """
 
     def __init__(
@@ -348,6 +421,11 @@ class _AppendWriteStrategy(_WriteStrategy):
         self._chunk_size = batch_size
         self._axis = axis
         self._seen: set[str] = set()
+
+    @property
+    def max_writers(self) -> int:
+        """A single writer: appends are order-sensitive and mutate array metadata."""
+        return 1
 
     def apply(self, array: Array, item: object) -> None:
         """Append the queued batch along the streamed axis.
@@ -379,17 +457,17 @@ class _AppendWriteStrategy(_WriteStrategy):
 
     def enqueue(
         self,
-        queues: dict[str, Queue],
+        queue: Queue,
         site_arrays: Mapping[str, np.ndarray],
     ) -> None:
-        """Put each site's batch array onto its writer queue.
+        """Put each site's batch array onto the shared writer queue.
 
         Args:
-            queues: Per-site writer queues, keyed by site name.
+            queue: The shared writer queue.
             site_arrays: Mapping of site name to the batch array to append.
         """
         for site, arr in site_arrays.items():
-            queues[site].put(arr)
+            queue.put((site, arr))
 
 
 class _SliceWriteStrategy(_WriteStrategy):
@@ -425,6 +503,17 @@ class _SliceWriteStrategy(_WriteStrategy):
         self._axis = axis
         self._seen: set[str] = set()
         self._site_offsets: dict[str, int] = {}
+
+    @property
+    def max_writers(self) -> int:
+        """No strategy limit: slice writes are position-addressed and disjoint.
+
+        Each batch write targets a fixed, chunk-aligned slice (one Zarr chunk == one
+        file on a local store), so writers never contend and completion order is
+        irrelevant. The effective pool size is bounded elsewhere by the CPU count /
+        :data:`_WRITER_COUNT_MAX` (or an explicit request) and the item count.
+        """
+        return _WRITER_COUNT_UNBOUNDED
 
     def apply(self, array: Array, item: object) -> None:
         """Assign the queued ``(start, arr)`` batch into a fixed slice of the axis.
@@ -483,88 +572,119 @@ class _SliceWriteStrategy(_WriteStrategy):
 
     def enqueue(
         self,
-        queues: dict[str, Queue],
+        queue: Queue,
         site_arrays: Mapping[str, np.ndarray],
     ) -> None:
-        """Enqueue each site's batch as ``(start, arr)`` and advance its offset.
+        """Enqueue each site's batch as ``(site, (start, arr))`` and advance its offset.
 
         Args:
-            queues: Per-site writer queues, keyed by site name.
+            queue: The shared writer queue.
             site_arrays: Mapping of site name to the batch array to write.
         """
         for site, arr in site_arrays.items():
             start = self._site_offsets[site]
-            queues[site].put((start, arr))
+            queue.put((site, (start, arr)))
             self._site_offsets[site] = start + arr.shape[self._axis]
 
 
 def _write_loop(
     items: Iterable,
     n_items: int,
-    return_sites: tuple[str, ...],
     artifact_path: Path,
     strategy: _WriteStrategy,
     dispatch: Callable[[object], object],
     finalize: Callable[[object], dict[str, np.ndarray]],
     pbar: tqdm,
+    num_writers: int | None = None,
 ) -> None:
     """Produce per-item site arrays and write them concurrently to disk.
 
     Shared by the data- and draw-parallel write paths. Items are produced through
     :func:`_iter_pipelined`, which keeps consecutive items' computations in flight on
-    the device and finalizes them in item order — preserving the write order the
+    the device and finalizes them in item order — preserving the offset bookkeeping the
     strategies rely on. Array creation/enqueuing is delegated to ``strategy`` and
-    writing to background threads.
+    writing to a shared pool of background writer threads. The pool size is chosen from
+    the strategy's :attr:`~_WriteStrategy.max_writers` ceiling (``1`` pins an
+    order-sensitive strategy to a single consumer) and the item count; ``num_writers``
+    overrides the automatic count.
 
     Args:
         items: Items to iterate (batches paired with keys, or draw-chunk starts).
-        n_items: Number of items (used to size the writer queues).
-        return_sites: Names of variables (sites) to write.
+        n_items: Number of items (used to size the writer queue and the pool).
         artifact_path: Call-specific path where the Zarr group is written.
         strategy: Write strategy that creates and enqueues each item's site arrays.
         dispatch: Launches one item's computation and returns its in-flight handle.
         finalize: Blocks on an in-flight handle and returns its mapping of site name
             to array.
         pbar: Progress bar instance to display progress.
+        num_writers: Explicit writer-thread pool size, or ``None`` (the production
+            path) to choose automatically. Bounded by the strategy's ceiling and the
+            item count; overriding is intended for tests.
 
     Raises:
         Exception: Any exception raised during production or writing is logged, the
             artifacts at ``artifact_path`` are removed, and the exception is re-raised.
     """
-    threads = []
-    queues = {}
-    error_queue = None
+    threads: list[Thread] = []
+    queue: Queue | None = None
+    error_queue: Queue | None = None
+    stop: Event | None = None
     worker_err: tuple | None = None
+    completed = False
     success = False
     try:
         for sliced in _iter_pipelined(items, dispatch=dispatch, finalize=finalize):
             strategy.create_arrays(sliced)
-            if error_queue is None:
-                threads, queues, error_queue = _start_writer_threads(
-                    return_sites,
-                    group_path=artifact_path,
-                    apply=strategy.apply,
-                    queue_size=_determine_writer_queue_size(
-                        n_items,
-                        item_nbytes=max(
-                            1,
-                            sum(int(arr.nbytes) for arr in sliced.values()),
-                        ),
+            if queue is None:
+                # One batch's worth of bytes fits `batch_budget` batches under the
+                # host-memory/CPU bounds. The pipelined producer holds up to
+                # `_PIPELINE_DEPTH` further batches in flight, so reserve those from
+                # the budget first. The shared queue counts individual
+                # `(site, payload)` items, so scale by the per-batch item count and
+                # reserve `n_writers` slots for items being applied — keeping total
+                # in-flight bytes within the single-writer envelope.
+                batch_budget = _determine_writer_queue_size(
+                    n_items,
+                    item_nbytes=max(
+                        1,
+                        sum(int(arr.nbytes) for arr in sliced.values()),
                     ),
                 )
-            strategy.enqueue(queues, site_arrays=sliced)
-            if not error_queue.empty():
-                worker_err = error_queue.get()
+                items_per_batch = max(1, len(sliced))
+                slots = max(1, batch_budget - _PIPELINE_DEPTH) * items_per_batch
+                n_writers = min(
+                    _determine_writer_count(
+                        strategy.max_writers,
+                        n_items,
+                        requested=num_writers,
+                    ),
+                    max(1, slots - 1),
+                )
+                queue_size = max(1, slots - n_writers)
+                threads, queue, error_queue, stop = _start_writer_threads(
+                    group_path=artifact_path,
+                    apply=strategy.apply,
+                    n_writers=n_writers,
+                    queue_size=queue_size,
+                )
+            strategy.enqueue(queue, site_arrays=sliced)
+            if stop is not None and stop.is_set():
+                if not cast("Queue", error_queue).empty():
+                    worker_err = cast("Queue", error_queue).get()
                 break
             pbar.update()
         if worker_err is None:
             pbar.set_description("Writing in progress...")
-        success = worker_err is None
+        completed = True
     finally:
-        _shutdown_writer_threads(threads, queues=queues)
-        if success and error_queue is not None and not error_queue.empty():
+        _shutdown_writer_threads(threads, queue=queue)
+        if worker_err is None and error_queue is not None and not error_queue.empty():
             worker_err = error_queue.get()
-            success = False
+        # `stop` set without a reported error means a writer failed while reporting
+        # (e.g. under memory pressure); treat it as a failure, never as a clean run.
+        success = (
+            completed and worker_err is None and (stop is None or not stop.is_set())
+        )
         if not success:
             rmtree(artifact_path, ignore_errors=True)
             logger.warning("Cleaned up artifact path: %s", artifact_path)
@@ -572,3 +692,6 @@ def _write_loop(
     if worker_err is not None:
         _, exc, tb = worker_err
         raise exc.with_traceback(tb)
+    if not success:
+        msg = "A background writer thread failed without reporting an error."
+        raise RuntimeError(msg)
