@@ -466,3 +466,46 @@ def test_pool_survives_failing_error_report(
         _run_pool(artifact_path, strategy, _batches(4, 2, ("y",)), num_writers=1)
 
     assert not artifact_path.exists()
+
+
+def test_unreported_writer_failure_still_fails_the_write(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A writer that cannot even report its error must not yield a clean run.
+
+    If `error_queue.put` itself fails (e.g. under memory pressure), the stop event is
+    the only surviving failure signal; the write must raise and clean up rather than
+    return partial output as success.
+    """
+
+    # A targeted override of the module's `Queue` attribute: the error queue is the
+    # only unbounded queue the writer creates, so failing `put` on `maxsize == 0`
+    # breaks error reporting while the bounded work queue keeps flowing.
+    class _BrokenErrorQueue(Queue):
+        def put(
+            self,
+            item: object,
+            block: bool = True,  # noqa: FBT001, FBT002 -- stdlib signature
+            timeout: float | None = None,
+        ) -> None:
+            if self.maxsize == 0:
+                raise MemoryError
+            super().put(item, block, timeout)
+
+    monkeypatch.setattr("aimz.utils._output.Queue", _BrokenErrorQueue)
+    artifact_path = tmp_path / "out"
+    strategy = _SliceWriteStrategy(
+        zarr_group=open_group(artifact_path, mode="w"),
+        total=8,
+        batch_size=2,
+        axis=0,
+    )
+
+    with (
+        patch.object(strategy, "apply", side_effect=_WriteError),
+        pytest.raises(RuntimeError, match="without reporting an error"),
+    ):
+        _run_pool(artifact_path, strategy, _batches(4, 2, ("y",)), num_writers=1)
+
+    assert not artifact_path.exists()
