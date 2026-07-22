@@ -176,11 +176,7 @@ def _setup_inputs(
                 other_size=num_samples,
                 num_devices=num_devices,
             )
-            logger.info(
-                "Using batch_size=%d. Specify explicitly to better control memory "
-                "usage.",
-                batch_size,
-            )
+            logger.debug("Resolved batch_size=%d automatically.", batch_size)
         if batch_size % num_devices != 0:
             msg = (
                 f"The `batch_size` ({batch_size}) is not divisible by the number of "

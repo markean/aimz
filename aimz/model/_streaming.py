@@ -595,11 +595,7 @@ class _OutputStreamer:
             num_devices=self._ctx.num_devices,
         )
         if req.batch_size is None:
-            logger.info(
-                "Using batch_size=%d (draws per chunk). Specify explicitly to better "
-                "control memory usage.",
-                batch_size,
-            )
+            logger.debug("Resolved batch_size=%d automatically.", batch_size)
         pbar.reset(total=-(-req.num_samples // batch_size))
         kwargs_array, kwargs_extra = _group_kwargs(req.kwargs)
         # The public draw-parallel entry points reject data loaders, so `req.X` is
