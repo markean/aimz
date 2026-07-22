@@ -114,7 +114,7 @@ def test_predict_data_reruns_draw_on_rank3_local_latent(
 
 
 @pytest.mark.parametrize("n_devices", [1, 3])
-def test_requires_whole_input(
+def test_plan_obs_batching_explicit_batch(
     synthetic_data: tuple[Array, Array],
     im_latent_var_svi_fitted: ImpactModel,
     monkeypatch: pytest.MonkeyPatch,
@@ -128,8 +128,10 @@ def test_requires_whole_input(
     X, _ = synthetic_data
     im = im_latent_var_svi_fitted
     monkeypatch.setattr(im, "_num_devices", n_devices)
-    assert im._requires_whole_input(X, batch_size=len(X) // 4) is True
-    assert im._requires_whole_input(X, batch_size=len(X)) is (n_devices > 1)
+    assert im._plan_obs_batching(X, batch_size=len(X) // 4) == "fallback"
+    assert im._plan_obs_batching(X, batch_size=len(X)) == (
+        "fallback" if n_devices > 1 else "proceed"
+    )
 
 
 def test_predict_draw_padding_round_trip(
@@ -477,14 +479,13 @@ def test_aligned_posterior_pins_whole_input_on_single_device(
     im = im_latent_var_svi_fitted
     monkeypatch.setattr(im, "_num_devices", 1)
 
-    assert im._has_aligned_posterior(X)
-    # Fits the budget on a single device: no fallback under automatic batching.
-    assert not im._requires_whole_input(X, batch_size=None)
+    # Fits the budget on a single device: pin the whole input, no fallback.
+    assert im._plan_obs_batching(X, batch_size=None) == "whole"
     # An explicit smaller batch is the caller's contract and still forces the fallback.
-    assert im._requires_whole_input(X, batch_size=max(1, len(X) // 2))
+    assert im._plan_obs_batching(X, batch_size=max(1, len(X) // 2)) == "fallback"
 
 
-def test_unaligned_posterior_never_requires_whole_input(
+def test_unaligned_posterior_always_proceeds(
     synthetic_data: tuple[Array, Array],
     im_lm_svi_fitted: ImpactModel,
 ) -> None:
@@ -492,6 +493,5 @@ def test_unaligned_posterior_never_requires_whole_input(
     X, _ = synthetic_data
     im = im_lm_svi_fitted
 
-    assert not im._has_aligned_posterior(X)
-    assert not im._requires_whole_input(X, batch_size=None)
-    assert not im._requires_whole_input(X, batch_size=2)
+    assert im._plan_obs_batching(X, batch_size=None) == "proceed"
+    assert im._plan_obs_batching(X, batch_size=2) == "proceed"
