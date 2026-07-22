@@ -365,6 +365,17 @@ def _select_write_strategy(
     unavailable the append strategy is used instead. Both stream the observation
     (axis-1) dimension.
 
+    The append fallback anticipates loaders without a knowable length (e.g. a future
+    PyTorch ``DataLoader`` over an ``IterableDataset``), but today it is reachable only
+    by a loader that defines ``__len__`` while its dataset does not: the streaming path
+    upstream still assumes a known batch count — ``len(dataloader)`` for the progress
+    total, the pre-split of one PRNG key per batch, and the planner's item-count
+    bounds — so a fully length-less loader fails before strategy selection. Supporting
+    such loaders means relaxing those assumptions (e.g. lazy per-batch key derivation
+    via ``random.fold_in``, an unknown progress total, and ``n_items=None`` planning)
+    alongside an adapter for the batch format; the choice of key derivation affects
+    results, so it should be settled with that feature, not piecemeal.
+
     Args:
         zarr_group: The open Zarr group to create site arrays in.
         dataloader: The data loader the sample loop will iterate.
@@ -446,10 +457,18 @@ class _AppendWriteStrategy(_WriteStrategy):
     Requires no size information up front; the streamed-axis size emerges from the
     batches as they arrive. ``array.append`` mutates the array's length metadata and is
     order-sensitive, so this strategy is **not** concurrency-safe: it must be written by
-    a single consumer (:attr:`max_writers` is ``1``). A single shared worker preserves
-    per-site append order via FIFO consumption; the cost is that cross-site appends,
-    which the previous one-thread-per-site model ran concurrently, are now serialized.
-    This path is only selected for a data loader without a knowable length.
+    a single consumer (:attr:`max_writers` is ``1``); a single shared worker preserves
+    per-site append order via FIFO consumption.
+
+    This is the designated fallback for data loaders without a knowable length — kept
+    deliberately, ahead of broadening the accepted loaders beyond
+    :class:`~aimz.utils.data.ArrayLoader` (e.g. a PyTorch ``DataLoader`` over an
+    ``IterableDataset``). Note the write side is not yet reachable by such loaders:
+    see :func:`_select_write_strategy` for what the streaming path still assumes. If
+    single-consumer appends ever become the bottleneck for that use case, a windowed
+    hybrid (grow the array by a window of batches, slice-write concurrently within
+    each window) can restore pool parallelism as a third strategy without touching
+    :func:`_write_loop`.
     """
 
     def __init__(
