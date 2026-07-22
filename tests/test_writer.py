@@ -27,13 +27,12 @@ from zarr import open_group
 
 from aimz.utils import _output as output_mod
 from aimz.utils._output import (
-    _QUEUE_SIZE_FALLBACK_CAP,
     _QUEUE_SIZE_MAX,
     _WRITER_COUNT_MAX,
     _WRITER_COUNT_UNBOUNDED,
     _AppendWriteStrategy,
     _determine_writer_count,
-    _determine_writer_queue_size,
+    _plan_writers,
     _SliceWriteStrategy,
     _start_writer_threads,
     _write_loop,
@@ -72,52 +71,88 @@ def fake_psutil(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     return fake
 
 
-class TestDetermineWriterQueueSize:
-    """Test class for :func:`_determine_writer_queue_size`."""
+class TestPlanWriters:
+    """Test class for the writer-pool planner :func:`_plan_writers`."""
 
-    def test_queue_size_without_psutil(
+    def test_full_pool_with_ample_memory(self, fake_psutil: MagicMock) -> None:
+        """With ample memory and many batches, the automatic pool is CPU-derived."""
+        del fake_psutil
+        plan = _plan_writers(
+            _WRITER_COUNT_UNBOUNDED,
+            n_items=100,
+            item_nbytes=1024,
+            n_sites=1,
+        )
+        assert plan.n_writers == _determine_writer_count(
+            _WRITER_COUNT_UNBOUNDED,
+            num_items=100,
+        )
+        assert 1 <= plan.queue_size <= _QUEUE_SIZE_MAX
+
+    def test_small_item_count_gets_full_parallelism(
         self,
-        monkeypatch: pytest.MonkeyPatch,
+        fake_psutil: MagicMock,
     ) -> None:
-        """Fallback path: bounded by the CPU-derived cap when psutil is missing."""
-        monkeypatch.setattr("aimz.utils._output.psutil", None)
+        """Few batches with plentiful memory still get one writer per batch.
 
-        assert (
-            1
-            <= _determine_writer_queue_size(num_items=100, item_nbytes=1)
-            <= _QUEUE_SIZE_FALLBACK_CAP
-        )
-
-    def test_queue_size_with_psutil(self, fake_psutil: MagicMock) -> None:
-        """Memory-aware path: result respects the absolute cap on a normal host."""
-        # Silence unused-argument warning; we just need the fixture to ensure the
-        # memory-aware branch runs
+        The pipeline reservation applies to the memory bound only; it must not
+        throttle a small batch count when memory is not the binding constraint.
+        """
         del fake_psutil
-        assert (
-            1
-            <= _determine_writer_queue_size(num_items=100, item_nbytes=1024)
-            <= _QUEUE_SIZE_MAX
+        n_items = 3
+        plan = _plan_writers(
+            _WRITER_COUNT_UNBOUNDED,
+            n_items=n_items,
+            item_nbytes=1024,
+            n_sites=1,
+            requested=8,
         )
+        assert plan.n_writers == n_items
+        assert plan.queue_size >= 1
 
-    def test_workload_cap_binds(self, fake_psutil: MagicMock) -> None:
-        """`num_items` caps the queue size when smaller than memory/CPU bounds."""
-        del fake_psutil
-        assert _determine_writer_queue_size(num_items=1, item_nbytes=1024) == 1
-
-    def test_absolute_cap_binds(self, fake_psutil: MagicMock) -> None:
-        """The absolute ceiling binds for huge workloads with tiny items."""
-        del fake_psutil
-        assert (
-            _determine_writer_queue_size(num_items=10**6, item_nbytes=1)
-            == _QUEUE_SIZE_MAX
+    def test_tight_memory_clamps_pool(self, fake_psutil: MagicMock) -> None:
+        """A tight envelope collapses to the floor: one queued, one applying."""
+        item_nbytes = 1024
+        # Room for three batches; the pipeline reserves two, leaving one slot.
+        fake_psutil.virtual_memory.return_value.available = 3 * item_nbytes
+        plan = _plan_writers(
+            _WRITER_COUNT_UNBOUNDED,
+            n_items=100,
+            item_nbytes=item_nbytes,
+            n_sites=1,
+            requested=8,
         )
+        assert plan.n_writers == 1
+        assert plan.queue_size == 1
 
-    def test_floor_binds(self, fake_psutil: MagicMock) -> None:
-        """The floor at 1 binds so `Queue(maxsize)` is always bounded."""
-        # Tight available memory + huge item drives `available // item_nbytes` to zero;
-        # The function's floor must keep `Queue(maxsize)` bounded.
-        fake_psutil.virtual_memory.return_value.available = 1
-        assert _determine_writer_queue_size(num_items=100, item_nbytes=10**18) == 1
+    def test_absolute_queue_cap_binds(self, fake_psutil: MagicMock) -> None:
+        """The absolute queue ceiling binds for huge workloads with tiny items."""
+        del fake_psutil
+        plan = _plan_writers(
+            _WRITER_COUNT_UNBOUNDED,
+            n_items=10**6,
+            item_nbytes=1,
+            n_sites=1,
+        )
+        assert plan.queue_size <= _QUEUE_SIZE_MAX
+
+    def test_strategy_ceiling_pins_single_writer(self, fake_psutil: MagicMock) -> None:
+        """An order-sensitive strategy keeps a single consumer regardless of request."""
+        del fake_psutil
+        plan = _plan_writers(1, n_items=100, item_nbytes=1024, n_sites=2, requested=8)
+        assert plan.n_writers == 1
+
+    def test_zero_size_items_do_not_crash(self, fake_psutil: MagicMock) -> None:
+        """Zero-byte batches (empty sites) still produce a bounded, sane plan."""
+        del fake_psutil
+        plan = _plan_writers(
+            _WRITER_COUNT_UNBOUNDED,
+            n_items=4,
+            item_nbytes=0,
+            n_sites=1,
+        )
+        assert plan.n_writers >= 1
+        assert plan.queue_size >= 1
 
 
 class TestWriteLoop:
@@ -562,18 +597,19 @@ def test_pool_survives_failing_error_report(
 
 
 def test_pool_size_clamped_by_memory_budget(
+    fake_psutil: MagicMock,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     """A tight memory budget clamps the pool instead of breaking the envelope.
 
-    With a budget of one batch, the pool must not start more writers than the
-    in-flight item budget allows: one writer, one queued slot.
+    With host memory for only one batch beyond the pipeline's reservation, the pool
+    must not start more writers than the in-flight budget allows: one writer, one
+    queued slot.
     """
-    monkeypatch.setattr(
-        "aimz.utils._output._determine_writer_queue_size",
-        lambda *_args, **_kwargs: 1,
-    )
+    # Each batch is a (2, 3) float32 = 24 bytes; room for three batches, two of which
+    # the pipelined producer reserves.
+    fake_psutil.virtual_memory.return_value.available = 3 * 24
     monkeypatch.setattr("aimz.utils._output.open_group", _fake_open_group)
 
     captured: dict[str, int] = {}

@@ -18,6 +18,7 @@ dependencies = [
     "dask>=2026.1",
     "jax>=0.10",
     "numpyro>=0.21",
+    "psutil>=6",
     "xarray>=2026.1",
     "zarr>=3,<4",
 ]

@@ -460,3 +460,38 @@ class TestValidation:
         )
         with pytest.raises(TypeError, match="not a data loader"):
             im_lm_svi_fitted.predict(loader, progress=False, shard_axis="draw")
+
+
+def test_aligned_posterior_pins_whole_input_on_single_device(
+    synthetic_data: tuple[Array, Array],
+    im_latent_var_svi_fitted: ImpactModel,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On one device, an aligned posterior that fits memory avoids the draw fallback.
+
+    Automatic batching splits the observation axis for I/O parallelism, which an
+    observation-aligned posterior cannot tolerate; the whole-input batch is pinned
+    instead of warning and rerunning draw-parallel, preserving the pre-split behavior.
+    """
+    X, _ = synthetic_data
+    im = im_latent_var_svi_fitted
+    monkeypatch.setattr(im, "_num_devices", 1)
+
+    assert im._has_aligned_posterior(X)
+    # Fits the budget on a single device: no fallback under automatic batching.
+    assert not im._requires_whole_input(X, batch_size=None)
+    # An explicit smaller batch is the caller's contract and still forces the fallback.
+    assert im._requires_whole_input(X, batch_size=max(1, len(X) // 2))
+
+
+def test_unaligned_posterior_never_requires_whole_input(
+    synthetic_data: tuple[Array, Array],
+    im_lm_svi_fitted: ImpactModel,
+) -> None:
+    """Globally shaped posteriors are unaffected by observation-axis splitting."""
+    X, _ = synthetic_data
+    im = im_lm_svi_fitted
+
+    assert not im._has_aligned_posterior(X)
+    assert not im._requires_whole_input(X, batch_size=None)
+    assert not im._requires_whole_input(X, batch_size=2)

@@ -19,17 +19,14 @@ from __future__ import annotations
 import logging
 from collections import deque
 from contextlib import suppress
+from dataclasses import dataclass
 from os import cpu_count
 from queue import Queue
 from shutil import rmtree
 from threading import Event, Thread
 from typing import TYPE_CHECKING, Protocol, cast
 
-try:
-    import psutil
-except ImportError:
-    psutil: ModuleType | None = None
-
+import psutil
 from zarr import open_group
 
 logger = logging.getLogger(__name__)
@@ -37,7 +34,6 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Mapping
     from pathlib import Path
-    from types import ModuleType
 
     import numpy as np
     from tqdm.auto import tqdm
@@ -52,7 +48,6 @@ if TYPE_CHECKING:
 # device, so raising this raises peak device memory proportionally.
 _PIPELINE_DEPTH = 2
 _QUEUE_SIZE_MAX = 128
-_QUEUE_SIZE_FALLBACK_CAP = 4
 # Ceiling on the automatically chosen writer-thread pool size. Guards against
 # oversubscribing cores/disk; the effective count is further bounded by the write
 # strategy's own ceiling and the number of items.
@@ -93,22 +88,76 @@ def _iter_pipelined(
         yield finalize(pending.popleft())
 
 
-def _determine_writer_queue_size(num_items: int, item_nbytes: int) -> int:
-    """Determine the writer queue size from workload and host-memory bounds.
+@dataclass(frozen=True)
+class _StreamPlan:
+    """Writer-pool sizing for one streamed write: pool size and shared queue depth."""
+
+    n_writers: int
+    queue_size: int
+
+
+def _plan_writers(
+    max_writers: int,
+    n_items: int,
+    item_nbytes: int,
+    n_sites: int,
+    requested: int | None = None,
+) -> _StreamPlan:
+    """Plan the writer pool and shared-queue depth for a streamed write.
+
+    The single place where the host-memory envelope and the concurrency bounds meet.
+    Invariants, stated once:
+
+    - In-flight host bytes — queued items, items being applied, and the pipelined
+      producer's :data:`_PIPELINE_DEPTH` pre-collected batches — stay within the
+      memory available at planning time.
+    - The pool never exceeds the strategy's ceiling, the batch count, the CPU-derived
+      automatic cap (or the explicit request), or what the memory envelope can feed.
+    - Both results are floored at 1, so a bounded queue and at least one writer always
+      exist; on an extremely tight envelope this floor (one queued item plus one being
+      applied) is the documented minimum footprint.
 
     Args:
-        num_items: Total number of items the producer will emit.
-        item_nbytes: Bytes the producer commits to the queue(s) per iteration.
+        max_writers: The write strategy's ceiling on concurrent writers.
+        n_items: Total number of batches the producer will emit.
+        item_nbytes: Bytes one batch commits across all of its sites.
+        n_sites: Number of ``(site, payload)`` items each batch enqueues.
+        requested: Explicit writer count, or ``None`` to choose automatically.
 
     Returns:
-        The writer queue size.
+        The writer-pool plan.
     """
-    if psutil is None:
-        queue_size = min(cpu_count() or 1, _QUEUE_SIZE_FALLBACK_CAP)
-    else:
-        queue_size = psutil.virtual_memory().available // item_nbytes
+    # Batches of headroom the host affords beyond the pipeline's in-flight steps; NOT
+    # clamped by `n_items`, so a small batch count with ample memory still gets a full
+    # pool (every batch can be in flight at once).
+    mem_batches = (
+        psutil.virtual_memory().available // max(1, item_nbytes) - _PIPELINE_DEPTH
+    )
+    mem_slots = mem_batches * n_sites
+    n_writers = max(
+        1,
+        min(
+            _determine_writer_count(max_writers, n_items, requested=requested),
+            # Reserve one queued slot so the producer can stay ahead of the pool.
+            mem_slots - 1,
+        ),
+    )
+    queue_size = max(
+        1,
+        min(_QUEUE_SIZE_MAX, n_items * n_sites, mem_slots) - n_writers,
+    )
+    plan = _StreamPlan(n_writers=n_writers, queue_size=queue_size)
+    logger.debug(
+        "Write plan: %d batches x %d site(s) (%d bytes/batch), %d writer(s), "
+        "queue depth %d",
+        n_items,
+        n_sites,
+        item_nbytes,
+        plan.n_writers,
+        plan.queue_size,
+    )
 
-    return max(1, min(_QUEUE_SIZE_MAX, num_items, queue_size))
+    return plan
 
 
 def _determine_writer_count(
@@ -636,36 +685,18 @@ def _write_loop(
         for sliced in _iter_pipelined(items, dispatch=dispatch, finalize=finalize):
             strategy.create_arrays(sliced)
             if queue is None:
-                # One batch's worth of bytes fits `batch_budget` batches under the
-                # host-memory/CPU bounds. The pipelined producer holds up to
-                # `_PIPELINE_DEPTH` further batches in flight, so reserve those from
-                # the budget first. The shared queue counts individual
-                # `(site, payload)` items, so scale by the per-batch item count and
-                # reserve `n_writers` slots for items being applied — keeping total
-                # in-flight bytes within the single-writer envelope.
-                batch_budget = _determine_writer_queue_size(
-                    n_items,
-                    item_nbytes=max(
-                        1,
-                        sum(int(arr.nbytes) for arr in sliced.values()),
-                    ),
+                plan = _plan_writers(
+                    strategy.max_writers,
+                    n_items=n_items,
+                    item_nbytes=sum(int(arr.nbytes) for arr in sliced.values()),
+                    n_sites=max(1, len(sliced)),
+                    requested=num_writers,
                 )
-                items_per_batch = max(1, len(sliced))
-                slots = max(1, batch_budget - _PIPELINE_DEPTH) * items_per_batch
-                n_writers = min(
-                    _determine_writer_count(
-                        strategy.max_writers,
-                        n_items,
-                        requested=num_writers,
-                    ),
-                    max(1, slots - 1),
-                )
-                queue_size = max(1, slots - n_writers)
                 threads, queue, error_queue, stop = _start_writer_threads(
                     group_path=artifact_path,
                     apply=strategy.apply,
-                    n_writers=n_writers,
-                    queue_size=queue_size,
+                    n_writers=plan.n_writers,
+                    queue_size=plan.queue_size,
                 )
             strategy.enqueue(queue, site_arrays=sliced)
             if stop is not None and stop.is_set():
