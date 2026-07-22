@@ -15,15 +15,17 @@
 """Tests for the pipelined write loop and writer-thread pool in `aimz.utils._output`."""
 
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from queue import Queue
 from threading import Event, Lock, Thread
+from typing import cast
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 from tqdm.auto import tqdm
-from zarr import open_group
+from zarr import Array, open_group
 
 from aimz.utils import _output as output_mod
 from aimz.utils._output import (
@@ -174,11 +176,11 @@ class TestWriteLoop:
             """Test exception for a failure while collecting a result."""
 
         def dispatch(item: object) -> object:
-            log.append(("dispatch", item))
+            log.append(("dispatch", cast("int", item)))
             return item
 
         def finalize(pending: object) -> dict[str, np.ndarray]:
-            log.append(("finalize", pending))
+            log.append(("finalize", cast("int", pending)))
             if pending == finalize_error_at:
                 raise FinalizeError
             return {
@@ -214,7 +216,7 @@ class TestWriteLoop:
         # Pipelining engaged: item 1 was dispatched before item 0 was collected.
         assert log.index(("dispatch", 1)) < log.index(("finalize", 0))
         # Every item landed at its own offset (FIFO order, including the tail drain).
-        written = open_group(artifact_path, mode="r")["y"][:]
+        written = np.asarray(open_group(artifact_path, mode="r")["y"])
         expected = np.repeat(
             np.arange(self.N_ITEMS, dtype=np.float32),
             self.CHUNK,
@@ -359,6 +361,11 @@ def _slice_batches(n_batches: int, chunk: int, sites: tuple[str, ...]) -> list[d
     ]
 
 
+def _passthrough_finalize(pending: object) -> dict[str, np.ndarray]:
+    """Identity finalize for tests whose dispatched item is already the site dict."""
+    return cast("dict[str, np.ndarray]", pending)
+
+
 class _RecordingSlice(_SliceWriteStrategy):
     """A slice strategy that records applied `(site, payload)` items thread-safely.
 
@@ -392,7 +399,7 @@ class _RecordingSlice(_SliceWriteStrategy):
     def apply(self, array: object, item: object) -> None:
         with self._lock:
             # `array` is the site name (see `_FakeGroup`); `item` is `(start, arr)`.
-            self.applied.append((array, item))  # type: ignore[arg-type]
+            self.applied.append((cast("str", array), item))
 
 
 def test_pool_writes_all_items_with_multiple_writers(
@@ -417,7 +424,7 @@ def test_pool_writes_all_items_with_multiple_writers(
         artifact_path=tmp_path,
         strategy=strategy,
         dispatch=lambda item: item,
-        finalize=lambda pending: pending,
+        finalize=_passthrough_finalize,
         pbar=MagicMock(),
         num_writers=4,
     )
@@ -429,7 +436,11 @@ def test_pool_writes_all_items_with_multiple_writers(
         assert applied_sites.count(site) == n_batches
     # Every chunk-aligned slice offset appears exactly once per site.
     expected_starts = list(range(0, n_batches * chunk, chunk))
-    starts_y = sorted(start for site, (start, _) in strategy.applied if site == "y")
+    starts_y = sorted(
+        cast("tuple[int, np.ndarray]", payload)[0]
+        for site, payload in strategy.applied
+        if site == "y"
+    )
     assert starts_y == expected_starts
 
 
@@ -459,7 +470,7 @@ def test_append_strategy_pinned_to_single_writer(
         artifact_path=tmp_path,
         strategy=strategy,
         dispatch=lambda item: item,
-        finalize=lambda pending: pending,
+        finalize=_passthrough_finalize,
         pbar=MagicMock(),
         num_writers=8,  # requested high, but max_writers=1 pins to one worker
     )
@@ -503,7 +514,7 @@ def test_pool_error_propagates_and_cleans_up(
             artifact_path=artifact_path,
             strategy=strategy,
             dispatch=lambda item: item,
-            finalize=lambda pending: pending,
+            finalize=_passthrough_finalize,
             pbar=MagicMock(),
             num_writers=4,
         )
@@ -573,7 +584,8 @@ def test_pool_survives_failing_error_report(
         """Test exception raised inside a writer thread."""
 
     class _BoomStrategy(_RecordingSlice):
-        def apply(self, _array: object, _item: object) -> None:
+        def apply(self, array: object, item: object) -> None:
+            del array, item  # unused: every write fails
             raise BoomError
 
     artifact_path = tmp_path / "out"
@@ -588,7 +600,7 @@ def test_pool_survives_failing_error_report(
             artifact_path=artifact_path,
             strategy=strategy,
             dispatch=lambda item: item,
-            finalize=lambda pending: pending,
+            finalize=_passthrough_finalize,
             pbar=MagicMock(),
             num_writers=1,
         )
@@ -615,12 +627,20 @@ def test_pool_size_clamped_by_memory_budget(
     captured: dict[str, int] = {}
     real_start = output_mod._start_writer_threads
 
-    def capturing_start(*args: object, **kwargs: object) -> object:
-        captured.update(
-            n_writers=kwargs["n_writers"],  # type: ignore[dict-item]
-            queue_size=kwargs["queue_size"],  # type: ignore[dict-item]
+    def capturing_start(
+        group_path: Path,
+        apply: Callable[[Array, object], None],
+        n_writers: int,
+        queue_size: int,
+    ) -> tuple[list[Thread], Queue, Queue, Event]:
+        captured["n_writers"] = n_writers
+        captured["queue_size"] = queue_size
+        return real_start(
+            group_path=group_path,
+            apply=apply,
+            n_writers=n_writers,
+            queue_size=queue_size,
         )
-        return real_start(*args, **kwargs)
 
     monkeypatch.setattr(
         "aimz.utils._output._start_writer_threads",
@@ -637,7 +657,7 @@ def test_pool_size_clamped_by_memory_budget(
         artifact_path=tmp_path,
         strategy=strategy,
         dispatch=lambda item: item,
-        finalize=lambda pending: pending,
+        finalize=_passthrough_finalize,
         pbar=MagicMock(),
         num_writers=8,
     )
