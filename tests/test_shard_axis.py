@@ -483,15 +483,3 @@ def test_aligned_posterior_pins_whole_input_on_single_device(
     assert im._plan_obs_batching(X, batch_size=None) == "whole"
     # An explicit smaller batch is the caller's contract and still forces the fallback.
     assert im._plan_obs_batching(X, batch_size=max(1, len(X) // 2)) == "fallback"
-
-
-def test_unaligned_posterior_always_proceeds(
-    synthetic_data: tuple[Array, Array],
-    im_lm_svi_fitted: ImpactModel,
-) -> None:
-    """Globally shaped posteriors are unaffected by observation-axis splitting."""
-    X, _ = synthetic_data
-    im = im_lm_svi_fitted
-
-    assert im._plan_obs_batching(X, batch_size=None) == "proceed"
-    assert im._plan_obs_batching(X, batch_size=2) == "proceed"

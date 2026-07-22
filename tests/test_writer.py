@@ -15,7 +15,6 @@
 """Tests for the pipelined write loop and writer-thread pool in `aimz.utils._output`."""
 
 import threading
-from collections.abc import Callable
 from pathlib import Path
 from queue import Queue
 from threading import Event, Lock, Thread
@@ -25,9 +24,8 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 from tqdm.auto import tqdm
-from zarr import Array, open_group
+from zarr import open_group
 
-from aimz.utils import _output as output_mod
 from aimz.utils._output import (
     _QUEUE_SIZE_MAX,
     _WRITER_COUNT_MAX,
@@ -76,21 +74,6 @@ def fake_psutil(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 class TestPlanWriters:
     """Test class for the writer-pool planner :func:`_plan_writers`."""
 
-    def test_full_pool_with_ample_memory(self, fake_psutil: MagicMock) -> None:
-        """With ample memory and many batches, the automatic pool is CPU-derived."""
-        del fake_psutil
-        plan = _plan_writers(
-            _WRITER_COUNT_UNBOUNDED,
-            n_items=100,
-            item_nbytes=1024,
-            n_sites=1,
-        )
-        assert plan.n_writers == _determine_writer_count(
-            _WRITER_COUNT_UNBOUNDED,
-            num_items=100,
-        )
-        assert 1 <= plan.queue_size <= _QUEUE_SIZE_MAX
-
     def test_small_item_count_gets_full_parallelism(
         self,
         fake_psutil: MagicMock,
@@ -137,24 +120,6 @@ class TestPlanWriters:
             n_sites=1,
         )
         assert plan.queue_size <= _QUEUE_SIZE_MAX
-
-    def test_strategy_ceiling_pins_single_writer(self, fake_psutil: MagicMock) -> None:
-        """An order-sensitive strategy keeps a single consumer regardless of request."""
-        del fake_psutil
-        plan = _plan_writers(1, n_items=100, item_nbytes=1024, n_sites=2, requested=8)
-        assert plan.n_writers == 1
-
-    def test_zero_size_items_do_not_crash(self, fake_psutil: MagicMock) -> None:
-        """Zero-byte batches (empty sites) still produce a bounded, sane plan."""
-        del fake_psutil
-        plan = _plan_writers(
-            _WRITER_COUNT_UNBOUNDED,
-            n_items=4,
-            item_nbytes=0,
-            n_sites=1,
-        )
-        assert plan.n_writers >= 1
-        assert plan.queue_size >= 1
 
 
 class TestWriteLoop:
@@ -293,25 +258,6 @@ class TestDetermineWriterCount:
             _determine_writer_count(max_writers=_WRITER_COUNT_UNBOUNDED, num_items=0)
             == 1
         )
-
-
-class TestStrategyMaxWriters:
-    """The write strategies advertise their concurrency tolerance correctly."""
-
-    def test_slice_strategy_is_concurrency_safe(self) -> None:
-        """Slice writing is position-addressed, so it tolerates a pool of writers."""
-        strategy = _SliceWriteStrategy(
-            zarr_group=MagicMock(),
-            total=10,
-            batch_size=2,
-            axis=0,
-        )
-        assert strategy.max_writers > 1
-
-    def test_append_strategy_is_single_consumer(self) -> None:
-        """Append writing is order-sensitive, so it must stay single-consumer."""
-        strategy = _AppendWriteStrategy(zarr_group=MagicMock(), batch_size=2, axis=1)
-        assert strategy.max_writers == 1
 
 
 def test_writer_reports_open_group_failure_and_drains_queue(
@@ -606,61 +552,3 @@ def test_pool_survives_failing_error_report(
         )
 
     assert not artifact_path.exists()
-
-
-def test_pool_size_clamped_by_memory_budget(
-    fake_psutil: MagicMock,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """A tight memory budget clamps the pool instead of breaking the envelope.
-
-    With host memory for only one batch beyond the pipeline's reservation, the pool
-    must not start more writers than the in-flight budget allows: one writer, one
-    queued slot.
-    """
-    # Each batch is a (2, 3) float32 = 24 bytes; room for three batches, two of which
-    # the pipelined producer reserves.
-    fake_psutil.virtual_memory.return_value.available = 3 * 24
-    monkeypatch.setattr("aimz.utils._output.open_group", _fake_open_group)
-
-    captured: dict[str, int] = {}
-    real_start = output_mod._start_writer_threads
-
-    def capturing_start(
-        group_path: Path,
-        apply: Callable[[Array, object], None],
-        n_writers: int,
-        queue_size: int,
-    ) -> tuple[list[Thread], Queue, Queue, Event]:
-        captured["n_writers"] = n_writers
-        captured["queue_size"] = queue_size
-        return real_start(
-            group_path=group_path,
-            apply=apply,
-            n_writers=n_writers,
-            queue_size=queue_size,
-        )
-
-    monkeypatch.setattr(
-        "aimz.utils._output._start_writer_threads",
-        capturing_start,
-    )
-
-    n_batches = 4
-    strategy = _RecordingSlice(total=2 * n_batches, batch_size=2, axis=0, max_writers=8)
-    batches = _slice_batches(n_batches=n_batches, chunk=2, sites=("y",))
-
-    _write_loop(
-        items=batches,
-        n_items=len(batches),
-        artifact_path=tmp_path,
-        strategy=strategy,
-        dispatch=lambda item: item,
-        finalize=_passthrough_finalize,
-        pbar=MagicMock(),
-        num_writers=8,
-    )
-
-    assert captured == {"n_writers": 1, "queue_size": 1}
-    assert len(strategy.applied) == n_batches

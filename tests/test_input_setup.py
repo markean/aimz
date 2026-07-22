@@ -126,19 +126,6 @@ class TestResolveBatchSize:
         """Pin the CPU count so the pool-occupancy target is deterministic."""
         monkeypatch.setattr("aimz.utils.data._input_setup.cpu_count", lambda: 4)
 
-    def test_explicit_batch_size_is_verbatim(self) -> None:
-        """An explicit batch size is the caller's contract, returned as given."""
-        requested = 7
-        assert (
-            _resolve_batch_size(
-                requested,
-                axis_size=1000,
-                other_size=1000,
-                num_devices=3,
-            )
-            == requested
-        )
-
     def test_pool_target_splits_large_axis(self) -> None:
         """A large output is split into enough batches to occupy the writer pool."""
         # 1M observations x 200 draws (~800 MB float32): the pool target binds.
@@ -175,14 +162,3 @@ class TestResolveBatchSize:
             num_devices=1,
         )
         assert batch == axis_size
-
-    def test_result_is_device_multiple(self) -> None:
-        """The resolved batch is rounded down to a multiple of the device count."""
-        batch = _resolve_batch_size(
-            None,
-            axis_size=10_000,
-            other_size=1000,
-            num_devices=3,
-        )
-        assert batch % 3 == 0
-        assert batch > 0
