@@ -17,9 +17,9 @@
 import threading
 from pathlib import Path
 from queue import Queue
-from threading import Event, Lock, Thread
+from threading import Event, Thread
 from typing import cast
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -38,23 +38,6 @@ from aimz.utils._output import (
     _write_loop,
     _writer,
 )
-
-
-class _FakeGroup:
-    """A stand-in for an open Zarr group whose ``group[site]`` returns the site name.
-
-    This makes the ``array`` argument that ``_writer`` passes into ``strategy.apply``
-    equal to the site name, so a recording strategy can attribute each applied payload
-    to its site without a real Zarr store.
-    """
-
-    def __getitem__(self, site: str) -> str:
-        return site
-
-
-def _fake_open_group(*_args: object, **_kwargs: object) -> _FakeGroup:
-    """Stand in for :func:`zarr.open_group`, returning a fake group."""
-    return _FakeGroup()
 
 
 @pytest.fixture
@@ -299,12 +282,18 @@ def test_writer_reports_open_group_failure_and_drains_queue(
     assert stop.is_set()
 
 
-def _slice_batches(n_batches: int, chunk: int, sites: tuple[str, ...]) -> list[dict]:
-    """Build fake per-site batch dicts whose arrays have a real shape and nbytes."""
+def _batches(n_batches: int, chunk: int, sites: tuple[str, ...]) -> list[dict]:
+    """Per-site batch dicts; batch ``k`` is filled with ``k`` to verify placement."""
     return [
-        {site: np.zeros((chunk, 3), dtype=np.float32) for site in sites}
-        for _ in range(n_batches)
+        {site: np.full((chunk, 3), k, dtype=np.float32) for site in sites}
+        for k in range(n_batches)
     ]
+
+
+def _expected(n_batches: int, chunk: int) -> np.ndarray:
+    """The array `_batches` produces once every batch sits at its own offset."""
+    values = np.repeat(np.arange(n_batches, dtype=np.float32), chunk)
+    return values[:, None] * np.ones(3, dtype=np.float32)
 
 
 def _passthrough_finalize(pending: object) -> dict[str, np.ndarray]:
@@ -312,156 +301,91 @@ def _passthrough_finalize(pending: object) -> dict[str, np.ndarray]:
     return cast("dict[str, np.ndarray]", pending)
 
 
-class _RecordingSlice(_SliceWriteStrategy):
-    """A slice strategy that records applied `(site, payload)` items thread-safely.
+def _run_pool(
+    artifact_path: Path,
+    strategy: _SliceWriteStrategy | _AppendWriteStrategy,
+    batches: list[dict],
+    num_writers: int,
+) -> None:
+    """Drive `_write_loop` with items that are already the finalized site dicts."""
+    _write_loop(
+        items=batches,
+        n_items=len(batches),
+        artifact_path=artifact_path,
+        strategy=strategy,
+        dispatch=lambda item: item,
+        finalize=_passthrough_finalize,
+        pbar=MagicMock(),
+        num_writers=num_writers,
+    )
 
-    Inherits the real position-addressed `enqueue`/`create_arrays` bookkeeping (its
-    ``zarr_group`` is a mock), but records each applied payload instead of touching a
-    Zarr array, so the writer pool can be exercised without a real store.
-    """
 
-    def __init__(
-        self,
-        *,
-        total: int,
-        batch_size: int,
-        axis: int,
-        max_writers: int,
-    ) -> None:
-        super().__init__(
-            zarr_group=MagicMock(),
-            total=total,
-            batch_size=batch_size,
-            axis=axis,
+class _WriteError(RuntimeError):
+    """Test error for a deliberate writer failure."""
+
+
+def test_pool_writes_all_items_with_multiple_writers(tmp_path: Path) -> None:
+    """A pool of writers lands every batch of every site at its own offset."""
+    store = tmp_path / "store"
+    n_batches, chunk = 4, 2
+    strategy = _SliceWriteStrategy(
+        zarr_group=open_group(store, mode="w"),
+        total=n_batches * chunk,
+        batch_size=chunk,
+        axis=0,
+    )
+
+    _run_pool(store, strategy, _batches(n_batches, chunk, ("y", "z")), num_writers=4)
+
+    # Content equality proves each batch was written exactly once at its own offset,
+    # regardless of the order in which the pool completed the writes.
+    group = open_group(store, mode="r")
+    for site in ("y", "z"):
+        np.testing.assert_array_equal(
+            np.asarray(group[site]),
+            _expected(n_batches, chunk),
         )
-        self._max_writers = max_writers
-        self._lock = Lock()
-        self.applied: list[tuple[str, object]] = []
-
-    @property
-    def max_writers(self) -> int:
-        return self._max_writers
-
-    def apply(self, array: object, item: object) -> None:
-        with self._lock:
-            # `array` is the site name (see `_FakeGroup`); `item` is `(start, arr)`.
-            self.applied.append((cast("str", array), item))
 
 
-def test_pool_writes_all_items_with_multiple_writers(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """A pool of writers applies every batch of every site exactly once."""
-    monkeypatch.setattr("aimz.utils._output.open_group", _fake_open_group)
-    n_batches, chunk = 4, 2
-    sites = ("y", "z")
-    strategy = _RecordingSlice(
-        total=n_batches * chunk,
+def test_append_strategy_pinned_to_single_writer(tmp_path: Path) -> None:
+    """The append strategy stays a single consumer even when more are requested."""
+    store = tmp_path / "store"
+    n_batches, chunk = 5, 2
+    strategy = _AppendWriteStrategy(
+        zarr_group=open_group(store, mode="w"),
         batch_size=chunk,
         axis=0,
-        max_writers=4,
-    )
-    batches = _slice_batches(n_batches=n_batches, chunk=chunk, sites=sites)
-
-    _write_loop(
-        items=batches,
-        n_items=len(batches),
-        artifact_path=tmp_path,
-        strategy=strategy,
-        dispatch=lambda item: item,
-        finalize=_passthrough_finalize,
-        pbar=MagicMock(),
-        num_writers=4,
     )
 
-    # Every batch of every site is applied exactly once, order-independent.
-    assert len(strategy.applied) == n_batches * len(sites)
-    applied_sites = [site for site, _ in strategy.applied]
-    for site in sites:
-        assert applied_sites.count(site) == n_batches
-    # Every chunk-aligned slice offset appears exactly once per site.
-    expected_starts = list(range(0, n_batches * chunk, chunk))
-    starts_y = sorted(
-        cast("tuple[int, np.ndarray]", payload)[0]
-        for site, payload in strategy.applied
-        if site == "y"
-    )
-    assert starts_y == expected_starts
+    # Requested high, but `max_writers=1` pins the pool to one worker, whose FIFO
+    # consumption preserves the batch order the growing array depends on.
+    _run_pool(store, strategy, _batches(n_batches, chunk, ("y",)), num_writers=8)
 
-
-def test_append_strategy_pinned_to_single_writer(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """The append strategy forces a single consumer even when more are requested."""
-    monkeypatch.setattr("aimz.utils._output.open_group", _fake_open_group)
-
-    applied: list[int] = []
-
-    class _RecordingAppend(_AppendWriteStrategy):
-        def apply(self, array: object, item: object) -> None:
-            del array  # unused: `item` is the appended array
-            applied.append(int(np.asarray(item).flat[0]))
-
-    strategy = _RecordingAppend(zarr_group=MagicMock(), batch_size=2, axis=1)
-    n_batches = 5
-    batches = [
-        {"y": np.full((3, 2), idx, dtype=np.float32)} for idx in range(n_batches)
-    ]
-
-    _write_loop(
-        items=batches,
-        n_items=len(batches),
-        artifact_path=tmp_path,
-        strategy=strategy,
-        dispatch=lambda item: item,
-        finalize=_passthrough_finalize,
-        pbar=MagicMock(),
-        num_writers=8,  # requested high, but max_writers=1 pins to one worker
+    np.testing.assert_array_equal(
+        np.asarray(open_group(store, mode="r")["y"]),
+        _expected(n_batches, chunk),
     )
 
-    # A single consumer preserves per-site FIFO order.
-    assert applied == list(range(n_batches))
 
-
-def test_pool_error_propagates_and_cleans_up(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
+def test_pool_error_propagates_and_cleans_up(tmp_path: Path) -> None:
     """A write error in the pool is re-raised with its traceback and cleans up."""
-    monkeypatch.setattr("aimz.utils._output.open_group", _fake_open_group)
-
-    class BoomError(RuntimeError):
-        """Test exception raised inside a writer thread."""
-
-    class _BoomStrategy(_RecordingSlice):
-        def apply(self, array: object, item: object) -> None:
-            # `array` is the site name; fail on one site to trigger the error path.
-            if array == "z":
-                raise BoomError
-            super().apply(array, item)
-
     artifact_path = tmp_path / "out"
-    artifact_path.mkdir()
     n_batches, chunk = 4, 2
-    strategy = _BoomStrategy(
+    strategy = _SliceWriteStrategy(
+        zarr_group=open_group(artifact_path, mode="w"),
         total=n_batches * chunk,
         batch_size=chunk,
         axis=0,
-        max_writers=4,
     )
-    batches = _slice_batches(n_batches=n_batches, chunk=chunk, sites=("y", "z"))
 
-    with pytest.raises(BoomError):
-        _write_loop(
-            items=batches,
-            n_items=len(batches),
-            artifact_path=artifact_path,
-            strategy=strategy,
-            dispatch=lambda item: item,
-            finalize=_passthrough_finalize,
-            pbar=MagicMock(),
+    with (
+        patch.object(strategy, "apply", side_effect=_WriteError),
+        pytest.raises(_WriteError),
+    ):
+        _run_pool(
+            artifact_path,
+            strategy,
+            _batches(n_batches, chunk, ("y", "z")),
             num_writers=4,
         )
 
@@ -481,6 +405,8 @@ def test_partial_pool_startup_unwinds_started_workers(
     started = 0
     fail_at = 2
 
+    # A targeted override of the module's `Thread` attribute; patching
+    # `threading.Thread.start` globally would break Zarr's own worker threads.
     class _FlakyThread(Thread):
         def start(self) -> None:
             nonlocal started
@@ -491,11 +417,12 @@ def test_partial_pool_startup_unwinds_started_workers(
             super().start()
 
     monkeypatch.setattr("aimz.utils._output.Thread", _FlakyThread)
-    monkeypatch.setattr("aimz.utils._output.open_group", _fake_open_group)
+    store = tmp_path / "store"
+    open_group(store, mode="w")
 
     with pytest.raises(RuntimeError, match="can't start new thread"):
         _start_writer_threads(
-            group_path=tmp_path,
+            group_path=store,
             apply=lambda _array, _item: None,
             n_writers=3,
             queue_size=4,
@@ -518,37 +445,24 @@ def test_pool_survives_failing_error_report(
     The error is enqueued before logging and both are guarded, so the original
     exception still propagates and the producer never deadlocks on a dead consumer.
     """
-    monkeypatch.setattr("aimz.utils._output.open_group", _fake_open_group)
 
     def raising_exception(*args: object, **kwargs: object) -> None:
         msg = "logging failed"
         raise MemoryError(msg)
 
     monkeypatch.setattr("aimz.utils._output.logger.exception", raising_exception)
-
-    class BoomError(RuntimeError):
-        """Test exception raised inside a writer thread."""
-
-    class _BoomStrategy(_RecordingSlice):
-        def apply(self, array: object, item: object) -> None:
-            del array, item  # unused: every write fails
-            raise BoomError
-
     artifact_path = tmp_path / "out"
-    artifact_path.mkdir()
-    strategy = _BoomStrategy(total=8, batch_size=2, axis=0, max_writers=1)
-    batches = _slice_batches(n_batches=4, chunk=2, sites=("y",))
+    strategy = _SliceWriteStrategy(
+        zarr_group=open_group(artifact_path, mode="w"),
+        total=8,
+        batch_size=2,
+        axis=0,
+    )
 
-    with pytest.raises(BoomError):
-        _write_loop(
-            items=batches,
-            n_items=len(batches),
-            artifact_path=artifact_path,
-            strategy=strategy,
-            dispatch=lambda item: item,
-            finalize=_passthrough_finalize,
-            pbar=MagicMock(),
-            num_writers=1,
-        )
+    with (
+        patch.object(strategy, "apply", side_effect=_WriteError),
+        pytest.raises(_WriteError),
+    ):
+        _run_pool(artifact_path, strategy, _batches(4, 2, ("y",)), num_writers=1)
 
     assert not artifact_path.exists()
