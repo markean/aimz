@@ -549,7 +549,6 @@ class _OutputStreamer:
         _write_loop(
             items=zip(dataloader, subkeys, strict=True),
             n_items=n_batches,
-            return_sites=req.return_sites,
             artifact_path=req.artifact_path,
             strategy=_select_write_strategy(
                 open_group(req.artifact_path, mode="w"),
@@ -596,11 +595,7 @@ class _OutputStreamer:
             num_devices=self._ctx.num_devices,
         )
         if req.batch_size is None:
-            logger.info(
-                "Using batch_size=%d (draws per chunk). Specify explicitly to better "
-                "control memory usage.",
-                batch_size,
-            )
+            logger.debug("Resolved batch_size=%d automatically.", batch_size)
         pbar.reset(total=-(-req.num_samples // batch_size))
         kwargs_array, kwargs_extra = _group_kwargs(req.kwargs)
         # The public draw-parallel entry points reject data loaders, so `req.X` is
@@ -659,7 +654,6 @@ class _OutputStreamer:
         _write_loop(
             items=range(0, req.num_samples, batch_size),
             n_items=-(-req.num_samples // batch_size),
-            return_sites=req.return_sites,
             artifact_path=req.artifact_path,
             strategy=_SliceWriteStrategy(
                 zarr_group=open_group(req.artifact_path, mode="w"),

@@ -19,7 +19,11 @@ import pytest
 from jax import local_device_count, make_mesh, random
 from jax.sharding import AxisType, NamedSharding, PartitionSpec
 
-from aimz.utils.data._input_setup import MAX_BYTES, _setup_inputs
+from aimz.utils.data._input_setup import (
+    MAX_BYTES,
+    _resolve_batch_size,
+    _setup_inputs,
+)
 
 
 def test_batch_size_capped_when_exceeding_threshold() -> None:
@@ -112,3 +116,49 @@ def test_non_array_kwargs_classified_as_extra() -> None:
 
     assert set(loader.dataset.arrays) == {"X"}
     assert extra == {"family": "gaussian"}
+
+
+class TestResolveBatchSize:
+    """Test class for the automatic policy of :func:`_resolve_batch_size`."""
+
+    @pytest.fixture(autouse=True)
+    def four_cpus(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Pin the CPU count so the pool-occupancy target is deterministic."""
+        monkeypatch.setattr("aimz.utils.data._input_setup.cpu_count", lambda: 4)
+
+    def test_pool_target_splits_large_axis(self) -> None:
+        """A large output is split into enough batches to occupy the writer pool."""
+        # 1M observations x 200 draws (~800 MB float32): the pool target binds.
+        # pool = min(4 cpus, cap) = 4; target batches = 4 * 4 = 16.
+        batch = _resolve_batch_size(
+            None,
+            axis_size=1_000_000,
+            other_size=200,
+            num_devices=1,
+        )
+        expected = 62_500  # ceil(1_000_000 / 16)
+        assert batch == expected
+
+    def test_memory_cap_binds_for_huge_outputs(self) -> None:
+        """The per-batch memory ceiling binds before the pool target for huge data."""
+        # 10M observations x 1000 draws (~40 GB float32): cap = 25M elements / 1000.
+        batch = _resolve_batch_size(
+            None,
+            axis_size=10_000_000,
+            other_size=1000,
+            num_devices=1,
+        )
+        expected = 25_000  # 25M float32 elements // 1000 draws
+        assert batch == expected
+
+    def test_floor_keeps_tiny_outputs_whole(self) -> None:
+        """Outputs below the per-batch byte floor are not split at all."""
+        # 1000 observations x 1000 draws (~4 MB float32): floor exceeds the axis.
+        axis_size = 1000
+        batch = _resolve_batch_size(
+            None,
+            axis_size=axis_size,
+            other_size=1000,
+            num_devices=1,
+        )
+        assert batch == axis_size

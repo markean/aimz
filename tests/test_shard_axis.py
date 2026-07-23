@@ -114,7 +114,7 @@ def test_predict_data_reruns_draw_on_rank3_local_latent(
 
 
 @pytest.mark.parametrize("n_devices", [1, 3])
-def test_requires_whole_input(
+def test_plan_obs_batching_explicit_batch(
     synthetic_data: tuple[Array, Array],
     im_latent_var_svi_fitted: ImpactModel,
     monkeypatch: pytest.MonkeyPatch,
@@ -128,8 +128,10 @@ def test_requires_whole_input(
     X, _ = synthetic_data
     im = im_latent_var_svi_fitted
     monkeypatch.setattr(im, "_num_devices", n_devices)
-    assert im._requires_whole_input(X, batch_size=len(X) // 4) is True
-    assert im._requires_whole_input(X, batch_size=len(X)) is (n_devices > 1)
+    assert im._plan_obs_batching(X, batch_size=len(X) // 4) == "fallback"
+    assert im._plan_obs_batching(X, batch_size=len(X)) == (
+        "fallback" if n_devices > 1 else "proceed"
+    )
 
 
 def test_predict_draw_padding_round_trip(
@@ -460,3 +462,27 @@ class TestValidation:
         )
         with pytest.raises(TypeError, match="not a data loader"):
             im_lm_svi_fitted.predict(loader, progress=False, shard_axis="draw")
+
+
+def test_aligned_posterior_pins_whole_input_on_single_device(
+    synthetic_data: tuple[Array, Array],
+    im_latent_var_svi_fitted: ImpactModel,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On one device, an aligned posterior that fits memory avoids the draw fallback.
+
+    Automatic batching splits the observation axis for I/O parallelism, which an
+    observation-aligned posterior cannot tolerate; the whole-input batch is pinned
+    instead of warning and rerunning draw-parallel, preserving the pre-split behavior.
+    """
+    X, _ = synthetic_data
+    im = im_latent_var_svi_fitted
+    monkeypatch.setattr(im, "_num_devices", 1)
+
+    # Fits the budget on a single device: pin the whole input, no fallback.
+    assert im._plan_obs_batching(X, batch_size=None) == "whole"
+    # An explicit smaller batch is the caller's contract and still forces the fallback.
+    assert im._plan_obs_batching(X, batch_size=max(1, len(X) // 2)) == "fallback"
+    # A budget-exceeding whole batch cannot be pinned: draw-parallel fallback.
+    monkeypatch.setattr(im, "_num_samples", 10**12)
+    assert im._plan_obs_batching(X, batch_size=None) == "fallback"
