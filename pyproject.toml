@@ -40,7 +40,7 @@ dev = [
     "pre-commit>=4.6",
     "pytest>=9.1",
     "pytest-cov>=7.1",
-    "ruff>=0.15",
+    "ruff>=0.16",
 ]
 gpu = ["jax[cuda13]>=0.10"]
 mlflow = ["mlflow>=3.10"]
@@ -79,10 +79,13 @@ per-file-ignores = { "aimz/model/_core.py" = [
     "ARG001",  # unused-function-argument
     "BLE001",  # blind-except
     "PLR0913", # too-many-arguments
+    "PLR0917", # too-many-positional-arguments
     "PLC0415", # import-outside-top-level
 ], "docs*" = [
     "A001", # builtin-variable-shadowing
     "F401", # unused-import
+], "docs/notebooks*" = [
+    "CPY001", # missing-copyright-notice
 ], "tests*" = [
     "ARG001", # unused-function-argument
     "S101",   # assert
