@@ -243,6 +243,83 @@ class TestDetermineWriterCount:
         )
 
 
+class TestWriteLoop:
+    """Test class for the pipelined :func:`_write_loop`."""
+
+    N_ITEMS = 4
+    CHUNK = 2
+    N_COLS = 5
+
+    def _run(
+        self,
+        artifact_path: Path,
+        log: list[tuple[str, int]],
+        finalize_error_at: int | None = None,
+    ) -> None:
+        """Drive `_write_loop` over draw-style items with recording fakes."""
+
+        class FinalizeError(RuntimeError):
+            """Test exception for a failure while collecting a result."""
+
+        def dispatch(item: object) -> object:
+            log.append(("dispatch", item))
+            return item
+
+        def finalize(pending: object) -> dict[str, np.ndarray]:
+            log.append(("finalize", pending))
+            if pending == finalize_error_at:
+                raise FinalizeError
+            return {
+                "y": np.full(
+                    (self.CHUNK, self.N_COLS),
+                    fill_value=pending,
+                    dtype=np.float32,
+                ),
+            }
+
+        _write_loop(
+            items=range(self.N_ITEMS),
+            n_items=self.N_ITEMS,
+            return_sites=("y",),
+            artifact_path=artifact_path,
+            strategy=_SliceWriteStrategy(
+                zarr_group=open_group(artifact_path, mode="w"),
+                total=self.N_ITEMS * self.CHUNK,
+                batch_size=self.CHUNK,
+                axis=0,
+            ),
+            dispatch=dispatch,
+            finalize=finalize,
+            pbar=tqdm(disable=True),
+        )
+
+    def test_dispatch_runs_ahead_and_order_is_preserved(self, tmp_path: Path) -> None:
+        """Dispatch runs ahead of collection while results stay in item order."""
+        artifact_path = tmp_path / "out"
+        log: list[tuple[str, int]] = []
+
+        self._run(artifact_path, log=log)
+
+        # Pipelining engaged: item 1 was dispatched before item 0 was collected.
+        assert log.index(("dispatch", 1)) < log.index(("finalize", 0))
+        # Every item landed at its own offset (FIFO order, including the tail drain).
+        written = open_group(artifact_path, mode="r")["y"][:]
+        expected = np.repeat(
+            np.arange(self.N_ITEMS, dtype=np.float32),
+            self.CHUNK,
+        )[:, None] * np.ones(self.N_COLS, dtype=np.float32)
+        np.testing.assert_array_equal(written, expected)
+
+    def test_finalize_failure_cleans_output_and_raises(self, tmp_path: Path) -> None:
+        """An error while collecting a result propagates and removes the output."""
+        artifact_path = tmp_path / "out"
+
+        with pytest.raises(RuntimeError):
+            self._run(artifact_path, log=[], finalize_error_at=1)
+
+        assert not artifact_path.exists()
+
+
 def test_writer_reports_open_group_failure_and_drains_queue(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
