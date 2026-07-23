@@ -68,7 +68,7 @@ from aimz.utils._validation import (
     _validate_X_y_to_jax,
 )
 from aimz.utils.data._input_setup import (
-    _resolve_batch_size,
+    _fits_single_batch,
     _setup_inputs,
 )
 
@@ -464,51 +464,55 @@ class ImpactModel(BaseModel):
 
         return artifact_path
 
-    def _requires_whole_input(
+    def _plan_obs_batching(
         self,
         X: ArrayLike | ArrayLoader,
         batch_size: int | None,
-    ) -> bool:
-        """Return whether an observation-aligned posterior requires the whole input.
+    ) -> Literal["proceed", "whole", "fallback"]:
+        """Decide how the observation axis may be batched given the posterior.
 
-        Data-parallel replicates the posterior and splits the observation axis of
-        ``X`` across devices or into batches. A posterior site shaped
-        ``(num_samples, n_obs, ...)`` is aligned to that axis, so once it is split the
-        site can no longer be matched to each slice. A single unsplit batch on one
-        device sees every observation, so an aligned site still matches.
+        A posterior site shaped ``(num_samples, n_obs, ...)`` indexes the observation
+        axis of ``X``; data-parallel streaming splits that axis across devices or into
+        batches, which would sever such a site from the observations it indexes. Only
+        a single whole-input batch on a single device keeps it intact.
 
         Args:
             X: Input data. If array-like, the leading axis is the observation axis.
             batch_size: The requested batch size, or ``None`` to use the default.
 
         Returns:
-            ``True`` if an observation-aligned posterior site would be split from the
-            observations it indexes; ``False`` for a data loader, an empty posterior, a
-            globally-shaped posterior, or a single unsplit batch.
+            - ``"proceed"``: batching as requested is safe. A data loader, an empty or
+              globally-shaped posterior, or an explicit ``batch_size`` already covering
+              the whole input.
+            - ``"whole"``: an aligned site with automatic batching on a single device,
+              and the whole input fits the memory budget; the caller pins
+              ``batch_size = n_obs`` so automatic splitting for I/O parallelism does
+              not apply.
+            - ``"fallback"``: an aligned site that data-parallel cannot serve. A
+              multi-device mesh, an explicit smaller ``batch_size``, or a
+              budget-exceeding input; the caller reruns draw-parallel.
         """
         if not isinstance(X, ArrayLike) or not self.posterior:
-            return False
+            return "proceed"
 
         n_obs = len(cast("Sized", X))
         min_aligned_ndim = 2
-        aligned = any(
+        if not any(
             v.ndim >= min_aligned_ndim and v.shape[1] == n_obs
             for v in self.posterior.values()
-        )
-        if not aligned:
-            return False
+        ):
+            return "proceed"
 
         if self._num_devices > 1:
-            return True
+            return "fallback"
 
-        batch_size = _resolve_batch_size(
-            batch_size,
-            axis_size=n_obs,
-            other_size=self._num_samples,
-            num_devices=self._num_devices,
-        )
+        if batch_size is not None:
+            return "proceed" if batch_size >= n_obs else "fallback"
 
-        return batch_size < n_obs
+        if _fits_single_batch(n_obs, other_size=self._num_samples):
+            return "whole"
+
+        return "fallback"
 
     def sample_prior_predictive_on_batch(
         self,
@@ -1416,10 +1420,12 @@ class ImpactModel(BaseModel):
 
         if isinstance(X, ArrayLike):
             _ = self._bind_kernel_args(X, kwargs=kwargs)
-            if shard_axis == "obs" and self._requires_whole_input(
-                X,
-                batch_size=batch_size,
-            ):
+            plan = (
+                self._plan_obs_batching(X, batch_size=batch_size)
+                if shard_axis == "obs"
+                else "proceed"
+            )
+            if plan == "fallback":
                 msg = (
                     "One or more posterior sample shapes are not compatible with "
                     "`.predict()` under `shard_axis='obs'`; rerunning with "
@@ -1439,6 +1445,8 @@ class ImpactModel(BaseModel):
                     progress=progress,
                     **kwargs,
                 )
+            if plan == "whole":
+                batch_size = len(cast("Sized", X))
 
         if rng_key is None:
             self._rng_key, rng_key = random.split(self._rng_key)
@@ -1663,7 +1671,12 @@ class ImpactModel(BaseModel):
         if not self.posterior:
             shard_axis = "obs"
 
-        if shard_axis == "obs" and self._requires_whole_input(X, batch_size=batch_size):
+        plan = (
+            self._plan_obs_batching(X, batch_size=batch_size)
+            if shard_axis == "obs"
+            else "proceed"
+        )
+        if plan == "fallback":
             msg = (
                 "One or more posterior sample shapes are not compatible with "
                 "`.log_likelihood()` under `shard_axis='obs'`; rerunning with "
@@ -1679,6 +1692,8 @@ class ImpactModel(BaseModel):
                 progress=progress,
                 **kwargs,
             )
+        if plan == "whole":
+            batch_size = len(cast("Sized", X))
 
         # With no posterior, the single-draw result samples every latent site from the
         # prior, which requires a seeded kernel. A posterior from fitting covers every
