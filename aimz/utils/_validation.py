@@ -283,16 +283,29 @@ def _validate_kernel_body(
         raise KernelValidationError(msg)
 
     if param_output not in model_trace:
-        msg = f"Kernel must include a sample site named {param_output!r}."
+        msg = (
+            f"Kernel must include a sample or deterministic site named "
+            f"{param_output!r}."
+        )
         raise KernelValidationError(msg)
     site = model_trace[param_output]
-    if site["type"] != "sample":
-        msg = f"Expected {param_output!r} to have type 'sample', got {site['type']!r}."
-        raise KernelValidationError(msg)
-    if with_output and not site.get("is_observed", False):
+    if with_output:
+        if site["type"] != "sample":
+            msg = (
+                f"Expected {param_output!r} to have type 'sample', got "
+                f"{site['type']!r}."
+            )
+            raise KernelValidationError(msg)
+        if not site.get("is_observed", False):
+            msg = (
+                f"{param_output!r} must be observed (i.e., defined with `obs=` in the "
+                "kernel)."
+            )
+            raise KernelValidationError(msg)
+    elif site["type"] not in ("sample", "deterministic"):
         msg = (
-            f"{param_output!r} must be observed (i.e., defined with `obs=` in the "
-            "kernel)."
+            f"Expected {param_output!r} to have type 'sample' or 'deterministic', "
+            f"got {site['type']!r}."
         )
         raise KernelValidationError(msg)
 
