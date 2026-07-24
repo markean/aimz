@@ -623,7 +623,7 @@ class ImpactModel(BaseModel):
             batch_size: Size of each batch, taken from the input under
                 ``shard_axis="obs"`` and from the draws under ``shard_axis="draw"``.
                 Also used as the chunk size when storing results. If ``None``, it is
-                determined automatically from the input size and number of samples.
+                chosen automatically.
             output_dir: The directory where the outputs will be saved. If the specified
                 directory does not exist, it will be created automatically. If ``None``,
                 a model-owned temporary directory is used. A subdirectory is generated
@@ -864,7 +864,7 @@ class ImpactModel(BaseModel):
             batch_size: Size of each batch, taken from the input under
                 ``shard_axis="obs"`` and from the draws under ``shard_axis="draw"``.
                 Also used as the chunk size when storing results. If ``None``, it is
-                determined automatically from the input size and number of samples.
+                chosen automatically.
                 Ignored if ``X`` is a data loader, in which case the data loader is
                 expected to handle batching internally.
             output_dir: The directory where the outputs will be saved. If the specified
@@ -1396,7 +1396,7 @@ class ImpactModel(BaseModel):
             batch_size: Size of each batch, taken from the input under
                 ``shard_axis="obs"`` and from the draws under ``shard_axis="draw"``.
                 Also used as the chunk size when storing results. If ``None``, it is
-                determined automatically from the input size and number of samples.
+                chosen automatically.
                 Ignored if ``X`` is a data loader, in which case the data loader is
                 expected to handle batching internally.
             output_dir: The directory where the outputs will be saved. If the specified
@@ -1643,7 +1643,7 @@ class ImpactModel(BaseModel):
             batch_size: Size of each batch, taken from the input under
                 ``shard_axis="obs"`` and from the draws under ``shard_axis="draw"``.
                 Also used as the chunk size when storing results. If ``None``, it is
-                determined automatically from the input size and number of samples.
+                chosen automatically.
                 Ignored if ``X`` is a data loader, in which case the data loader is
                 expected to handle batching internally.
             output_dir: The directory where the outputs will be saved. If the specified
