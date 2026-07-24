@@ -353,7 +353,9 @@ class ImpactModel(BaseModel):
         This method is idempotent: if a compatible spec already exists it is a no-op.
         A compatible spec means: ``with_output`` is ``False`` and we already traced
         once, or ``with_output`` is ``True`` and the existing spec was built with an
-        observed output (``output_observed=True``).
+        observed output (``output_observed=True``). An upgrade re-trace merges the
+        newly discovered sites with the existing spec, since a kernel may define
+        different sites depending on whether data are supplied.
 
         Args:
             args_bound: Mapping of fully bound keyword arguments to invoke the kernel
@@ -381,8 +383,16 @@ class ImpactModel(BaseModel):
         sample_sites = tuple(k for k, v in model_trace.items() if v["type"] == "sample")
         return_sites = (
             self.param_output,
-            *tuple(k for k, v in model_trace.items() if v["type"] == "deterministic"),
+            *tuple(
+                k
+                for k, v in model_trace.items()
+                if v["type"] == "deterministic" and k != self.param_output
+            ),
         )
+        prev = self._kernel_spec
+        if prev is not None and prev.traced:
+            sample_sites = tuple(dict.fromkeys(prev.sample_sites + sample_sites))
+            return_sites = tuple(dict.fromkeys(return_sites + prev.return_sites))
         output_observed = bool(with_output)
         self._kernel_spec = KernelSpec(
             traced=True,
@@ -395,7 +405,7 @@ class ImpactModel(BaseModel):
         self,
         return_sites: str | Iterable[str] | None,
     ) -> tuple[str, ...]:
-        """Return a normalized, validated tuple of site names.
+        """Return a normalized tuple of site names.
 
         Args:
             return_sites: User-provided site name(s) or ``None``.
@@ -403,8 +413,10 @@ class ImpactModel(BaseModel):
         Returns:
             A tuple of site names.
 
-        Raises:
-            ValueError: If a requested site is not present in the traced kernel.
+        Warns:
+            UserWarning: If a requested site was not seen in any trace so far. The
+                name is passed through, since a kernel may define it only at sampling
+                time. A name absent from the forward trace is dropped from the output.
         """
         spec = self._kernel_spec
         if return_sites is None:
@@ -418,8 +430,13 @@ class ImpactModel(BaseModel):
             known = set(spec.sample_sites) | set(spec.return_sites)
             unknown = [site for site in requested if site not in known]
             if unknown:
-                msg = f"Unknown return site(s): {', '.join(map(repr, unknown))}."
-                raise ValueError(msg)
+                msg = (
+                    f"Return site(s) not seen in any trace so far: "
+                    f"{', '.join(map(repr, unknown))}. They are passed through, but "
+                    "will be missing from the output unless the kernel defines them "
+                    "at sampling time."
+                )
+                warn(msg, category=UserWarning, stacklevel=3)
 
         return requested
 

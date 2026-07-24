@@ -38,8 +38,8 @@ class KernelSpec:
 
     Notes:
         Re-tracing only upgrades a prior-only spec (``output_observed`` is ``False``) to
-        one that includes an observed output; the user kernel is assumed immutable after
-        construction.
+        one that includes an observed output, merging the newly discovered sites with
+        the existing ones; the user kernel is assumed immutable after construction.
     """
 
     traced: bool

@@ -183,7 +183,7 @@ def _setup_inputs(
                 f"devices ({num_devices}). Use a multiple of {num_devices} "
                 "for optimal performance."
             )
-            warn(msg, category=UserWarning, stacklevel=2)
+            warn(msg, category=UserWarning, stacklevel=5)
         # Key the dataset by the kernel's input/output parameter names (alongside the
         # array kwargs) so each batch is keyed as the downstream lookup expects.
         kwargs_array[param_input] = X
