@@ -16,9 +16,10 @@
 
 import warnings
 
+import jax.numpy as jnp
 import numpy as np
 import pytest
-from jax import Array, random
+from jax import Array, local_device_count, random
 
 from aimz import ImpactModel
 from aimz.utils.data import ArrayDataset, ArrayLoader
@@ -486,3 +487,23 @@ def test_aligned_posterior_pins_whole_input_on_single_device(
     # A budget-exceeding whole batch cannot be pinned: draw-parallel fallback.
     monkeypatch.setattr(im, "_num_samples", 10**12)
     assert im._plan_obs_batching(X, batch_size=None) == "fallback"
+
+
+def test_predict_obs_shards_draw_independent_noise(
+    synthetic_data: tuple[Array, Array],
+    im_lm_svi_fitted: ImpactModel,
+) -> None:
+    """`shard_axis='obs'` draws independent noise on every device shard."""
+    X, _ = synthetic_data
+    n_devices = local_device_count()
+    # A constant input holds the `lm` mean identical across observations, so whatever
+    # variation is left in the draws is the likelihood noise.
+    dt = im_lm_svi_fitted.predict(
+        jnp.tile(X[:1], reps=(n_devices, 1)),
+        batch_size=n_devices,
+        shard_axis="obs",
+        progress=False,
+    )
+    draws = np.asarray(dt["posterior_predictive"].to_dataset()["y"])[0]
+    for i in range(1, n_devices):
+        assert not np.array_equal(draws[:, 0], draws[:, i])

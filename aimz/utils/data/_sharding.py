@@ -20,7 +20,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Literal
 
 import jax.numpy as jnp
-from jax import Array, device_put, jit, random, shard_map
+from jax import Array, device_put, jit, lax, random, shard_map
 from jax.sharding import PartitionSpec
 
 from aimz.sampling._forward import _sample_forward
@@ -70,6 +70,9 @@ def _create_sharded_sampler(
                 arguments (both array-like and non-array-like).
     """
     draws = shard_axis == "draw"
+    axis = None
+    if mesh is not None:
+        (axis,) = mesh.axis_names
 
     def f(
         kernel: Callable,
@@ -82,10 +85,17 @@ def _create_sharded_sampler(
         X: Array,
         *args: object,
     ) -> dict[str, Array]:
-        # Under draws-sharding the device receives its slice of the pre-split per-draw
-        # keys and forwards them directly; data-sharding splits the replicated scalar
-        # key into ``num_samples`` per-draw keys.
-        rng_keys = rng_key if draws else random.split(rng_key, num=num_samples)
+        # Draws-sharding forwards the device's slice of the pre-split per-draw keys;
+        # obs-sharding splits the device-folded scalar key into ``num_samples`` keys.
+        if draws:
+            rng_keys = rng_key
+        else:
+            rng_keys = random.split(
+                rng_key
+                if axis is None
+                else random.fold_in(rng_key, data=lax.axis_index(axis)),
+                num=num_samples,
+            )
 
         return _sample_forward(
             kernel,
@@ -110,7 +120,6 @@ def _create_sharded_sampler(
             ],
         )(f)
 
-    (axis,) = mesh.axis_names
     # Draw mode shards the posterior draw axis (rng keys + samples) and replicates the
     # whole input; data mode shards the observation axis of the input and replicates
     # the posterior. Under draw, ``out_spec`` shards only the leading axis: a

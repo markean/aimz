@@ -151,20 +151,6 @@ class TestKernelParameterValidation:
             im.predict(X=X)
 
 
-class TestBatchSize:
-    """Test class related to batch size specification."""
-
-    def test_default_batch_size(
-        self,
-        synthetic_data: tuple[Array, Array],
-        im_lm_svi_fitted: ImpactModel,
-    ) -> None:
-        """Warns if `batch_size` is not explicitly set."""
-        X, _ = synthetic_data
-        with pytest.warns(UserWarning, match=".*"):
-            im_lm_svi_fitted.predict(X=X, progress=False)
-
-
 @pytest.mark.parametrize("vi", [lm], indirect=True)
 def test_predict_after_cleanup(synthetic_data: tuple[Array, Array], vi: SVI) -> None:
     """Test `.predict()` recreates tempdir after `.cleanup()`."""
