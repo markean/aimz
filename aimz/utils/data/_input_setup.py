@@ -177,7 +177,7 @@ def _setup_inputs(
                 num_devices=num_devices,
             )
             logger.debug("Resolved batch_size=%d automatically.", batch_size)
-        if batch_size % num_devices != 0:
+        elif batch_size % num_devices != 0:
             msg = (
                 f"The `batch_size` ({batch_size}) is not divisible by the number of "
                 f"devices ({num_devices}). Use a multiple of {num_devices} "

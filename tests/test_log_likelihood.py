@@ -150,19 +150,15 @@ def test_log_likelihood_cleans_subdir_on_write_failure(
         assert not any(Path(output_dir).iterdir())
 
 
-class TestBatchSize:
-    """Test class related to batch size specification."""
-
-    def test_default_batch_size(
-        self,
-        synthetic_data: tuple[Array, Array],
-        im_lm_svi_fitted: ImpactModel,
-    ) -> None:
-        """Warns if `batch_size` is not explicitly set."""
-        X, y = synthetic_data
-        msg = (
-            r"The `batch_size` \(\d+\) is not divisible by the number of devices "
-            r"\(\d+\)\."
-        )
-        with pytest.warns(UserWarning, match=msg):
-            im_lm_svi_fitted.log_likelihood(X=X, y=y)
+def test_explicit_batch_size_not_divisible_by_devices(
+    synthetic_data: tuple[Array, Array],
+    im_lm_svi_fitted: ImpactModel,
+) -> None:
+    """An explicit batch size that is not a device multiple triggers a warning."""
+    X, y = synthetic_data
+    msg = (
+        r"The `batch_size` \(\d+\) is not divisible by the number of devices "
+        r"\(\d+\)\."
+    )
+    with pytest.warns(UserWarning, match=msg):
+        im_lm_svi_fitted.log_likelihood(X=X, y=y, batch_size=2, progress=False)
