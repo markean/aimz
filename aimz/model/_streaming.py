@@ -12,13 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Streaming engine that runs the kernel across shards and writes to Zarr.
+"""Streaming engine that runs the kernel across shards and streams the outputs.
 
 :class:`_OutputStreamer` owns the streaming subsystem extracted from
 :class:`~aimz.ImpactModel`: it builds (and caches) the sharded callables, places the
-posterior on devices, and drives the data- and draw-parallel write paths. The model
-passes a stable :class:`_RuntimeContext` once and a per-call :class:`_WriteRequest` each
-time.
+posterior on devices, and drives the data- and draw-parallel write paths — into a Zarr
+store on disk or accumulated in host memory, per the request. The model passes a stable
+:class:`_RuntimeContext` once and a per-call :class:`_WriteRequest` each time.
 """
 
 from __future__ import annotations
@@ -29,13 +29,12 @@ from typing import TYPE_CHECKING, Literal, NamedTuple, cast
 
 from jax import Array, device_get, device_put, random, tree
 from tqdm.auto import tqdm
-from zarr import open_group
 
 from aimz.sampling._forward import _sample_forward
 from aimz.utils._kwargs import _group_kwargs
 from aimz.utils._output import (
+    _create_slice_strategy,
     _select_write_strategy,
-    _SliceWriteStrategy,
     _write_loop,
 )
 from aimz.utils._validation import _is_arraylike
@@ -54,6 +53,7 @@ if TYPE_CHECKING:
 
     import numpy as np
     import numpy.typing as npt
+    from dask.array import Array as DaskArray
     from jax.sharding import Mesh, Sharding
     from jax.typing import ArrayLike
 
@@ -81,7 +81,8 @@ class _WriteRequest:
     return_sites: tuple[str, ...]
     num_samples: int
     batch_size: int | None
-    artifact_path: Path
+    artifact_path: Path | None
+    """Zarr group path for the results; ``None`` accumulates them in host memory."""
     progress: bool
     loader_rng_key: Array
     kwargs: dict[str, object]
@@ -112,7 +113,7 @@ class _Step(NamedTuple):
 
 
 class _OutputStreamer:
-    """Run the kernel across shards and stream the per-item outputs to Zarr.
+    """Run the kernel across shards and stream the per-item outputs to a destination.
 
     Constructed once per model from a :class:`_RuntimeContext`; owns the jit/shard_map
     callable cache and the posterior device-placement cache. Exposes
@@ -269,8 +270,8 @@ class _OutputStreamer:
         rng_key: Array,
         group: str,
         posterior: dict[str, Array] | None,
-    ) -> None:
-        """Write predictive samples to ``req.artifact_path``.
+    ) -> dict[str, DaskArray] | None:
+        """Stream predictive samples to the request's destination.
 
         Builds the predictive ``compute`` — one sharded-sampler call per item — and
         dispatches to the strategy streamer. ``shard_axis="draw"`` chunks the draw axis;
@@ -286,6 +287,10 @@ class _OutputStreamer:
             group: Output group (``"posterior_predictive"``, ``"predictions"``, or
                 ``"prior_predictive"``).
             posterior: The posterior to condition on (ignored for prior predictive).
+
+        Returns:
+            The site arrays, Dask-backed over the retained host batches, when
+            ``req.artifact_path`` is ``None``; ``None`` for a Zarr-backed write.
 
         .. _NumPyro: https://num.pyro.ai/
         """
@@ -324,7 +329,7 @@ class _OutputStreamer:
                 if group == "prior_predictive"
                 else cast("dict[str, Array]", posterior)
             )
-            self._write_draws(
+            return self._write_draws(
                 req,
                 compute=compute,
                 y=None,
@@ -332,7 +337,6 @@ class _OutputStreamer:
                 rng_key=rng_key,
                 pbar=pbar,
             )
-            return
 
         if group == "prior_predictive":
             # Single-element, unsharded probe draws the global prior samples once; the
@@ -364,6 +368,7 @@ class _OutputStreamer:
                 num_samples=req.num_samples,
                 shuffle=False,
                 device=None,
+                stacklevel=6,
                 **kwargs_probe,
             )
             batch, _ = next(iter(probe))
@@ -380,7 +385,8 @@ class _OutputStreamer:
                 samples = device_put(samples, device=self._ctx.replicated_sharding)
         else:
             samples = self.place_posterior(posterior, self._ctx.replicated_sharding)
-        self._write_data(
+
+        return self._write_data(
             req,
             compute=compute,
             y=None,
@@ -397,8 +403,8 @@ class _OutputStreamer:
         kernel: Callable,
         posterior: dict[str, Array] | None,
         y: ArrayLike | None,
-    ) -> None:
-        """Write the log-likelihood to ``req.artifact_path``.
+    ) -> dict[str, DaskArray] | None:
+        """Stream the log-likelihood to the request's destination.
 
         Builds the log-likelihood ``compute`` — one sharded call per item, keyed by the
         output site — and dispatches to the strategy streamer.
@@ -409,6 +415,10 @@ class _OutputStreamer:
                 caller when tracing needs to sample latent sites (empty posterior).
             posterior: The posterior to condition on.
             y: Output data.
+
+        Returns:
+            The site arrays, Dask-backed over the retained host batches, when
+            ``req.artifact_path`` is ``None``; ``None`` for a Zarr-backed write.
 
         .. _NumPyro: https://num.pyro.ai/
         """
@@ -442,7 +452,7 @@ class _OutputStreamer:
             dynamic_ncols=True,
         )
         if req.shard_axis == "draw":
-            self._write_draws(
+            return self._write_draws(
                 req,
                 compute=compute,
                 y=cast("ArrayLike", y),
@@ -450,19 +460,19 @@ class _OutputStreamer:
                 rng_key=None,
                 pbar=pbar,
             )
-        else:
-            self._write_data(
-                req,
-                compute=compute,
-                y=y,
-                samples=self.place_posterior(
-                    posterior,
-                    self._ctx.replicated_sharding,
-                ),
-                kwargs_key=kwargs_key,
-                rng_key=None,
-                pbar=pbar,
-            )
+
+        return self._write_data(
+            req,
+            compute=compute,
+            y=y,
+            samples=self.place_posterior(
+                posterior,
+                self._ctx.replicated_sharding,
+            ),
+            kwargs_key=kwargs_key,
+            rng_key=None,
+            pbar=pbar,
+        )
 
     def _write_data(
         self,
@@ -473,8 +483,8 @@ class _OutputStreamer:
         kwargs_key: tuple[str, ...],
         rng_key: Array | None,
         pbar: tqdm,
-    ) -> None:
-        """Stream over data-parallel batches and write to ``req.artifact_path``.
+    ) -> dict[str, DaskArray] | None:
+        """Stream over data-parallel batches into the request's destination.
 
         Shards the observation axis across devices and conditions every batch on the
         whole (replicated) ``samples``. For each batch it assembles a :class:`_Step`
@@ -493,6 +503,10 @@ class _OutputStreamer:
                 each batch's ``tail`` by name.
             rng_key: Per-batch key source, or ``None`` for log-likelihood.
             pbar: Progress bar to drive over the batches.
+
+        Returns:
+            The strategy's site arrays for in-memory accumulation, or ``None`` for a
+            Zarr-backed write.
         """
         _, kwargs_extra = _group_kwargs(req.kwargs)
         dataloader, _ = _setup_inputs(
@@ -505,6 +519,7 @@ class _OutputStreamer:
             num_samples=req.num_samples,
             shuffle=False,
             device=self._ctx.partitioned_sharding,
+            stacklevel=7,
             **req.kwargs,
         )
         n_batches = len(dataloader)
@@ -546,18 +561,17 @@ class _OutputStreamer:
                 for site, arr in device_get(out).items()
             }
 
+        strategy = _select_write_strategy(req.artifact_path, dataloader=dataloader)
         _write_loop(
             items=zip(dataloader, subkeys, strict=True),
             n_items=n_batches,
-            artifact_path=req.artifact_path,
-            strategy=_select_write_strategy(
-                open_group(req.artifact_path, mode="w"),
-                dataloader=dataloader,
-            ),
+            strategy=strategy,
             dispatch=dispatch,
             finalize=finalize,
             pbar=pbar,
         )
+
+        return strategy.result()
 
     def _write_draws(
         self,
@@ -567,8 +581,8 @@ class _OutputStreamer:
         posterior: dict[str, Array],
         rng_key: Array | None,
         pbar: tqdm,
-    ) -> None:
-        """Stream over draw chunks and write to ``req.artifact_path``.
+    ) -> dict[str, DaskArray] | None:
+        """Stream over draw chunks into the request's destination.
 
         Shards the draw axis across devices and holds the whole input resident:
         replicates the input/output/array-kwargs once, splits the per-draw keys once,
@@ -587,6 +601,10 @@ class _OutputStreamer:
                 (each chunk draws fresh).
             rng_key: Per-draw key source, or ``None`` for log-likelihood.
             pbar: Progress bar to drive over the draw chunks.
+
+        Returns:
+            The strategy's site arrays for in-memory accumulation, or ``None`` for a
+            Zarr-backed write.
         """
         batch_size = _resolve_batch_size(
             req.batch_size,
@@ -651,17 +669,19 @@ class _OutputStreamer:
 
             return {s: a[:n_draws] for s, a in device_get(out).items()}
 
+        strategy = _create_slice_strategy(
+            req.artifact_path,
+            total=req.num_samples,
+            batch_size=batch_size,
+            axis=0,
+        )
         _write_loop(
             items=range(0, req.num_samples, batch_size),
             n_items=-(-req.num_samples // batch_size),
-            artifact_path=req.artifact_path,
-            strategy=_SliceWriteStrategy(
-                zarr_group=open_group(req.artifact_path, mode="w"),
-                total=req.num_samples,
-                batch_size=batch_size,
-                axis=0,
-            ),
+            strategy=strategy,
             dispatch=dispatch,
             finalize=finalize,
             pbar=pbar,
         )
+
+        return strategy.result()

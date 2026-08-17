@@ -142,9 +142,8 @@ class TestWriteLoop:
         _write_loop(
             items=range(self.N_ITEMS),
             n_items=self.N_ITEMS,
-            artifact_path=artifact_path,
             strategy=_SliceWriteStrategy(
-                zarr_group=open_group(artifact_path, mode="w"),
+                artifact_path=artifact_path,
                 total=self.N_ITEMS * self.CHUNK,
                 batch_size=self.CHUNK,
                 axis=0,
@@ -302,7 +301,6 @@ def _passthrough_finalize(pending: object) -> dict[str, np.ndarray]:
 
 
 def _run_pool(
-    artifact_path: Path,
     strategy: _SliceWriteStrategy | _AppendWriteStrategy,
     batches: list[dict],
     num_writers: int,
@@ -311,7 +309,6 @@ def _run_pool(
     _write_loop(
         items=batches,
         n_items=len(batches),
-        artifact_path=artifact_path,
         strategy=strategy,
         dispatch=lambda item: item,
         finalize=_passthrough_finalize,
@@ -329,13 +326,13 @@ def test_pool_writes_all_items_with_multiple_writers(tmp_path: Path) -> None:
     store = tmp_path / "store"
     n_batches, chunk = 4, 2
     strategy = _SliceWriteStrategy(
-        zarr_group=open_group(store, mode="w"),
+        artifact_path=store,
         total=n_batches * chunk,
         batch_size=chunk,
         axis=0,
     )
 
-    _run_pool(store, strategy, _batches(n_batches, chunk, ("y", "z")), num_writers=4)
+    _run_pool(strategy, _batches(n_batches, chunk, ("y", "z")), num_writers=4)
 
     # Content equality proves each batch was written exactly once at its own offset,
     # regardless of the order in which the pool completed the writes.
@@ -352,14 +349,14 @@ def test_append_strategy_pinned_to_single_writer(tmp_path: Path) -> None:
     store = tmp_path / "store"
     n_batches, chunk = 5, 2
     strategy = _AppendWriteStrategy(
-        zarr_group=open_group(store, mode="w"),
+        artifact_path=store,
         batch_size=chunk,
         axis=0,
     )
 
     # Requested high, but `max_writers=1` pins the pool to one worker, whose FIFO
     # consumption preserves the batch order the growing array depends on.
-    _run_pool(store, strategy, _batches(n_batches, chunk, ("y",)), num_writers=8)
+    _run_pool(strategy, _batches(n_batches, chunk, ("y",)), num_writers=8)
 
     np.testing.assert_array_equal(
         np.asarray(open_group(store, mode="r")["y"]),
@@ -372,7 +369,7 @@ def test_pool_error_propagates_and_cleans_up(tmp_path: Path) -> None:
     artifact_path = tmp_path / "out"
     n_batches, chunk = 4, 2
     strategy = _SliceWriteStrategy(
-        zarr_group=open_group(artifact_path, mode="w"),
+        artifact_path=artifact_path,
         total=n_batches * chunk,
         batch_size=chunk,
         axis=0,
@@ -383,7 +380,6 @@ def test_pool_error_propagates_and_cleans_up(tmp_path: Path) -> None:
         pytest.raises(_WriteError),
     ):
         _run_pool(
-            artifact_path,
             strategy,
             _batches(n_batches, chunk, ("y", "z")),
             num_writers=4,
@@ -422,7 +418,7 @@ def test_partial_pool_startup_unwinds_started_workers(
 
     with pytest.raises(RuntimeError, match="can't start new thread"):
         _start_writer_threads(
-            group_path=store,
+            sink=store,
             apply=lambda _array, _item: None,
             n_writers=3,
             queue_size=4,
@@ -453,7 +449,7 @@ def test_pool_survives_failing_error_report(
     monkeypatch.setattr("aimz.utils._output.logger.exception", raising_exception)
     artifact_path = tmp_path / "out"
     strategy = _SliceWriteStrategy(
-        zarr_group=open_group(artifact_path, mode="w"),
+        artifact_path=artifact_path,
         total=8,
         batch_size=2,
         axis=0,
@@ -463,7 +459,7 @@ def test_pool_survives_failing_error_report(
         patch.object(strategy, "apply", side_effect=_WriteError),
         pytest.raises(_WriteError),
     ):
-        _run_pool(artifact_path, strategy, _batches(4, 2, ("y",)), num_writers=1)
+        _run_pool(strategy, _batches(4, 2, ("y",)), num_writers=1)
 
     assert not artifact_path.exists()
 
@@ -496,7 +492,7 @@ def test_unreported_writer_failure_still_fails_the_write(
     monkeypatch.setattr("aimz.utils._output.Queue", _BrokenErrorQueue)
     artifact_path = tmp_path / "out"
     strategy = _SliceWriteStrategy(
-        zarr_group=open_group(artifact_path, mode="w"),
+        artifact_path=artifact_path,
         total=8,
         batch_size=2,
         axis=0,
@@ -506,6 +502,6 @@ def test_unreported_writer_failure_still_fails_the_write(
         patch.object(strategy, "apply", side_effect=_WriteError),
         pytest.raises(RuntimeError, match="without reporting an error"),
     ):
-        _run_pool(artifact_path, strategy, _batches(4, 2, ("y",)), num_writers=1)
+        _run_pool(strategy, _batches(4, 2, ("y",)), num_writers=1)
 
     assert not artifact_path.exists()

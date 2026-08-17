@@ -31,6 +31,7 @@ from aimz._exceptions import KernelValidationError, NotFittedError
 if TYPE_CHECKING:
     from collections import OrderedDict
     from collections.abc import Callable
+    from pathlib import Path
 
     import xarray as xr
 
@@ -142,6 +143,25 @@ def _validate_shard_axis(shard_axis: str, X: ArrayLike | ArrayLoader) -> None:
             "so `X` must be an array, not a data loader."
         )
         raise TypeError(msg)
+
+
+def _validate_store(store: str, output_dir: str | Path | None) -> None:
+    """Validate the result-store selection for the streaming entry points.
+
+    Args:
+        store: The requested result store.
+        output_dir: The requested output directory for the persistent store.
+
+    Raises:
+        ValueError: If ``store`` is not ``"persistent"`` or ``"memory"``, or an
+            ``output_dir`` is passed with ``store="memory"``.
+    """
+    if store not in ("persistent", "memory"):
+        msg = f"`store` must be either 'persistent' or 'memory', got {store!r}."
+        raise ValueError(msg)
+    if store == "memory" and output_dir is not None:
+        msg = "`output_dir` must be `None` when `store='memory'`."
+        raise ValueError(msg)
 
 
 def _validate_batch_size(batch_size: int | None, X: ArrayLike | ArrayLoader) -> None:

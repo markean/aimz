@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file and are best
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- {meth}`~aimz.ImpactModel.predict`, {meth}`~aimz.ImpactModel.sample_posterior_predictive`, {meth}`~aimz.ImpactModel.sample_prior_predictive`, and {meth}`~aimz.ImpactModel.log_likelihood` now accept a `store` argument selecting where results accumulate. The default `"persistent"` streams batches to a Zarr store and returns a lazy, Dask-backed {class}`xarray.DataTree` recording its `artifact_path` attribute (the previous behavior). The new `"memory"` option keeps the same batched, sharded execution but retains the streamed batches in host memory, returning a lazy, Dask-backed tree whose chunks are those resident batches. Nothing is written to disk, no `artifact_path` attribute is set, and no temporary directory is created ([#293](https://github.com/markean/aimz/issues/293)).
+
+### Changed
+
+- The tree returned by {meth}`~aimz.ImpactModel.sample_prior_predictive_on_batch` now lists its `posterior` group before `prior_predictive` ([#293](https://github.com/markean/aimz/issues/293)).
+- Disk-backed Zarr arrays are now compressed with byte-shuffled Zstandard ([#293](https://github.com/markean/aimz/issues/293)).
+
+### Fixed
+
+- An interrupted or failed streamed call no longer keeps its intermediate buffers reachable through the exception's traceback. The in-flight pipeline results and the current batch are dropped in the cleanup path for both stores, and `store="memory"` additionally releases its partially accumulated results ([#293](https://github.com/markean/aimz/issues/293)).
+
 ## [v0.14.0](https://github.com/markean/aimz/releases/tag/v0.14.0) - 2026-07-24
 
 ### Added

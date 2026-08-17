@@ -96,7 +96,7 @@ Mixed (precomputed baseline, lazy intervention)::
 
 .. note::
 
-   A lazily generated scenario (``args_baseline`` / ``args_intervention``) runs the disk-backed :meth:`~aimz.ImpactModel.predict` internally, writing its artifacts to disk (under the model's temporary directory unless an ``output_dir`` entry is included in the argument dictionary).
+   A lazily generated scenario (``args_baseline`` / ``args_intervention``) runs the streaming :meth:`~aimz.ImpactModel.predict` internally with its default persistent store, writing artifacts under the model's temporary directory (unless an ``output_dir`` or ``store`` entry is included in the argument dictionary).
    Because the intermediate trees are not returned, the effect tree's ``artifact_path_baseline`` / ``artifact_path_intervention`` attributes are the only handle to those artifacts; see :doc:`cleanup` for managing them.
    Pass ``on_batch=True`` to compute both scenarios in memory without writing to disk.
 

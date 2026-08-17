@@ -130,6 +130,7 @@ def _setup_inputs(
     num_samples: int,
     shuffle: bool = False,
     device: Sharding | None = None,
+    stacklevel: int = 2,
     **kwargs: object,
 ) -> tuple[ArrayLoader, dict]:
     """Prepare an dataloader and grouped keyword arguments.
@@ -150,6 +151,9 @@ def _setup_inputs(
         device: The device or sharding specification to which the data should be moved.
             By default, no device transfer is applied. If ``X`` is a data loader, it
             will override the device setting of the loader.
+        stacklevel: Frames between this function and the user's call site, so the
+            batch-size divisibility warning is attributed to the user's own line;
+            each caller passes the depth of its chain.
         **kwargs: Additional arguments passed to the model.
 
     Returns:
@@ -183,7 +187,7 @@ def _setup_inputs(
                 f"devices ({num_devices}). Use a multiple of {num_devices} "
                 "for optimal performance."
             )
-            warn(msg, category=UserWarning, stacklevel=5)
+            warn(msg, category=UserWarning, stacklevel=stacklevel)
         # Key the dataset by the kernel's input/output parameter names (alongside the
         # array kwargs) so each batch is keyed as the downstream lookup expects.
         kwargs_array[param_input] = X
