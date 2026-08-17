@@ -3,10 +3,10 @@
 Multi-Device Execution and Sharding
 ===================================
 
-The disk-backed predictive methods of :class:`~aimz.ImpactModel` can distribute work across multiple devices (CPUs, GPUs, or TPUs) by *sharding*, which splits one of the computation's axes across the available devices and runs the pieces in parallel.
+The streaming predictive methods of :class:`~aimz.ImpactModel` can distribute work across multiple devices (CPUs, GPUs, or TPUs) by *sharding*, which splits one of the computation's axes across the available devices and runs the pieces in parallel.
 aimz shards over whatever devices JAX already exposes and does not select or configure them itself.
 These methods accept a ``shard_axis`` argument that selects the strategy.
-The on-batch (``*_on_batch``) variants run a single in-memory pass and do not shard; see :doc:`disk_and_on_batch` for the broader disk-backed vs. on-batch comparison.
+The on-batch (``*_on_batch``) variants run a single in-memory pass and do not shard; see :doc:`disk_and_on_batch` for the broader streaming vs. on-batch comparison.
 
 .. note::
 

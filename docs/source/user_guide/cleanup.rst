@@ -1,14 +1,14 @@
 Output Directory Cleanup
 ========================
 
-Many high‑level methods of :class:`~aimz.ImpactModel` stream results to disk (e.g., posterior predictive samples, predictions) to support large datasets and memory efficiency.
+The streaming methods of :class:`~aimz.ImpactModel` persist results (e.g., posterior predictive samples, predictions) to disk by default (``store="persistent"``) to support large datasets and memory efficiency.
 Each of these methods accepts an ``output_dir`` parameter (see :doc:`disk_and_on_batch` for broader I/O behavior of them).
 This page focuses on managing the temporary directory created when the user does not supply ``output_dir`` and on the :meth:`~aimz.ImpactModel.cleanup` method, as well as the :meth:`~aimz.ImpactModel.cleanup_models` class method, which removes temporary directories for all live model instances.
 
 
 Creation Logic
 --------------
-When a disk‑writing method is called with ``output_dir=None`` (the default), the model creates a process‑scoped temporary root directory (via :class:`tempfile.TemporaryDirectory`) the first time such a call occurs.
+When a persistent-store call is made with ``output_dir=None`` (the default), the model creates a process‑scoped temporary root directory (via :class:`tempfile.TemporaryDirectory`) the first time such a call occurs.
 Each invocation then writes to a timestamped subdirectory under that root, ensuring that earlier results are never overwritten.
 Subdirectories follow the pattern ``<UTC-timestamp>_<caller_name>/``, where ``<caller_name>`` is the name of the method that triggered the write operation.
 This root directory is stored in the :attr:`~aimz.ImpactModel.temp_dir` attribute and reused for subsequent calls until the user invokes :meth:`~aimz.ImpactModel.cleanup`.
@@ -16,13 +16,14 @@ This root directory is stored in the :attr:`~aimz.ImpactModel.temp_dir` attribut
 Example Layout (implicit temp root)::
 
     /tmp/tmpz00u5kxk/       # model.temp_dir (root, reused until cleanup)
-        20250926T185250223698Z_sample_prior_predictive/
-        20250926T185359570134Z_log_likelihood/
-        20250926T185419208087Z_predict/
+        20260926T185250223698Z_sample_prior_predictive/
+        20260926T185359570134Z_log_likelihood/
+        20260926T185419208087Z_predict/
 
 If the user provides ``output_dir``, that directory becomes the root, and it will be created if it does not already exist.
 The same timestamped subdirectory pattern is used there (e.g., ``my_runs/20250917T013040123456Z_predict``).
 An explicit ``output_dir`` is **not** deleted by :meth:`~aimz.ImpactModel.cleanup`, since it is assumed that the user intends to manage its lifecycle manually.
+Calls made with ``store="memory"`` bypass all of this: they write nothing and never create the temporary root.
 
 
 Cleanup Behavior
@@ -46,7 +47,7 @@ Large artifacts can accumulate quickly; calling :meth:`~aimz.ImpactModel.cleanup
 
 Accessing Artifact Paths
 ------------------------
-Every disk-writing method records the call's artifact path — the timestamped subdirectory holding the Zarr_ store with the results — in the ``artifact_path`` attribute, set on both the root tree and the group node (``tree.attrs["artifact_path"]`` and ``tree[<group>].attrs["artifact_path"]``).
+Every persistent-store call records its artifact path — the timestamped subdirectory holding the Zarr_ store with the results — in the ``artifact_path`` attribute, set on both the root tree and the group node (``tree.attrs["artifact_path"]`` and ``tree[<group>].attrs["artifact_path"]``).
 The enclosing base directory is simply ``Path(artifact_path).parent``, and the temporary root (when no ``output_dir`` was given) is also available via :attr:`~aimz.ImpactModel.temp_dir`.
 :meth:`~aimz.ImpactModel.estimate_effect` records the artifact paths of its two scenarios under ``artifact_path_baseline`` and ``artifact_path_intervention`` when the corresponding outputs were streamed to disk.
 The output below shows an example :external:class:`xarray.DataTree` illustrating the artifact paths.
@@ -117,6 +118,7 @@ The output below shows an example :external:class:`xarray.DataTree` illustrating
     A temporary directory is reclaimed when :meth:`~aimz.ImpactModel.cleanup` or :meth:`~aimz.ImpactModel.cleanup_models` is called, or when the model is garbage-collected.
     Afterwards the returned :external:class:`xarray.DataTree` and all its group entries remain accessible, but any arrays that were stored on disk read back with **all values set to zero**, since the underlying data files are gone.
     A temporary result is therefore valid only while its model is alive; pass an explicit ``output_dir`` to keep results beyond the model's lifetime.
+    Results returned by ``store="memory"`` live entirely in host memory and are unaffected by cleanup.
 
 
 Cleaning Multiple Models

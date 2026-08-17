@@ -1,5 +1,5 @@
-Disk-Backed vs. On-Batch Methods
-================================
+Streaming vs. On-Batch Methods
+==============================
 
 .. image:: https://colab.research.google.com/assets/colab-badge.svg
    :target: https://colab.research.google.com/github/markean/aimz/blob/main/docs/notebooks/disk_and_on_batch.ipynb
@@ -9,28 +9,28 @@ Disk-Backed vs. On-Batch Methods
 
 This page explains and compares the two complementary execution styles provided by :class:`~aimz.ImpactModel`:
 
-* **Disk-backed** (default) methods iterate over the input in chunks, materialize results incrementally, and persist structured artifacts (Zarr_-backed :external:class:`xarray.DataTree` plus metadata) to a temporary or user-specified output directory.
+* **Streaming** (default) methods iterate over the input in chunks, materialize results incrementally, and can distribute the computation across devices. Where the streamed results accumulate is a separate choice — the *result store*: a persisted Zarr_ artifact (default) or host memory; see :ref:`result-store`.
 * **On-batch** (``*_on_batch`` suffix) methods execute a single, fully in-memory pass and can optionally return a plain :class:`dict` instead of a :external:class:`xarray.DataTree`. The naming mirrors the Keras convention to signal an immediate, single-batch, memory-resident operation.
 
 
-Why Disk-Backed by Default
---------------------------
-The non-``*_on_batch`` methods default to a disk-backed (chunked) execution model for several reasons:
+Why Streaming by Default
+------------------------
+The non-``*_on_batch`` methods default to a streaming (chunked) execution model for several reasons:
 
 * Posterior predictive and prior predictive tensors can scale as ``(#samples x #dims x #posterior_samples x ...)``.
   Even moderate increases in any axis (time, spatial units, parameter samples) can exceed host or accelerator RAM.
 * Using ``batch_size`` with chunked iteration limits peak memory and prevents out-of-memory errors.
-* Persisted Zarr_ arrays create an artifact you can reopen without rerunning inference. Coordinates and attributes are re-derived when the tree is rebuilt rather than stored on disk (see :ref:`reopening-persisted-outputs`).
+* The persistent store creates an artifact you can reopen without rerunning inference. Coordinates and attributes are re-derived when the tree is rebuilt rather than stored on disk (see :ref:`reopening-persisted-outputs`).
 * The :external:class:`xarray.DataTree` + Zarr_ format integrates with scientific Python tools such as Dask_ and ArviZ_.
-* Summaries (means, HDIs, residual PPC stats) can be computed lazily over chunked storage without first materializing dense arrays.
+* Summaries (means, HDIs, residual PPC stats) can be computed lazily, chunk by chunk, without first materializing dense arrays.
 * One API works for both small experiments and large-scale use cases.
 
 
 Comparison
 ----------
-Disk-backed variants target larger datasets, enable chunked processing, multi-device parallelism, and stable artifact generation.
-These methods build internal data loaders, iterate in chunks, and decouple sampling from file I/O, enabling concurrent execution.
-Outputs consolidate into a single :external:class:`xarray.DataTree` backed by Zarr_ files for post-hoc analysis.
+Streaming variants target larger datasets, enable chunked processing, multi-device parallelism, and — with the persistent store — stable artifact generation.
+These methods build internal data loaders, iterate in chunks, and decouple sampling from result handling, enabling concurrent execution.
+Outputs consolidate into a single lazy, Dask_-backed :external:class:`xarray.DataTree` whose chunks live in a Zarr_ store or directly in host memory, depending on the result store.
 On-batch variants, in contrast, favor minimal overhead, immediate return, and greater flexibility when posterior sample shapes are not shard-friendly.
 
 .. seealso::
@@ -39,25 +39,59 @@ On-batch variants, in contrast, favor minimal overhead, immediate return, and gr
 
 Feature Summary
 ^^^^^^^^^^^^^^^
-============================= ==================================== =======================================================
-Feature                       Disk-backed (default)                On-batch (``*_on_batch``)
-============================= ==================================== =======================================================
-Typical dataset size          Medium -> large                       Small -> moderate
-Supported use cases           Standard models                      Broader model support
-Peak memory usage             Chunk-bounded                        Full batch resident
-Writes to disk                Yes                                  No
-Return type                   :external:class:`xarray.DataTree`    :external:class:`xarray.DataTree` or :class:`dict`
-                                                                   (via ``return_datatree=False``)
-Custom batch sizing           Yes (``batch_size``)                 No (single pass)
-Device parallelism (sharding) Yes                                  No
-Automatic rerun               Yes (reruns as ``draw``)             No (final mode)
-Latency (small data)          Higher (I/O + orchestration)         Minimal
-============================= ==================================== =======================================================
+.. list-table::
+   :header-rows: 1
+   :widths: 22 27 27 24
+
+   * - Feature
+     - Streaming, persistent store (default)
+     - Streaming, memory store
+     - On-batch (``*_on_batch``)
+   * - Typical dataset size
+     - Medium to large
+     - Medium to large (result fits host RAM)
+     - Small to moderate
+   * - Supported use cases
+     - Standard models
+     - Standard models
+     - Broader model support
+   * - Peak memory usage
+     - Chunk-bounded
+     - Full result resident
+     - Full batch resident
+   * - Writes to disk
+     - Yes
+     - No
+     - No
+   * - Result survives the process
+     - Yes (reopenable Zarr_ artifact)
+     - No
+     - No
+   * - Return type
+     - Lazy :external:class:`xarray.DataTree` (Dask_ over Zarr_ chunks)
+     - Lazy :external:class:`xarray.DataTree` (Dask_ over resident chunks)
+     - Eager :external:class:`xarray.DataTree`, or :class:`dict` via ``return_datatree=False``
+   * - Custom batch sizing
+     - Yes (``batch_size``)
+     - Yes (``batch_size``)
+     - No (single pass)
+   * - Device parallelism (sharding)
+     - Yes
+     - Yes
+     - No
+   * - Automatic rerun
+     - Yes (reruns as ``draw``)
+     - Yes (reruns as ``draw``)
+     - No (final mode)
+   * - Latency (small data)
+     - Higher (I/O + orchestration)
+     - Moderate (orchestration)
+     - Minimal
 
 Capability Matrix
 ^^^^^^^^^^^^^^^^^
 =============================== ===================================================== ==============================================================
-Capability                      Disk-backed (default)                                 On-batch (``*_on_batch``)
+Capability                      Streaming (default)                                   On-batch (``*_on_batch``)
 =============================== ===================================================== ==============================================================
 Full dataset training           :meth:`~aimz.ImpactModel.fit`                         :meth:`~aimz.ImpactModel.fit_on_batch`
 Single training step            N/A                                                   :meth:`~aimz.ImpactModel.train_on_batch`
@@ -70,14 +104,47 @@ Effect estimation               :meth:`~aimz.ImpactModel.estimate_effect`       
 =============================== ===================================================== ==============================================================
 
 
+.. _result-store:
+
+Choosing a Result Store
+-----------------------
+Every streaming method accepts a ``store`` argument selecting where the streamed batches accumulate; the batched (and sharded) execution is identical either way.
+
+Persistent (default)
+^^^^^^^^^^^^^^^^^^^^
+``store="persistent"`` streams batches into a Zarr_ store under ``output_dir`` (a model-owned temporary directory by default) and returns a lazy, Dask_-backed :external:class:`xarray.DataTree` recording the artifact's location in its ``artifact_path`` attribute.
+The artifact outlives the call: it can be reopened without rerunning inference (see :ref:`reopening-persisted-outputs`), and the temporary directory is managed through :meth:`~aimz.ImpactModel.cleanup` (see :doc:`cleanup`).
+
+.. _in-memory-results:
+
+Memory
+^^^^^^
+``store="memory"`` retains the streamed batches in host memory instead of writing them:
+
+.. code-block:: python
+
+    dt = im.predict(X, store="memory")
+
+The returned :external:class:`xarray.DataTree` has the same groups, dimensions, coordinates, and chunk structure as the persistent result — a lazy, Dask_-backed tree — except that its chunks *are* the resident batch arrays.
+Downstream summaries, group-bys, quantiles, and :meth:`~aimz.ImpactModel.estimate_effect` contrasts still parallelize across chunks exactly as they do for the persistent tree, but read directly from memory with no file I/O or chunk decoding.
+Call :external:meth:`~xarray.DataTree.load` on the result (or :external:meth:`~xarray.DataArray.load` on a variable) to materialize plain eager NumPy arrays — for example when iterating on many small selections, where per-operation Dask_ scheduling overhead dominates.
+
+Use it when the complete result comfortably fits in host memory.
+``output_dir`` does not apply and must be left ``None``.
+Unlike the on-batch methods, ``store="memory"`` still batches — and, on multiple devices, shards — the computation, so it handles inputs that a single unbatched pass cannot.
+
+
 Quick Recommendations
 ---------------------
-* Moderate or large data, or need persisted outputs: use disk-backed (e.g., :meth:`~aimz.ImpactModel.fit`, :meth:`~aimz.ImpactModel.predict`).
-* Small data, rapid iteration, CI, or read-only / ephemeral filesystem: use on-batch (``*_on_batch``).
-* If :meth:`~aimz.ImpactModel.predict` warns that posterior sample shapes are not compatible with ``shard_axis="obs"``, it automatically reruns under ``shard_axis="draw"``; pass ``shard_axis="draw"`` explicitly to silence the warning.
+* Moderate or large data: use the streaming methods (e.g., :meth:`~aimz.ImpactModel.fit`, :meth:`~aimz.ImpactModel.predict`).
+* Need results beyond the model's lifetime: keep the default persistent store and pass an explicit ``output_dir``.
+* Results fit in RAM and you iterate on summaries, group-bys, or plots: pass ``store="memory"`` to skip the Zarr_ layer — same lazy Dask_ tree, chunks resident in memory — while keeping batched (and sharded) execution; see :ref:`in-memory-results`.
+* Small data, rapid iteration, CI, or read-only / ephemeral filesystem: use on-batch (``*_on_batch``), or streaming with ``store="memory"``, which also writes nothing.
+* If :meth:`~aimz.ImpactModel.predict` warns that posterior sample shapes are not compatible with ``shard_axis="obs"``, it automatically reruns under ``shard_axis="draw"``.
+  Pass ``shard_axis="draw"`` explicitly to silence the warning.
   For posterior shapes that remain incompatible with chunked execution, call :meth:`~aimz.ImpactModel.predict_on_batch` directly.
 * Custom training loop: iterate with :meth:`~aimz.ImpactModel.train_on_batch`.
-* Need multi-device (sharding) execution: disk-backed; see :doc:`sharding` for choosing ``shard_axis``.
+* Need multi-device (sharding) execution: streaming; see :doc:`sharding` for choosing ``shard_axis``.
 * Need raw NumPy/dict outputs (no :external:class:`xarray.DataTree`): on-batch with ``return_datatree=False``.
 
 .. note::
@@ -89,7 +156,8 @@ Quick Recommendations
 Example: :meth:`~aimz.ImpactModel.predict` with an Automatic Rerun
 -------------------------------------------------------------------
 
-A common scenario for the rerun warning occurs when the model contains **local latent variables**, which make posterior sample shapes incompatible with data-parallel (observation-sharded) execution; :meth:`~aimz.ImpactModel.predict` then warns and reruns under ``shard_axis="draw"``.
+A common scenario for the rerun warning occurs when the model contains **local latent variables**, which make posterior sample shapes incompatible with data-parallel (observation-sharded) execution.
+:meth:`~aimz.ImpactModel.predict` then warns and reruns under ``shard_axis="draw"``.
 The example below illustrates this case.
 
 .. jupyter-execute::
@@ -146,8 +214,10 @@ The example below illustrates this case.
 
 Reopening Persisted Outputs
 ---------------------------
-When you pass an explicit ``output_dir``, each call writes one subdirectory containing a Zarr_ group with one array per return site; its path is recorded in the returned tree's ``artifact_path`` attribute (the attribute is recorded for temporary-root outputs as well).
-Only the sampled arrays and their dimension names are persisted; coordinates and attributes are not stored on disk.
+When you pass an explicit ``output_dir``, each persistent-store call writes one subdirectory containing a Zarr_ group with one array per return site.
+Its path is recorded in the returned tree's ``artifact_path`` attribute (the attribute is recorded for temporary-root outputs as well).
+Only the sampled arrays and their dimension names are persisted.
+Coordinates and attributes are not stored on disk.
 
 To reconstruct the same :external:class:`xarray.DataTree` from the files alone, mirror that read-time step:
 

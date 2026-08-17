@@ -5,7 +5,7 @@ User Guide
    :maxdepth: 1
 
    installation
-   disk_and_on_batch
+   streaming_and_on_batch
    sharding
    sampling
    cleanup

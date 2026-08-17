@@ -55,7 +55,10 @@ from aimz.model._streaming import (
 )
 from aimz.model.kernel_spec import KernelSpec
 from aimz.sampling._forward import _sample_forward
-from aimz.utils._format import _build_datatree, _dict_to_datatree
+from aimz.utils._format import (
+    _build_datatree,
+    _dict_to_datatree,
+)
 from aimz.utils._kwargs import _group_kwargs
 from aimz.utils._validation import (
     _check_is_fitted,
@@ -65,6 +68,7 @@ from aimz.utils._validation import (
     _validate_group,
     _validate_kernel_body,
     _validate_shard_axis,
+    _validate_store,
     _validate_X_y_to_jax,
 )
 from aimz.utils.data._input_setup import (
@@ -74,6 +78,8 @@ from aimz.utils.data._input_setup import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sized
+
+    from dask.array import Array as DaskArray
 
     from aimz.utils.data import ArrayLoader
 
@@ -481,6 +487,51 @@ class ImpactModel(BaseModel):
 
         return artifact_path
 
+    def _stream_to_datatree(
+        self,
+        write: Callable[[Path | None], dict[str, DaskArray] | None],
+        *,
+        store: str,
+        output_dir: str | Path | None,
+        group: str,
+    ) -> xr.DataTree:
+        """Run one streamed write and assemble its output tree.
+
+        The single place where the result store forks: ``store="persistent"`` creates
+        the call-specific artifact path, streams into it (removing it again if the
+        stream fails), and reads it back lazily; ``store="memory"`` retains the
+        streamed batches in host memory and assembles the tree over them directly.
+
+        Args:
+            write: Runs the streamed write against the given artifact path (``None``
+                for in-memory accumulation) and returns the accumulated site arrays,
+                if any.
+            store: The result store, ``"persistent"`` or ``"memory"``.
+            output_dir: Base directory for disk-backed outputs.
+            group: Output group name for the resulting tree.
+
+        Returns:
+            The output tree: lazy in both modes, Dask-backed by the Zarr store for
+            ``"persistent"`` and by the retained in-memory batches for ``"memory"``.
+        """
+        artifact_path = (
+            self._create_artifact_path(output_dir) if store == "persistent" else None
+        )
+        try:
+            result = write(artifact_path)
+        except BaseException:
+            if artifact_path is not None:
+                rmtree(artifact_path, ignore_errors=True)
+            raise
+        if artifact_path is None:
+            return _build_datatree(
+                cast("dict[str, DaskArray]", result),
+                group=group,
+                posterior=self.posterior,
+            )
+
+        return _build_datatree(artifact_path, group=group, posterior=self.posterior)
+
     def _plan_obs_batching(
         self,
         X: ArrayLike | ArrayLoader,
@@ -585,12 +636,11 @@ class ImpactModel(BaseModel):
         if not return_datatree:
             return prior_predictive_samples
 
-        out = xr.DataTree(name="root")
-        out["prior_predictive"] = _dict_to_datatree(prior_predictive_samples)
-        if self.posterior:
-            out["posterior"] = _dict_to_datatree(self.posterior)
-
-        return out
+        return _build_datatree(
+            prior_predictive_samples,
+            group="prior_predictive",
+            posterior=self.posterior,
+        )
 
     def sample_prior_predictive(
         self,
@@ -601,6 +651,7 @@ class ImpactModel(BaseModel):
         return_sites: str | Iterable[str] | None = None,
         shard_axis: Literal["obs", "draw"] = "obs",
         batch_size: int | None = None,
+        store: Literal["persistent", "memory"] = "persistent",
         output_dir: str | Path | None = None,
         progress: bool = True,
         **kwargs: object,
@@ -608,7 +659,8 @@ class ImpactModel(BaseModel):
         """Draw samples from the prior predictive distribution.
 
         Results are written to disk in the Zarr format, with computing and file writing
-        decoupled and executed concurrently.
+        decoupled and executed concurrently. Pass ``store="memory"`` to accumulate the
+        results in host memory instead.
 
         Args:
             X (ArrayLike): Input data. The leading axis is the observation axis.
@@ -624,6 +676,11 @@ class ImpactModel(BaseModel):
                 ``shard_axis="obs"`` and from the draws under ``shard_axis="draw"``.
                 Also used as the chunk size when storing results. If ``None``, it is
                 chosen automatically.
+            store: Where results accumulate. ``"persistent"`` (default) streams
+                batches to a
+                Zarr store under ``output_dir`` and returns a lazy, Dask-backed tree
+                recording its ``artifact_path`` attribute. ``"memory"`` retains the
+                batches in host memory as the returned tree's chunks.
             output_dir: The directory where the outputs will be saved. If the specified
                 directory does not exist, it will be created automatically. If ``None``,
                 a model-owned temporary directory is used. A subdirectory is generated
@@ -643,19 +700,22 @@ class ImpactModel(BaseModel):
         Raises:
             TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
                 argument.
-            ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``.
+            ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``, ``store`` is
+                not ``"persistent"`` or ``"memory"``, or ``output_dir`` is passed with
+                ``store="memory"``.
             NotImplementedError: If a return site's axis-1 size does not match the
                 input batch size (``shard_axis="obs"`` only).
 
         See Also:
-            :meth:`~aimz.ImpactModel.sample_prior_predictive_on_batch` for an
-            in-memory alternative.
+            :meth:`~aimz.ImpactModel.sample_prior_predictive_on_batch` for a
+            single-batch, in-memory alternative.
 
             :meth:`~aimz.ImpactModel.cleanup` to remove the temporary directory if
             created.
         """
         _validate_shard_axis(shard_axis, X=X)
         _validate_batch_size(batch_size, X=X)
+        _validate_store(store, output_dir=output_dir)
         _validate_aligned_inputs(X, y=None, kwargs=kwargs)
 
         args_bound = self._bind_kernel_args(X, kwargs=kwargs)
@@ -675,10 +735,8 @@ class ImpactModel(BaseModel):
         if rng_key is None:
             self._rng_key, rng_key = random.split(self._rng_key)
 
-        artifact_path = self._create_artifact_path(output_dir)
-
-        try:
-            self._streamer.write_predictive(
+        return self._stream_to_datatree(
+            lambda artifact_path: self._streamer.write_predictive(
                 _WriteRequest(
                     shard_axis,
                     X=X,
@@ -694,15 +752,10 @@ class ImpactModel(BaseModel):
                 rng_key=rng_key,
                 group="prior_predictive",
                 posterior=self.posterior,
-            )
-        except BaseException:
-            rmtree(artifact_path, ignore_errors=True)
-            raise
-
-        return _build_datatree(
-            artifact_path,
+            ),
+            store=store,
+            output_dir=output_dir,
             group="prior_predictive",
-            posterior=self.posterior,
         )
 
     def sample(
@@ -770,10 +823,7 @@ class ImpactModel(BaseModel):
         if not return_datatree:
             return posterior_samples
 
-        out = xr.DataTree(name="root")
-        out["posterior"] = _dict_to_datatree(posterior_samples)
-
-        return out
+        return _build_datatree(posterior_samples, group="posterior")
 
     def sample_posterior_predictive_on_batch(
         self,
@@ -834,6 +884,7 @@ class ImpactModel(BaseModel):
         return_sites: str | Iterable[str] | None = None,
         shard_axis: Literal["obs", "draw"] = "obs",
         batch_size: int | None = None,
+        store: Literal["persistent", "memory"] = "persistent",
         output_dir: str | Path | None = None,
         progress: bool = True,
         **kwargs: object,
@@ -867,6 +918,11 @@ class ImpactModel(BaseModel):
                 chosen automatically.
                 Ignored if ``X`` is a data loader, in which case the data loader is
                 expected to handle batching internally.
+            store: Where results accumulate. ``"persistent"`` (default) streams
+                batches to a
+                Zarr store under ``output_dir`` and returns a lazy, Dask-backed tree
+                recording its ``artifact_path`` attribute. ``"memory"`` retains the
+                batches in host memory as the returned tree's chunks.
             output_dir: The directory where the outputs will be saved. If the specified
                 directory does not exist, it will be created automatically. If ``None``,
                 a model-owned temporary directory is used. A subdirectory is generated
@@ -886,7 +942,9 @@ class ImpactModel(BaseModel):
         Raises:
             TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
                 argument, or ``shard_axis="draw"`` is used with a data loader ``X``.
-            ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``.
+            ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``, ``store`` is
+                not ``"persistent"`` or ``"memory"``, or ``output_dir`` is passed with
+                ``store="memory"``.
 
         See Also:
             :meth:`~aimz.ImpactModel.predict()`.
@@ -899,6 +957,7 @@ class ImpactModel(BaseModel):
             return_sites=return_sites,
             batch_size=batch_size,
             shard_axis=shard_axis,
+            store=store,
             output_dir=output_dir,
             progress=progress,
             **kwargs,
@@ -1135,6 +1194,7 @@ class ImpactModel(BaseModel):
             num_samples=num_samples,
             shuffle=shuffle,
             device=None,
+            stacklevel=3,
             **kwargs,
         )
 
@@ -1338,14 +1398,11 @@ class ImpactModel(BaseModel):
         if not return_datatree:
             return samples
 
-        out = xr.DataTree(name="root")
-        if self.posterior:
-            out["posterior"] = _dict_to_datatree(self.posterior)
-        out["posterior_predictive" if in_sample else "predictions"] = _dict_to_datatree(
+        return _build_datatree(
             samples,
+            group="posterior_predictive" if in_sample else "predictions",
+            posterior=self.posterior,
         )
-
-        return out
 
     def predict(
         self,
@@ -1357,6 +1414,7 @@ class ImpactModel(BaseModel):
         return_sites: str | Iterable[str] | None = None,
         shard_axis: Literal["obs", "draw"] = "obs",
         batch_size: int | None = None,
+        store: Literal["persistent", "memory"] = "persistent",
         output_dir: str | Path | None = None,
         progress: bool = True,
         **kwargs: object,
@@ -1367,7 +1425,8 @@ class ImpactModel(BaseModel):
         predictions. It is optimized for batch processing of large input data and is not
         recommended for use in loops that process only a few inputs at a time. Results
         are written to disk in the Zarr format, with sampling and file writing decoupled
-        and executed concurrently.
+        and executed concurrently. Pass ``store="memory"`` to accumulate the results in
+        host memory instead.
 
         Args:
             X (ArrayLike | ArrayLoader): Input data. If array-like, the leading axis is
@@ -1399,6 +1458,11 @@ class ImpactModel(BaseModel):
                 chosen automatically.
                 Ignored if ``X`` is a data loader, in which case the data loader is
                 expected to handle batching internally.
+            store: Where results accumulate. ``"persistent"`` (default) streams
+                batches to a
+                Zarr store under ``output_dir`` and returns a lazy, Dask-backed tree
+                recording its ``artifact_path`` attribute. ``"memory"`` retains the
+                batches in host memory as the returned tree's chunks.
             output_dir: The directory where the outputs will be saved. If the specified
                 directory does not exist, it will be created automatically. If ``None``,
                 a model-owned temporary directory is used. A subdirectory is generated
@@ -1418,7 +1482,9 @@ class ImpactModel(BaseModel):
         Raises:
             TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
                 argument, or ``shard_axis="draw"`` is used with a data loader ``X``.
-            ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``.
+            ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``, ``store`` is
+                not ``"persistent"`` or ``"memory"``, or ``output_dir`` is passed with
+                ``store="memory"``.
             NotImplementedError: If a return site's axis-1 size does not match the
                 input batch size (``shard_axis="obs"`` only).
 
@@ -1429,6 +1495,7 @@ class ImpactModel(BaseModel):
         _check_is_fitted(self)
         _validate_shard_axis(shard_axis, X=X)
         _validate_batch_size(batch_size, X=X)
+        _validate_store(store, output_dir=output_dir)
         _validate_aligned_inputs(X, y=None, kwargs=kwargs)
         # No posterior to shard means draw-parallel has nothing to chunk, so it behaves
         # identically to the data-parallel path.
@@ -1458,6 +1525,7 @@ class ImpactModel(BaseModel):
                     return_sites=return_sites,
                     shard_axis="draw",
                     batch_size=batch_size,
+                    store=store,
                     output_dir=output_dir,
                     progress=progress,
                     **kwargs,
@@ -1477,10 +1545,8 @@ class ImpactModel(BaseModel):
 
         group = "posterior_predictive" if in_sample else "predictions"
 
-        artifact_path = self._create_artifact_path(output_dir)
-
-        try:
-            self._streamer.write_predictive(
+        return self._stream_to_datatree(
+            lambda artifact_path: self._streamer.write_predictive(
                 _WriteRequest(
                     shard_axis,
                     X=X,
@@ -1496,15 +1562,10 @@ class ImpactModel(BaseModel):
                 rng_key=rng_key,
                 group=group,
                 posterior=self.posterior,
-            )
-        except BaseException:
-            rmtree(artifact_path, ignore_errors=True)
-            raise
-
-        return _build_datatree(
-            artifact_path,
+            ),
+            store=store,
+            output_dir=output_dir,
             group=group,
-            posterior=self.posterior,
         )
 
     def estimate_effect(
@@ -1600,8 +1661,8 @@ class ImpactModel(BaseModel):
         if self.posterior:
             out["posterior"] = _dict_to_datatree(self.posterior)
         # Record each scenario's artifact path when the scenario was computed by a
-        # disk-backed method. In-memory (on_batch / *_on_batch) results carry no
-        # artifact attrs.
+        # disk-backed method. In-memory (on_batch / *_on_batch / store="memory")
+        # results carry no artifact attrs.
         for suffix, tree in (
             ("baseline", dt_baseline),
             ("intervention", dt_intervention),
@@ -1619,6 +1680,7 @@ class ImpactModel(BaseModel):
         *,
         shard_axis: Literal["obs", "draw"] = "obs",
         batch_size: int | None = None,
+        store: Literal["persistent", "memory"] = "persistent",
         output_dir: str | Path | None = None,
         progress: bool = True,
         **kwargs: object,
@@ -1626,7 +1688,8 @@ class ImpactModel(BaseModel):
         """Compute the log-likelihood of the data under the given model.
 
         Results are written to disk in the Zarr format, with computing and file writing
-        decoupled and executed concurrently.
+        decoupled and executed concurrently. Pass ``store="memory"`` to accumulate the
+        results in host memory instead.
 
         Args:
             X (ArrayLike | ArrayLoader): Input data. If array-like, the leading axis is
@@ -1646,6 +1709,11 @@ class ImpactModel(BaseModel):
                 chosen automatically.
                 Ignored if ``X`` is a data loader, in which case the data loader is
                 expected to handle batching internally.
+            store: Where results accumulate. ``"persistent"`` (default) streams
+                batches to a
+                Zarr store under ``output_dir`` and returns a lazy, Dask-backed tree
+                recording its ``artifact_path`` attribute. ``"memory"`` retains the
+                batches in host memory as the returned tree's chunks.
             output_dir: The directory where the outputs will be saved. If the specified
                 directory does not exist, it will be created automatically. If ``None``,
                 a model-owned temporary directory is used. A subdirectory is generated
@@ -1664,7 +1732,9 @@ class ImpactModel(BaseModel):
 
         Raises:
             TypeError: If ``shard_axis="draw"`` is used with a data loader ``X``.
-            ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``.
+            ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``, ``store`` is
+                not ``"persistent"`` or ``"memory"``, or ``output_dir`` is passed with
+                ``store="memory"``.
             NotImplementedError: If a return site's axis-1 size does not match the
                 input batch size (``shard_axis="obs"`` only).
 
@@ -1675,6 +1745,7 @@ class ImpactModel(BaseModel):
         _check_is_fitted(self)
         _validate_shard_axis(shard_axis, X=X)
         _validate_batch_size(batch_size, X=X)
+        _validate_store(store, output_dir=output_dir)
         _validate_aligned_inputs(X, y=y, kwargs=kwargs)
         if y is None and isinstance(X, ArrayLike):
             msg = (
@@ -1705,6 +1776,7 @@ class ImpactModel(BaseModel):
                 y,
                 batch_size=batch_size,
                 shard_axis="draw",
+                store=store,
                 output_dir=output_dir,
                 progress=progress,
                 **kwargs,
@@ -1720,10 +1792,8 @@ class ImpactModel(BaseModel):
             self.kernel if self.posterior else seed(self.kernel, rng_seed=self.rng_key)
         )
 
-        artifact_path = self._create_artifact_path(output_dir)
-
-        try:
-            self._streamer.write_log_likelihood(
+        return self._stream_to_datatree(
+            lambda artifact_path: self._streamer.write_log_likelihood(
                 _WriteRequest(
                     shard_axis,
                     X=X,
@@ -1738,15 +1808,10 @@ class ImpactModel(BaseModel):
                 kernel=kernel,
                 posterior=self.posterior,
                 y=y,
-            )
-        except BaseException:
-            rmtree(artifact_path, ignore_errors=True)
-            raise
-
-        return _build_datatree(
-            artifact_path,
+            ),
+            store=store,
+            output_dir=output_dir,
             group="log_likelihood",
-            posterior=self.posterior,
         )
 
     def cleanup(self) -> None:

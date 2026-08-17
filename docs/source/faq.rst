@@ -140,11 +140,12 @@ Why do I not see a ``posterior`` group in the output?
 It appears in the returned :class:`~xarray.DataTree` only if posterior samples are available (fitted or injected).
 
 
-Where is the on-disk output written?
+Where is the persistent output written?
 ------------------------------------
-All outputs are written under the directory passed via ``output_dir``.
+Currently, persistent-store outputs (the streaming methods' default) are written under the directory passed via ``output_dir``.
 If ``output_dir=None``, a temporary directory is created (accessible via :attr:`~aimz.ImpactModel.temp_dir`) and removed when the model is cleaned up (either explicitly with :meth:`~aimz.ImpactModel.cleanup` or when the instance is garbage collected).
 The returned :class:`~xarray.DataTree` records the call's artifact path in an ``artifact_path`` attribute on both the root tree and the group node; its parent is the ``output_dir`` (or temporary root) it was written under.
+Calls made with ``store="memory"`` write nothing and return a Dask-backed tree whose chunks live in host memory, with no ``artifact_path`` attribute, and leave :attr:`~aimz.ImpactModel.temp_dir` untouched.
 
 
 Does serialization persist the posterior samples?
