@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A keyword argument named after {attr}`~aimz.ImpactModel.param_input` or {attr}`~aimz.ImpactModel.param_output` now raises a `TypeError` in every entry point. Previously it resolved inconsistently: {meth}`~aimz.ImpactModel.predict` computed with `X` and silently dropped the keyword argument, {meth}`~aimz.ImpactModel.predict_on_batch` did the reverse, and the fitting methods silently trained on the keyword argument instead of `X` ([#303](https://github.com/markean/aimz/issues/303)).
 - {meth}`~aimz.ImpactModel.set_posterior_sample` now removes the output site from the provided samples with a `UserWarning` ([#305](https://github.com/markean/aimz/issues/305)).
 - {meth}`~aimz.ImpactModel.log_likelihood` now substitutes only latent sample sites from the posterior: `deterministic` sites are recomputed from the trace and observed sites score the passed data, so injected posteriors carrying such sites can no longer override either ([#305](https://github.com/markean/aimz/issues/305)).
+- {meth}`~aimz.ImpactModel.sample` with `return_sites=[]` now returns no sites instead of falling back to all latent sites, matching the predictive methods ([#307](https://github.com/markean/aimz/issues/307)).
+- {meth}`~aimz.ImpactModel.estimate_effect` no longer truth-tests its arguments: an explicitly passed output tree or arguments dictionary is honored even when empty ([#307](https://github.com/markean/aimz/issues/307)).
+- {class}`~aimz.utils.data.ArrayLoader` now pads batches by the device count of the sharding the data is placed on, rather than the host's device count, avoiding unnecessary padding for shardings that span fewer devices ([#307](https://github.com/markean/aimz/issues/307)).
 
 ## [v0.14.0](https://github.com/markean/aimz/releases/tag/v0.14.0) - 2026-07-24
 

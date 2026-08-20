@@ -39,7 +39,10 @@ class KernelSpec:
     Notes:
         Re-tracing only upgrades a prior-only spec (``output_observed`` is ``False``) to
         one that includes an observed output, merging the newly discovered sites with
-        the existing ones; the user kernel is assumed immutable after construction.
+        the existing ones; the user kernel is assumed immutable after construction, and
+        its site structure is assumed independent of the call's arguments. Sites that
+        appear only under specific arguments are not discovered by later calls and must
+        be requested explicitly via ``return_sites``.
     """
 
     traced: bool

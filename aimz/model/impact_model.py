@@ -837,7 +837,7 @@ class ImpactModel(BaseModel):
                     ),
                     rng_keys=random.split(rng_key, num=num_samples),
                     return_sites=self._coerce_return_sites(return_sites)
-                    if return_sites
+                    if return_sites is not None
                     else None,
                     samples=None,
                     model_kwargs=None,
@@ -880,7 +880,8 @@ class ImpactModel(BaseModel):
             **kwargs: Additional arguments passed to the model.
 
         Returns:
-            Posterior predictive samples. Posterior samples are included if available.
+            Posterior predictive samples. Posterior samples are included if available
+            when a :external:class:`~xarray.DataTree` is returned.
 
         Raises:
             TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
@@ -1430,7 +1431,9 @@ class ImpactModel(BaseModel):
             **kwargs: Additional arguments passed to the model.
 
         Returns:
-            Posterior predictive samples. Posterior samples are included if available.
+            Posterior predictive samples. Posterior samples are included if available
+            when a :external:class:`~xarray.DataTree` is returned; the dictionary
+            contains only the requested sites.
 
         Raises:
             NotFittedError: If the model is not fitted.
@@ -1690,17 +1693,17 @@ class ImpactModel(BaseModel):
 
         _predict = self.predict_on_batch if on_batch else self.predict
 
-        if output_baseline:
+        if output_baseline is not None:
             dt_baseline = output_baseline
-        elif args_baseline:
+        elif args_baseline is not None:
             dt_baseline = _predict(**args_baseline)
         else:
             msg = "Either `output_baseline` or `args_baseline` must be provided."
             raise ValueError(msg)
 
-        if output_intervention:
+        if output_intervention is not None:
             dt_intervention = output_intervention
-        elif args_intervention:
+        elif args_intervention is not None:
             dt_intervention = _predict(**args_intervention)
         else:
             msg = (
