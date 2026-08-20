@@ -40,6 +40,7 @@ from aimz.mlflow import (
     autolog,
     get_default_conda_env,
     load_model,
+    log_model,
     save_model,
 )
 
@@ -194,6 +195,33 @@ def test_load_model_returns_raw_impact_model(
     reloaded = load_model(str(tmp_path / "model"))
 
     assert isinstance(reloaded, ImpactModel)
+
+
+def test_log_model_round_trip_outputs_match(
+    im_lm_svi_fitted: ImpactModel,
+    synthetic_data: tuple[Array, Array],
+) -> None:
+    """A logged model reloads predicting identically to the original.
+
+    Across a :func:`~aimz.mlflow.log_model` -> :func:`~aimz.mlflow.load_model` round
+    trip, the reloaded model must reproduce predictions draw-for-draw under the same
+    explicit PRNG key, without a refit.
+    """
+    X, _ = synthetic_data
+    with mlflow.start_run():
+        info = log_model(im_lm_svi_fitted, name="model")
+
+    reloaded = load_model(info.model_uri)
+
+    expected = cast(
+        "xr.DataTree",
+        im_lm_svi_fitted.predict_on_batch(X, rng_key=random.key(0)),
+    )
+    actual = cast("xr.DataTree", reloaded.predict_on_batch(X, rng_key=random.key(0)))
+    np.testing.assert_array_equal(
+        np.asarray(actual["posterior_predictive"]["y"]),
+        np.asarray(expected["posterior_predictive"]["y"]),
+    )
 
 
 def test_load_model_disallowed_when_pickle_deserialization_disabled(

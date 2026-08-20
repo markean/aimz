@@ -83,6 +83,7 @@ per-file-ignores = { "aimz/model/_core.py" = [
     "PLR0913", # too-many-arguments
     "PLR0917", # too-many-positional-arguments
     "PLC0415", # import-outside-top-level
+    "SLF001",  # private-member-access
 ], "docs*" = [
     "A001", # builtin-variable-shadowing
     "F401", # unused-import

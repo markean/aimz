@@ -15,10 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The tree returned by {meth}`~aimz.ImpactModel.sample_prior_predictive_on_batch` now lists its `posterior` group before `prior_predictive` ([#293](https://github.com/markean/aimz/issues/293)).
 - Disk-backed Zarr arrays are now compressed with byte-shuffled Zstandard ([#293](https://github.com/markean/aimz/issues/293)).
+- {func}`~aimz.mlflow.get_default_pip_requirements`, and therefore the environments captured by {func}`~aimz.mlflow.save_model` and {func}`~aimz.mlflow.log_model`, now pin `jax` and `numpyro` alongside `aimz`. The pickled model contains serialized state from both libraries that must be restored against the versions used at save time, which the previous floor-only constraints inherited from the package metadata did not guarantee ([#296](https://github.com/markean/aimz/issues/296)).
+- The {mod}`aimz.mlflow` documentation now states that REST serving (e.g. `mlflow models serve`) is not supported, as the MLflow scoring server cannot serialize the {class}`xarray.DataTree` returned by predictions; the pyfunc flavor is intended for batch inference in Python ([#296](https://github.com/markean/aimz/issues/296)).
 
 ### Fixed
 
 - An interrupted or failed streamed call no longer keeps its intermediate buffers reachable through the exception's traceback. The in-flight pipeline results and the current batch are dropped in the cleanup path for both stores, and `store="memory"` additionally releases its partially accumulated results ([#293](https://github.com/markean/aimz/issues/293)).
+- Predictions through the pyfunc flavor now default to the in-memory result store. Previously each call streamed its results to a Zarr artifact in the model's temporary directory with no cleanup path at the pyfunc layer, and the lazily-read tree silently returned zeros if the model was garbage-collected before the results were consumed. An explicitly passed `store` is still honored ([#296](https://github.com/markean/aimz/issues/296)).
+- {func}`~aimz.mlflow.save_model` and {func}`~aimz.mlflow.log_model` no longer advance the model's internal PRNG key when inferring a signature from `input_example`, so saving a model leaves its future prediction stream unchanged ([#296](https://github.com/markean/aimz/issues/296)).
 
 ## [v0.14.0](https://github.com/markean/aimz/releases/tag/v0.14.0) - 2026-07-24
 
