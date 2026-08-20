@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The streaming methods now emit a `UserWarning` when a data loader with `shuffle=True` is passed ([#303](https://github.com/markean/aimz/issues/303)).
 - Kernel validation now rejects an output parameter whose default is falsy but not `None`; an array default now raises a `KernelValidationError` instead of a `ValueError` ([#303](https://github.com/markean/aimz/issues/303)).
 - A keyword argument named after {attr}`~aimz.ImpactModel.param_input` or {attr}`~aimz.ImpactModel.param_output` now raises a `TypeError` in every entry point. Previously it resolved inconsistently: {meth}`~aimz.ImpactModel.predict` computed with `X` and silently dropped the keyword argument, {meth}`~aimz.ImpactModel.predict_on_batch` did the reverse, and the fitting methods silently trained on the keyword argument instead of `X` ([#303](https://github.com/markean/aimz/issues/303)).
+- {meth}`~aimz.ImpactModel.set_posterior_sample` now removes the output site from the provided samples with a `UserWarning` ([#305](https://github.com/markean/aimz/issues/305)).
+- {meth}`~aimz.ImpactModel.log_likelihood` now substitutes only latent sample sites from the posterior: `deterministic` sites are recomputed from the trace and observed sites score the passed data, so injected posteriors carrying such sites can no longer override either ([#305](https://github.com/markean/aimz/issues/305)).
 
 ## [v0.14.0](https://github.com/markean/aimz/releases/tag/v0.14.0) - 2026-07-24
 
