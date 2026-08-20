@@ -19,7 +19,9 @@ This module exports aimz models with the following flavors:
 aimz (native) format
     This is the main flavor that can be loaded back into aimz.
 :py:mod:`mlflow.pyfunc`
-    Produced for use by generic pyfunc-based deployment tools and batch inference.
+    Produced for generic pyfunc-based batch inference in Python. Predictions are
+    returned as an :py:class:`xarray.DataTree`, which the MLflow scoring server does
+    not serialize, so REST serving (e.g. ``mlflow models serve``) is not supported.
 """
 
 from __future__ import annotations
@@ -121,7 +123,11 @@ def get_default_pip_requirements(*, include_cloudpickle: bool = False) -> list[s
         Calls to :func:`save_model()` and :func:`log_model()` produce a pip environment
         that, at minimum, contains these requirements.
     """
-    pip_deps = [_get_pinned_requirement("aimz")]
+    pip_deps = [
+        _get_pinned_requirement("aimz"),
+        _get_pinned_requirement("jax"),
+        _get_pinned_requirement("numpyro"),
+    ]
     if include_cloudpickle:
         pip_deps.append(_get_pinned_requirement("cloudpickle"))
 
@@ -206,8 +212,16 @@ def save_model(
     saved_example = _save_example(mlflow_model, input_example, str(path))
 
     if signature is None and saved_example is not None:
-        wrapped_model = _AimzModelWrapper(model)
-        signature = _infer_signature_from_input_example(saved_example, wrapped_model)
+        # Signature inference runs a real prediction; restore the rng key so that
+        # saving does not change the model's future prediction stream.
+        rng_key = model.rng_key
+        try:
+            signature = _infer_signature_from_input_example(
+                saved_example,
+                _AimzModelWrapper(model),
+            )
+        finally:
+            model._rng_key = rng_key
     elif signature is False:
         signature = None
 
@@ -551,12 +565,19 @@ class _AimzModelWrapper:
         Returns:
             Model predictions.
         """
+        # Results default to the in-memory store
         if isinstance(data, dict):
             return self.aimz_model.predict(
-                **cast("dict[str, Any]", data),
-                **(params or {}),
+                **{
+                    "store": "memory",
+                    **cast("dict[str, Any]", data),
+                    **(params or {}),
+                },
             )
-        return self.aimz_model.predict(cast("Any", data), **(params or {}))
+        return self.aimz_model.predict(
+            cast("Any", data),
+            **{"store": "memory", **(params or {})},
+        )
 
 
 @autologging_integration(FLAVOR_NAME)
