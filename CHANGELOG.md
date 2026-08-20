@@ -15,8 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The tree returned by {meth}`~aimz.ImpactModel.sample_prior_predictive_on_batch` now lists its `posterior` group before `prior_predictive` ([#293](https://github.com/markean/aimz/issues/293)).
 - Disk-backed Zarr arrays are now compressed with byte-shuffled Zstandard ([#293](https://github.com/markean/aimz/issues/293)).
-- {func}`~aimz.mlflow.get_default_pip_requirements`, and therefore the environments captured by {func}`~aimz.mlflow.save_model` and {func}`~aimz.mlflow.log_model`, now pin `jax` and `numpyro` alongside `aimz`. The pickled model contains serialized state from both libraries that must be restored against the versions used at save time, which the previous floor-only constraints inherited from the package metadata did not guarantee ([#296](https://github.com/markean/aimz/issues/296)).
-- The {mod}`aimz.mlflow` documentation now states that REST serving (e.g. `mlflow models serve`) is not supported, as the MLflow scoring server cannot serialize the {class}`xarray.DataTree` returned by predictions; the pyfunc flavor is intended for batch inference in Python ([#296](https://github.com/markean/aimz/issues/296)).
+- {func}`~aimz.mlflow.get_default_pip_requirements`, and therefore the environments captured by {func}`~aimz.mlflow.save_model` and {func}`~aimz.mlflow.log_model`, now pin `jax` and `numpyro` alongside `aimz` ([#296](https://github.com/markean/aimz/issues/296)).
 
 ### Fixed
 
