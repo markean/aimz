@@ -1168,6 +1168,13 @@ class ImpactModel(BaseModel):
             (e.g., using `NumPyro`_'s :external:func:`~numpyro.primitives.subsample` or
             similar constructs).
         """
+        _validate_aligned_inputs(X, y=y, kwargs=kwargs)
+        if y is None and isinstance(X, ArrayLike):
+            msg = (
+                "`y` is required for `fit()` when `X` is array-like. "
+                "Provide `y`, or give `X` as a data loader that carries it."
+            )
+            raise ValueError(msg)
         if isinstance(self.inference, MCMC):
             msg = (
                 "`.fit()` is not supported for MCMC inference. Use `.fit_on_batch()` "
