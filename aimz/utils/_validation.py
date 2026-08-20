@@ -47,26 +47,18 @@ def _is_arraylike(x: object) -> bool:
     return hasattr(x, "__len__") or hasattr(x, "shape") or hasattr(x, "__array__")
 
 
-def _check_is_fitted(model: ImpactModel, msg: str | None = None) -> None:
+def _check_is_fitted(model: ImpactModel) -> None:
     """Check if the model is fitted.
 
     Raises:
         NotFittedError: If the model has not been fitted.
     """
-    if msg is None:
+    if not model.is_fitted():
         msg = (
-            "This %(name)s instance is not fitted yet. Call ``.fit()`` with "
-            "appropriate arguments before using the model."
+            f"This {type(model).__name__} instance is not fitted yet. Call "
+            "``.fit()`` with appropriate arguments before using the model."
         )
-    if not _is_fitted(model):
-        raise NotFittedError(msg % {"name": type(model).__name__})
-
-
-def _is_fitted(model: ImpactModel) -> bool:
-    if hasattr(model, "_is_fitted"):
-        return model.is_fitted()
-
-    return any(v.endswith("_") and not v.startswith("__") for v in vars(model))
+        raise NotFittedError(msg)
 
 
 def _validate_group(dt_baseline: xr.DataTree, dt_intervention: xr.DataTree) -> str:

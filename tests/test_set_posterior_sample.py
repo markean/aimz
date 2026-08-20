@@ -26,7 +26,6 @@ from numpyro.infer import Predictive
 from numpyro.infer.svi import SVIRunResult
 
 from aimz import ImpactModel
-from aimz.utils._validation import _is_fitted
 from tests.conftest import lm
 
 if TYPE_CHECKING:
@@ -62,7 +61,7 @@ def test_set_posterior_sample(synthetic_data: tuple[Array, Array], vi: SVI) -> N
         chain=0,
     )
     im.set_posterior_sample({k: v.values for k, v in posterior_samples.items()})
-    assert _is_fitted(im), "Model fitting check failed"
+    assert im.is_fitted(), "Model fitting check failed"
     assert isinstance(im.vi_result, SVIRunResult)
     assert posterior_sample.keys() == im.posterior.keys()
     for key in posterior_sample:
