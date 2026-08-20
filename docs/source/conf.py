@@ -78,7 +78,6 @@ intersphinx_mapping = {
     "arviz": ("https://python.arviz.org/en/stable/", None),
     "mlflow": ("https://mlflow.org/docs/latest/api_reference/", None),
 }
-tls_verify = False
 
 
 def linkcode_resolve(domain: str, info: dict) -> str | None:
@@ -130,7 +129,7 @@ html_context = {
     "github_user": "markean",
     "github_repo": "aimz",
     "github_version": "main",
-    "doc_path": "doc",
+    "doc_path": "docs/source",
 }
 html_theme_options = {
     "github_url": "https://github.com/markean/aimz",
