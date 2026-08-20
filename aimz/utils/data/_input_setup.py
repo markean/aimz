@@ -160,7 +160,10 @@ def _setup_inputs(
         - The data loader for batching.
         - Extra keyword arguments to be passed downstream.
     """
-    kwargs_array, kwargs_extra = _group_kwargs(kwargs)
+    kwargs_array, kwargs_extra = _group_kwargs(
+        kwargs,
+        forbid=(param_input, param_output),
+    )
 
     if isinstance(X, ArrayLike):
         X = np.asarray(X)
@@ -203,6 +206,12 @@ def _setup_inputs(
         if y is not None:
             msg = "`y` must be `None` when `X` is already a data loader."
             raise TypeError(msg)
+        if X.shuffle and not shuffle:
+            msg = (
+                "The data loader shuffles, so results will not follow the data order. "
+                "Use `shuffle=False` to preserve it."
+            )
+            warn(msg, category=UserWarning, stacklevel=stacklevel)
         loader = X
         loader.device = device
     else:

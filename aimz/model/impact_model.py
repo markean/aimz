@@ -337,14 +337,23 @@ class ImpactModel(BaseModel):
             Mapping of fully bound keyword arguments to invoke the kernel.
 
         Raises:
-            TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
-                argument.
+            TypeError: If :attr:`~aimz.ImpactModel.param_input` or
+                :attr:`~aimz.ImpactModel.param_output` is passed as an argument.
         """
+        if self.param_input in kwargs:
+            msg = (
+                f"{self.param_input!r} is a reserved kernel parameter and cannot be "
+                "passed as a keyword argument."
+            )
+            raise TypeError(msg)
         args_bound = (
             signature(self.kernel).bind(**{self.param_input: X, **kwargs}).arguments
         )
         if self.param_output in args_bound:
-            msg = f"Specifying {self.param_output!r} is not allowed."
+            msg = (
+                f"{self.param_output!r} is a reserved kernel parameter and cannot be "
+                "passed as a keyword argument."
+            )
             raise TypeError(msg)
 
         return args_bound
@@ -1005,6 +1014,10 @@ class ImpactModel(BaseModel):
             necessary to capture the returned state externally unless explicitly needed.
             However, the returned loss value can be used for monitoring or logging.
         """
+        _, kwargs_extra = _group_kwargs(
+            kwargs,
+            forbid=(self.param_input, self.param_output),
+        )
         batch = {self.param_input: X, self.param_output: y, **kwargs}
 
         if self._vi_state is None:
@@ -1018,7 +1031,6 @@ class ImpactModel(BaseModel):
         # Cache one jitted update per set of non-array kwarg names: the names are baked
         # into `static_argnames`, so a call with different extras needs its own wrapper
         # rather than reusing a stale one.
-        _, kwargs_extra = _group_kwargs(kwargs)
         fn_key = tuple(sorted(kwargs_extra))
         fn_vi_update = self._fn_vi_update.get(fn_key)
         if fn_vi_update is None:
@@ -1081,6 +1093,13 @@ class ImpactModel(BaseModel):
         """
         X, y = _validate_X_y_to_jax(X, y=y)
 
+        for name in (self.param_input, self.param_output):
+            if name in kwargs:
+                msg = (
+                    f"{name!r} is a reserved kernel parameter and cannot be passed "
+                    "as a keyword argument."
+                )
+                raise TypeError(msg)
         # Validate the provided parameters against the kernel's signature
         args_bound = (
             signature(self.kernel)
