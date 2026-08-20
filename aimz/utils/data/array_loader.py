@@ -22,7 +22,7 @@ from warnings import warn
 
 import jax.numpy as jnp
 import numpy as np
-from jax import Array, device_put, local_device_count, random
+from jax import Array, device_put, random
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -34,7 +34,11 @@ if TYPE_CHECKING:
 
 
 class ArrayLoader:
-    """Data loader for batching and padding arrays."""
+    """Data loader for batching and padding arrays.
+
+    Passing a loader to a model method adopts it for the call: the method sets
+    ``device`` to its own setting and, when shuffling, iteration advances ``rng_key``.
+    """
 
     def __init__(
         self,
@@ -72,7 +76,6 @@ class ArrayLoader:
             warn(msg, category=UserWarning, stacklevel=2)
             rng_key = random.wrap_key_data(rng_key)
         self.rng_key = rng_key
-        self._num_devices = local_device_count()
         self.device = device
 
     def pad_array(
@@ -129,7 +132,7 @@ class ArrayLoader:
             end = start + self.batch_size
             batch_idx = indices[start:end]
             if self.device is not None:
-                n_pad = (-len(batch_idx)) % self._num_devices
+                n_pad = (-len(batch_idx)) % self.device.num_devices
                 if n_pad > 0:
                     batch = {
                         k: self.pad_array(arr[batch_idx], n_pad=n_pad)
