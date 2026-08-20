@@ -1842,4 +1842,11 @@ class ImpactModel(BaseModel):
             single instance.
         """
         for model in cls._models:
-            model.cleanup()
+            try:
+                model.cleanup()
+            except OSError:
+                logger.warning(
+                    "Failed to clean up the temporary directory at: %s",
+                    model.temp_dir,
+                    exc_info=True,
+                )
