@@ -19,14 +19,28 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
           python-version: "3.11"
+
+      - name: Verify version
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          PROJECT_VERSION="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          if [ "$PROJECT_VERSION" != "$REQUESTED_VERSION" ]; then
+            echo "::error::Requested version '$REQUESTED_VERSION' does not match pyproject.toml version '$PROJECT_VERSION'"
+            exit 1
+          fi
+
       - name: Install pypa/build
         run: python3 -m pip install build --user
+
       - name: Build a binary wheel and a source tarball
         run: python3 -m build
+
       - name: Store the distribution packages
         uses: actions/upload-artifact@v7
         with:
@@ -49,10 +63,12 @@ jobs:
         with:
           name: python-package-distributions
           path: dist/
+
       - name: Publish distribution 📦 to TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
 
   publish-to-pypi:
     name: Publish to PyPI
@@ -70,5 +86,6 @@ jobs:
         with:
           name: python-package-distributions
           path: dist/
+
       - name: Publish distribution 📦 to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
