@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - {meth}`~aimz.ImpactModel.fit` now validates its inputs like the other entry points: a 0-d or misaligned array keyword argument raises a `ValueError` naming the offending argument, and a missing `y` with an array-like `X` raises a clear `ValueError` instead of an internal `TypeError` from the training loop ([#299](https://github.com/markean/aimz/issues/299)).
 - {meth}`~aimz.ImpactModel.sample` on an MCMC model prepared via {meth}`~aimz.ImpactModel.set_posterior_sample` raises a clear `NotFittedError` instead of an `AttributeError` on the missing MCMC state; the same applies to an SVI model without a stored `vi_result` ([#299](https://github.com/markean/aimz/issues/299)).
 - {meth}`~aimz.ImpactModel.cleanup_models` no longer stops at the first model whose cleanup fails: the failure is logged as a warning and the remaining models are still cleaned up ([#299](https://github.com/markean/aimz/issues/299)).
+- The streaming entry points now accept list and tuple inputs: {class}`~aimz.utils.data.ArrayDataset` converts values that are not already JAX or NumPy arrays to NumPy arrays at construction, matching {meth}`~aimz.ImpactModel.predict_on_batch` ([#301](https://github.com/markean/aimz/issues/301)).
+- An empty `X` passed to a streaming entry point or {meth}`~aimz.ImpactModel.fit` raises a `ValueError` ([#301](https://github.com/markean/aimz/issues/301)).
+- {meth}`~aimz.ImpactModel.set_posterior_sample` now converts values that are not already JAX or NumPy arrays to NumPy arrays, and a 0-d value raises a `ValueError` ([#301](https://github.com/markean/aimz/issues/301)).
 
 ## [v0.14.0](https://github.com/markean/aimz/releases/tag/v0.14.0) - 2026-07-24
 
