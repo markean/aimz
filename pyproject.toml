@@ -69,7 +69,9 @@ extend-exclude = []
 
 [tool.ruff.lint]
 select = ["ALL"]
-ignore = []
+ignore = [
+    "COM812", # missing-trailing-comma
+]
 pep8-naming = { ignore-names = ["*X*"] }
 per-file-ignores = { "aimz/model/_core.py" = [
     "ANN001", # missing-type-function-argument
