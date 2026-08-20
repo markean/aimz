@@ -1337,7 +1337,18 @@ class ImpactModel(BaseModel):
             sites are not discovered; predictive methods return only the output site by
             default. Request ``deterministic`` (or other) sites explicitly via
             ``return_sites``.
+
+            Include only latent sample sites. The output site is removed with a
+            warning, but ``deterministic`` sites must be excluded by the caller —
+            if present, they override the values recomputed by
+            :meth:`~aimz.ImpactModel.log_likelihood`.
         """
+        if self.param_output in posterior_sample:
+            posterior_sample = {
+                k: v for k, v in posterior_sample.items() if k != self.param_output
+            }
+            msg = f"The output site {self.param_output!r} is removed."
+            warn(msg, category=UserWarning, stacklevel=2)
         batch_ndims = 1
         posterior_sample = {
             name: sample

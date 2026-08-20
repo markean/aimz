@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import TYPE_CHECKING
 
 import jax.numpy as jnp
@@ -70,6 +71,27 @@ def _pin_subsample_indices(msg: Message) -> Array | None:
     return jnp.arange(subsample_size)
 
 
+def _substitute_latent(msg: Message, sample: dict[str, Array]) -> Array | None:
+    """Provide the posterior value for a latent sample site.
+
+    Only latent sample sites take posterior values: deterministic sites are recomputed
+    from the trace, and observed sites score the passed data. This keeps injected
+    posteriors that carry output or deterministic sites from overriding either.
+
+    Args:
+        msg: A NumPyro effect-handler site message.
+        sample: One posterior draw, keyed by site name.
+
+    Returns:
+        The posterior value for a latent sample site, or ``None`` to leave the site
+        unchanged.
+    """
+    if msg["type"] == "deterministic" or msg.get("is_observed", False):
+        return None
+
+    return sample.get(msg["name"])
+
+
 def _log_likelihood(
     model: Callable,
     samples: dict[str, Array] | None,
@@ -98,7 +120,14 @@ def _log_likelihood(
 
     def _loglik_one_sample(sample: dict[str, Array]) -> dict[str, Array]:
         pinned_model = substitute(model, substitute_fn=_pin_subsample_indices)
-        substituted_model = substitute(pinned_model, sample) if sample else pinned_model
+        substituted_model = (
+            substitute(
+                pinned_model,
+                substitute_fn=partial(_substitute_latent, sample=sample),
+            )
+            if sample
+            else pinned_model
+        )
         model_trace = trace(substituted_model).get_trace(**(model_kwargs or {}))
 
         return {
