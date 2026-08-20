@@ -1310,7 +1310,8 @@ class ImpactModel(BaseModel):
             method chaining.
 
         Raises:
-            ValueError: If the batch shapes in ``posterior_sample`` are inconsistent.
+            ValueError: If ``posterior_sample`` is empty, a value is 0-D, or the batch
+                shapes in ``posterior_sample`` are inconsistent.
 
         Note:
             The kernel is not traced when samples are set this way, so ``deterministic``
@@ -1319,6 +1320,16 @@ class ImpactModel(BaseModel):
             ``return_sites``.
         """
         batch_ndims = 1
+        posterior_sample = {
+            name: sample
+            if isinstance(sample, (Array, np.ndarray))
+            else np.asarray(sample)
+            for name, sample in posterior_sample.items()
+        }
+        for name, sample in posterior_sample.items():
+            if sample.ndim < batch_ndims:
+                msg = f"`posterior_sample[{name!r}]` must have at least 1 dimension."
+                raise ValueError(msg)
         batch_shapes = {
             sample.shape[:batch_ndims] for sample in posterior_sample.values()
         }

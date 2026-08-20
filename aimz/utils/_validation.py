@@ -200,8 +200,8 @@ def _validate_aligned_inputs(
             checked.
 
     Raises:
-        ValueError: If any checked input is 0-D, or the inputs do not all share one
-            leading-axis size.
+        ValueError: If any checked input is 0-D, ``X`` is empty, or the inputs do not
+            all share one leading-axis size.
     """
     if not isinstance(X, ArrayLike):
         return
@@ -216,6 +216,9 @@ def _validate_aligned_inputs(
             msg = f"`{name}` must have at least 1 dimension."
             raise ValueError(msg)
         sizes[name] = np.shape(arr)[0]
+    if sizes["X"] == 0:
+        msg = "`X` must not be empty."
+        raise ValueError(msg)
     if len(set(sizes.values())) > 1:
         detail = ", ".join(f"{name}={size}" for name, size in sizes.items())
         msg = f"All inputs must have the same leading-axis size; got {detail}."

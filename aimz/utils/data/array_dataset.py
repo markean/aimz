@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 import jax.numpy as jnp
+import numpy as np
 from jax import Array
 
 if TYPE_CHECKING:
@@ -45,15 +46,20 @@ class ArrayDataset:
 
         Args:
             to_jax: Whether to convert the input arrays to JAX arrays.
-            **arrays: Named JAX arrays, NumPy arrays, or ``None``. At least one
-                non-``None`` array must be provided. All non-``None`` arrays must have
-                the same length.
+            **arrays: Named JAX arrays, NumPy arrays, or ``None``; other array-likes
+                (e.g., lists) are converted to NumPy arrays. At least one non-``None``
+                array must be provided. All non-``None`` arrays must have the same
+                length.
 
         Raises:
             ValueError: If no non-``None`` arrays are provided or if the arrays do not
                 have the same length.
         """
-        arrays = {k: v for k, v in arrays.items() if v is not None}
+        arrays = {
+            k: v if isinstance(v, (Array, np.ndarray)) else np.asarray(v)
+            for k, v in arrays.items()
+            if v is not None
+        }
         if not arrays:
             msg = "At least one array must be provided."
             raise ValueError(msg)
