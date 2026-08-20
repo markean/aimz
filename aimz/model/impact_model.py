@@ -47,6 +47,7 @@ from numpyro.infer import MCMC, SVI
 from numpyro.infer.svi import SVIRunResult, SVIState
 from tqdm.auto import tqdm
 
+from aimz._exceptions import NotFittedError
 from aimz.model._core import BaseModel
 from aimz.model._streaming import (
     _OutputStreamer,
@@ -133,6 +134,7 @@ class ImpactModel(BaseModel):
         self._inference = inference
         self._vi_result: SVIRunResult | None = None
         self._vi_state = None
+        self._is_fitted = False
         self._posterior: dict[str, Array] | None = None
         self._init_runtime_attrs()
 
@@ -177,7 +179,7 @@ class ImpactModel(BaseModel):
             f"Inference method: {self.inference.__class__.__name__}",
             f"Input parameter: '{self.param_input}'",
             f"Output parameter: '{self.param_output}'",
-            f"Fitted: {getattr(self, '_is_fitted', False)}",
+            f"Fitted: {self._is_fitted}",
         ]
         temp_dir = getattr(self, "temp_dir", None)
         if temp_dir:
@@ -198,7 +200,7 @@ class ImpactModel(BaseModel):
             f"param_input={self.param_input!r};",
             f"param_output={self.param_output!r};",
             f"kernel_spec={self.kernel_spec!r};",
-            f"fitted={getattr(self, '_is_fitted', False)};",
+            f"fitted={self._is_fitted};",
             f"temp_dir={getattr(self, 'temp_dir', None)!r}>",
         ]
 
@@ -240,6 +242,8 @@ class ImpactModel(BaseModel):
             state: The state to restore, excluding the runtime attributes.
         """
         self.__dict__.update(state)
+        # Models pickled before `_is_fitted` was initialized eagerly may lack it.
+        self.__dict__.setdefault("_is_fitted", False)
         self._init_runtime_attrs()
 
     @property
@@ -291,8 +295,8 @@ class ImpactModel(BaseModel):
     def vi_result(self) -> SVIRunResult | None:
         """Variational inference result, or ``None`` if not set.
 
-        :setter: This sets :external:data:`~numpyro.infer.svi.SVIRunResult` and marks
-            the model as fitted. It does not perform posterior sampling — use
+        :setter: This sets :external:data:`~numpyro.infer.svi.SVIRunResult` without
+            marking the model fitted. It does not perform posterior sampling — use
             :meth:`~aimz.ImpactModel.sample` separately to obtain samples.
         """
         return self._vi_result
@@ -309,16 +313,13 @@ class ImpactModel(BaseModel):
                 - losses (ArrayLike): Loss values recorded during optimization.
 
         Note:
-            This stores the result and marks the model fitted, but does not draw
+            This stores the result but does not mark the model fitted or draw
             posterior samples. Draw them with :meth:`~aimz.ImpactModel.sample` and
             register them via :meth:`~aimz.ImpactModel.set_posterior_sample`.
         """
         if not np.all(np.isfinite(vi_result.losses)):
             msg = "Loss contains NaN or Inf, indicating numerical instability."
             warn(msg, category=RuntimeWarning, stacklevel=2)
-
-        self._is_fitted = True
-
         self._vi_result = vi_result
 
     def _bind_kernel_args(
@@ -487,51 +488,6 @@ class ImpactModel(BaseModel):
 
         return artifact_path
 
-    def _stream_to_datatree(
-        self,
-        write: Callable[[Path | None], dict[str, DaskArray] | None],
-        *,
-        store: str,
-        output_dir: str | Path | None,
-        group: str,
-    ) -> xr.DataTree:
-        """Run one streamed write and assemble its output tree.
-
-        The single place where the result store forks: ``store="persistent"`` creates
-        the call-specific artifact path, streams into it (removing it again if the
-        stream fails), and reads it back lazily; ``store="memory"`` retains the
-        streamed batches in host memory and assembles the tree over them directly.
-
-        Args:
-            write: Runs the streamed write against the given artifact path (``None``
-                for in-memory accumulation) and returns the accumulated site arrays,
-                if any.
-            store: The result store, ``"persistent"`` or ``"memory"``.
-            output_dir: Base directory for disk-backed outputs.
-            group: Output group name for the resulting tree.
-
-        Returns:
-            The output tree: lazy in both modes, Dask-backed by the Zarr store for
-            ``"persistent"`` and by the retained in-memory batches for ``"memory"``.
-        """
-        artifact_path = (
-            self._create_artifact_path(output_dir) if store == "persistent" else None
-        )
-        try:
-            result = write(artifact_path)
-        except BaseException:
-            if artifact_path is not None:
-                rmtree(artifact_path, ignore_errors=True)
-            raise
-        if artifact_path is None:
-            return _build_datatree(
-                cast("dict[str, DaskArray]", result),
-                group=group,
-                posterior=self.posterior,
-            )
-
-        return _build_datatree(artifact_path, group=group, posterior=self.posterior)
-
     def _plan_obs_batching(
         self,
         X: ArrayLike | ArrayLoader,
@@ -581,6 +537,51 @@ class ImpactModel(BaseModel):
             return "whole"
 
         return "fallback"
+
+    def _stream_to_datatree(
+        self,
+        write: Callable[[Path | None], dict[str, DaskArray] | None],
+        *,
+        store: str,
+        output_dir: str | Path | None,
+        group: str,
+    ) -> xr.DataTree:
+        """Run one streamed write and assemble its output tree.
+
+        The single place where the result store forks: ``store="persistent"`` creates
+        the call-specific artifact path, streams into it (removing it again if the
+        stream fails), and reads it back lazily; ``store="memory"`` retains the
+        streamed batches in host memory and assembles the tree over them directly.
+
+        Args:
+            write: Runs the streamed write against the given artifact path (``None``
+                for in-memory accumulation) and returns the accumulated site arrays,
+                if any.
+            store: The result store, ``"persistent"`` or ``"memory"``.
+            output_dir: Base directory for disk-backed outputs.
+            group: Output group name for the resulting tree.
+
+        Returns:
+            The output tree: lazy in both modes, Dask-backed by the Zarr store for
+            ``"persistent"`` and by the retained in-memory batches for ``"memory"``.
+        """
+        artifact_path = (
+            self._create_artifact_path(output_dir) if store == "persistent" else None
+        )
+        try:
+            result = write(artifact_path)
+        except BaseException:
+            if artifact_path is not None:
+                rmtree(artifact_path, ignore_errors=True)
+            raise
+        if artifact_path is None:
+            return _build_datatree(
+                cast("dict[str, DaskArray]", result),
+                group=group,
+                posterior=self.posterior,
+            )
+
+        return _build_datatree(artifact_path, group=group, posterior=self.posterior)
 
     def sample_prior_predictive_on_batch(
         self,
@@ -767,7 +768,7 @@ class ImpactModel(BaseModel):
         return_datatree: bool = True,
         **kwargs: object,
     ) -> xr.DataTree | dict[str, npt.NDArray]:
-        """Draw posterior samples from a fitted model.
+        """Draw posterior samples from the model's inference state.
 
         Args:
             num_samples: The number of posterior samples to draw.
@@ -786,15 +787,20 @@ class ImpactModel(BaseModel):
             Posterior samples.
 
         Raises:
+            NotFittedError: If there is no inference state to sample from — no
+                completed MCMC run, or no ``vi_result`` when the inference method
+                is SVI.
             TypeError: If :attr:`~aimz.ImpactModel.param_output` is not passed as an
                 argument when the inference method is MCMC.
         """
-        _check_is_fitted(self)
-
-        if rng_key is None:
-            self._rng_key, rng_key = random.split(self._rng_key)
-
         if isinstance(self.inference, MCMC):
+            if self.inference.last_state is None:
+                msg = (
+                    "This ImpactModel instance has no MCMC state to sample from. "
+                    "Call `.fit_on_batch()`, or run the MCMC directly, before using "
+                    "`.sample()`."
+                )
+                raise NotFittedError(msg)
             # Validate the provided parameters against the kernel's signature
             args_bound = signature(self.kernel).bind(**kwargs).arguments
             if self.param_output not in args_bound:
@@ -805,6 +811,15 @@ class ImpactModel(BaseModel):
             self.inference.run(self.inference.post_warmup_state.rng_key, **args_bound)
             posterior_samples = device_get(self.inference.get_samples())
         else:
+            if self.vi_result is None:
+                msg = (
+                    "This ImpactModel instance has no inference result to sample from. "
+                    "Call `.fit()` or `.fit_on_batch()`, or set `vi_result`, before "
+                    "using `.sample()`."
+                )
+                raise NotFittedError(msg)
+            if rng_key is None:
+                self._rng_key, rng_key = random.split(self._rng_key)
             posterior_samples = device_get(
                 _sample_forward(
                     substitute(
@@ -1111,8 +1126,7 @@ class ImpactModel(BaseModel):
             self._num_samples = (
                 next(iter(self.posterior.values())).shape[0] if self.posterior else 0
             )
-            # The SVI path is already marked by the `vi_result` setter
-            self._is_fitted = True
+        self._is_fitted = True
 
         return self
 
@@ -1160,6 +1174,8 @@ class ImpactModel(BaseModel):
 
         Raises:
             TypeError: If the inference method is MCMC.
+            ValueError: If ``y`` is missing when ``X`` is array-like, or the array
+                inputs do not share one leading-axis size.
 
         Note:
             This method continues training from the existing SVI state if available.
@@ -1255,6 +1271,7 @@ class ImpactModel(BaseModel):
             samples=None,
             model_kwargs=None,
         )
+        self._is_fitted = True
 
         return self
 
@@ -1265,7 +1282,7 @@ class ImpactModel(BaseModel):
             `True` if the model is fitted, `False` otherwise.
 
         """
-        return hasattr(self, "_is_fitted") and self._is_fitted
+        return self._is_fitted
 
     def set_posterior_sample(self, posterior_sample: dict[str, Array]) -> Self:
         """Set posterior samples for the model.
@@ -1375,6 +1392,7 @@ class ImpactModel(BaseModel):
             Posterior predictive samples. Posterior samples are included if available.
 
         Raises:
+            NotFittedError: If the model is not fitted.
             TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
                 argument.
         """
@@ -1487,11 +1505,13 @@ class ImpactModel(BaseModel):
             Posterior predictive samples. Posterior samples are included if available.
 
         Raises:
+            NotFittedError: If the model is not fitted.
             TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
                 argument, or ``shard_axis="draw"`` is used with a data loader ``X``.
             ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``, ``store`` is
-                not ``"persistent"`` or ``"memory"``, or ``output_dir`` is passed with
-                ``store="memory"``.
+                not ``"persistent"`` or ``"memory"``, ``output_dir`` is passed with
+                ``store="memory"``, or the array inputs do not share one leading-axis
+                size.
             NotImplementedError: If a return site's axis-1 size does not match the
                 input batch size (``shard_axis="obs"`` only).
 
@@ -1616,6 +1636,7 @@ class ImpactModel(BaseModel):
             in-memory results set neither.
 
         Raises:
+            NotFittedError: If the model is not fitted.
             ValueError: If neither ``output_baseline`` nor ``args_baseline`` is
                 provided, or if neither ``output_intervention`` nor
                 ``args_intervention`` is provided.
@@ -1738,10 +1759,12 @@ class ImpactModel(BaseModel):
             Log-likelihood values. Posterior samples are included if available.
 
         Raises:
+            NotFittedError: If the model is not fitted.
             TypeError: If ``shard_axis="draw"`` is used with a data loader ``X``.
             ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``, ``store`` is
-                not ``"persistent"`` or ``"memory"``, or ``output_dir`` is passed with
-                ``store="memory"``.
+                not ``"persistent"`` or ``"memory"``, ``output_dir`` is passed with
+                ``store="memory"``, ``y`` is missing when ``X`` is array-like, or the
+                array inputs do not share one leading-axis size.
             NotImplementedError: If a return site's axis-1 size does not match the
                 input batch size (``shard_axis="obs"`` only).
 

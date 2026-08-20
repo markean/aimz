@@ -25,7 +25,6 @@ from numpyro.optim import Adam
 
 from aimz import ImpactModel
 from aimz._exceptions import KernelValidationError
-from aimz.utils._validation import _is_fitted
 from tests.conftest import lm
 
 
@@ -211,4 +210,4 @@ def test_fit_lm(synthetic_data: tuple[Array, Array], vi: SVI) -> None:
     X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
     im.fit(X=X, y=y, batch_size=3)
-    assert _is_fitted(im), "Model fitting check failed"
+    assert im.is_fitted(), "Model fitting check failed"

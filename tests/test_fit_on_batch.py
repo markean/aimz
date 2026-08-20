@@ -21,7 +21,6 @@ from numpyro.infer.autoguide import AutoNormal
 from numpyro.optim import Adam
 
 from aimz import ImpactModel
-from aimz.utils._validation import _is_fitted
 from tests.conftest import lm
 
 
@@ -48,7 +47,7 @@ def test_fit_svi(synthetic_data: tuple[Array, Array], vi: SVI) -> None:
     X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
     im.fit_on_batch(X=X, y=y)
-    assert _is_fitted(im), "Model fitting check failed"
+    assert im.is_fitted(), "Model fitting check failed"
     assert im.vi_result is not None, "VI result should not be `None`"
     first_loss = im.vi_result.losses[0]
 
@@ -66,7 +65,7 @@ def test_fit_mcmc(synthetic_data: tuple[Array, Array], mcmc: MCMC) -> None:
     X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), inference=mcmc)
     im.fit_on_batch(X=X, y=y)
-    assert _is_fitted(im), "Model fitting check failed"
+    assert im.is_fitted(), "Model fitting check failed"
 
 
 def test_fit_on_batch_zero_dim_raises(synthetic_data: tuple[Array, Array]) -> None:
