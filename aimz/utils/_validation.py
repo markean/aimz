@@ -264,7 +264,7 @@ def _validate_kernel_signature(
         sub = param_input
         msg = f"{sub!r} must not have a default value."
         raise KernelValidationError(msg)
-    if sig.parameters[param_output].default:
+    if sig.parameters[param_output].default is not None:
         sub = param_output
         msg = f"{sub!r} must have a default value of `None`."
         raise KernelValidationError(msg)

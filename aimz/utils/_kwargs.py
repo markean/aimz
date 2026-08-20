@@ -17,18 +17,33 @@
 from aimz.utils._validation import _is_arraylike
 
 
-def _group_kwargs(kwargs: dict) -> tuple[dict, dict]:
+def _group_kwargs(
+    kwargs: dict,
+    forbid: tuple[str, ...] = (),
+) -> tuple[dict, dict]:
     """Separate keyword arguments into array-like and non-array-like groups.
 
     Args:
         kwargs: A dictionary of keyword arguments where values could be array-like or
             non-array-like.
+        forbid: Names that must not appear in ``kwargs``. Reserved parameter names whose
+            values are supplied through dedicated arguments instead.
 
     Returns:
         A tuple containing two dictionaries:
             - kwargs_array: Contains the array-like arguments.
             - kwargs_extra: Contains the non-array-like arguments.
+
+    Raises:
+        TypeError: If a forbidden name appears in ``kwargs``.
     """
+    for name in forbid:
+        if name in kwargs:
+            msg = (
+                f"{name!r} is a reserved kernel parameter and cannot be passed as a "
+                "keyword argument."
+            )
+            raise TypeError(msg)
     kwargs_array = {k: v for k, v in kwargs.items() if _is_arraylike(v)}
     kwargs_extra = {k: v for k, v in kwargs.items() if not _is_arraylike(v)}
 

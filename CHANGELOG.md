@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The streaming entry points now accept list and tuple inputs: {class}`~aimz.utils.data.ArrayDataset` converts values that are not already JAX or NumPy arrays to NumPy arrays at construction, matching {meth}`~aimz.ImpactModel.predict_on_batch` ([#301](https://github.com/markean/aimz/issues/301)).
 - An empty `X` passed to a streaming entry point or {meth}`~aimz.ImpactModel.fit` raises a `ValueError` ([#301](https://github.com/markean/aimz/issues/301)).
 - {meth}`~aimz.ImpactModel.set_posterior_sample` now converts values that are not already JAX or NumPy arrays to NumPy arrays, and a 0-d value raises a `ValueError` ([#301](https://github.com/markean/aimz/issues/301)).
+- The streaming methods now emit a `UserWarning` when a data loader with `shuffle=True` is passed ([#303](https://github.com/markean/aimz/issues/303)).
+- Kernel validation now rejects an output parameter whose default is falsy but not `None`; an array default now raises a `KernelValidationError` instead of a `ValueError` ([#303](https://github.com/markean/aimz/issues/303)).
+- A keyword argument named after {attr}`~aimz.ImpactModel.param_input` or {attr}`~aimz.ImpactModel.param_output` now raises a `TypeError` in every entry point. Previously it resolved inconsistently: {meth}`~aimz.ImpactModel.predict` computed with `X` and silently dropped the keyword argument, {meth}`~aimz.ImpactModel.predict_on_batch` did the reverse, and the fitting methods silently trained on the keyword argument instead of `X` ([#303](https://github.com/markean/aimz/issues/303)).
 
 ## [v0.14.0](https://github.com/markean/aimz/releases/tag/v0.14.0) - 2026-07-24
 
