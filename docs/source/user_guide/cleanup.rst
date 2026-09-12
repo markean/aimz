@@ -2,7 +2,7 @@ Output Directory Cleanup
 ========================
 
 The streaming methods of :class:`~aimz.ImpactModel` persist results (e.g., posterior predictive samples, predictions) to disk by default (``store="persistent"``) to support large datasets and memory efficiency.
-Each of these methods accepts an ``output_dir`` parameter (see :doc:`disk_and_on_batch` for broader I/O behavior of them).
+Each of these methods accepts an ``output_dir`` parameter (see :doc:`streaming_and_on_batch` for broader I/O behavior of them).
 This page focuses on managing the temporary directory created when the user does not supply ``output_dir`` and on the :meth:`~aimz.ImpactModel.cleanup` method, as well as the :meth:`~aimz.ImpactModel.cleanup_models` class method, which removes temporary directories for all live model instances.
 
 
@@ -41,13 +41,13 @@ Additional guarantees:
 
 Rationale for Explicit Calls
 ----------------------------
-Although :class:`tempfile.TemporaryDirectory` *attempts* automatic removal upon garbage collection, the timing is nondeterministic—especially in notebooks or long-lived processes.
+Although :class:`tempfile.TemporaryDirectory` *attempts* automatic removal upon garbage collection, the timing is nondeterministic, especially in notebooks or long-lived processes.
 Large artifacts can accumulate quickly; calling :meth:`~aimz.ImpactModel.cleanup` ensures prompt reclamation of disk space.
 
 
 Accessing Artifact Paths
 ------------------------
-Every persistent-store call records its artifact path — the timestamped subdirectory holding the Zarr_ store with the results — in the ``artifact_path`` attribute, set on both the root tree and the group node (``tree.attrs["artifact_path"]`` and ``tree[<group>].attrs["artifact_path"]``).
+Every persistent-store call records its artifact path (the timestamped subdirectory holding the Zarr_ store with the results) in the ``artifact_path`` attribute, set on both the root tree and the group node (``tree.attrs["artifact_path"]`` and ``tree[<group>].attrs["artifact_path"]``).
 The enclosing base directory is simply ``Path(artifact_path).parent``, and the temporary root (when no ``output_dir`` was given) is also available via :attr:`~aimz.ImpactModel.temp_dir`.
 :meth:`~aimz.ImpactModel.estimate_effect` records the artifact paths of its two scenarios under ``artifact_path_baseline`` and ``artifact_path_intervention`` when the corresponding outputs were streamed to disk.
 The output below shows an example :external:class:`xarray.DataTree` illustrating the artifact paths.

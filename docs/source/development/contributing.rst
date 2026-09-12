@@ -2,7 +2,7 @@ Contributing to aimz
 ====================
 
 Thank you for your interest in contributing to aimz.
-Whether you're fixing a bug, adding a feature, or improving documentation—your help is appreciated.
+Whether you're fixing a bug, adding a feature, or improving documentation, your help is appreciated.
 This page explains the expected workflow, coding standards, and how to submit quality changes.
 
 
@@ -78,7 +78,7 @@ For larger additions:
 
 Linting & Pre-commit Hooks
 --------------------------
-We use `Ruff <https://docs.astral.sh/ruff>`_ (lint + optional formatting) and `pre-commit <https://pre-commit.com/>`_ hooks to keep diffs clean and reviews focused on design—not style nits.
+We use `Ruff <https://docs.astral.sh/ruff>`_ (lint + optional formatting) and `pre-commit <https://pre-commit.com/>`_ hooks to keep diffs clean and reviews focused on design, not style nits.
 
 One-time setup::
 

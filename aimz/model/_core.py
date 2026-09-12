@@ -29,7 +29,7 @@ class BaseModel(ABC):
     """Abstract base class for the impact model.
 
     Attributes:
-        kernel (Callable): A probabilistic model with NumPyro primitives.
+        kernel: A probabilistic model with NumPyro primitives.
     """
 
     def __init__(

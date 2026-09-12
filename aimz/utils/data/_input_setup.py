@@ -67,8 +67,8 @@ def _resolve_batch_size(
     Automatic resolution balances three concerns: each batch stays within the
     :data:`MAX_BYTES` memory budget; the axis is split into enough batches to keep the
     writer-thread pool occupied (:data:`_BATCHES_PER_WRITER` per writer); and no batch
-    produces less than :data:`_BATCH_BYTES_MIN` of output, so tiny workloads — which
-    are not I/O-bound — stay whole instead of paying per-chunk overhead. The result is
+    produces less than :data:`_BATCH_BYTES_MIN` of output, so tiny workloads (which
+    are not I/O-bound) stay whole instead of paying per-chunk overhead. The result is
     rounded down to a multiple of ``num_devices`` (floored at ``num_devices``) and
     clamped to ``axis_size``.
 
@@ -136,11 +136,11 @@ def _setup_inputs(
     """Prepare an dataloader and grouped keyword arguments.
 
     Args:
-        X (ArrayLike | ArrayLoader): Input data. If array-like, the leading axis is
-            the observation axis. Alternatively, a data loader that holds all array-like
-            objects and handles batching internally.
-        y (ArrayLike | None): Output data. The leading axis is the observation axis.
-            Must be ``None`` if ``X`` is a data loader.
+        X: Input data. If array-like, the leading axis is the observation axis.
+            Alternatively, a data loader that holds all array-like objects and handles
+            batching internally.
+        y: Output data. The leading axis is the observation axis. Must be ``None`` if
+            ``X`` is a data loader.
         param_input: Dataset key for ``X``, matching the kernel's input parameter so
             each batch is keyed as the downstream lookup expects.
         param_output: Dataset key for ``y``, matching the kernel's output parameter.

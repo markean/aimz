@@ -6,7 +6,7 @@ Multi-Device Execution and Sharding
 The streaming predictive methods of :class:`~aimz.ImpactModel` can distribute work across multiple devices (CPUs, GPUs, or TPUs) by *sharding*, which splits one of the computation's axes across the available devices and runs the pieces in parallel.
 aimz shards over whatever devices JAX already exposes and does not select or configure them itself.
 These methods accept a ``shard_axis`` argument that selects the strategy.
-The on-batch (``*_on_batch``) variants run a single in-memory pass and do not shard; see :doc:`disk_and_on_batch` for the broader streaming vs. on-batch comparison.
+The on-batch (``*_on_batch``) variants run a single in-memory pass and do not shard; see :doc:`streaming_and_on_batch` for the broader streaming vs. on-batch comparison.
 
 .. note::
 
@@ -49,7 +49,7 @@ When the posterior sample shape is observation-aligned (the hallmark of a **loca
 Rather than failing, :meth:`~aimz.ImpactModel.predict` and :meth:`~aimz.ImpactModel.log_likelihood` detect this, emit a warning, and rerun under ``shard_axis="draw"``, keeping results streamed to disk and memory-bounded.
 Passing ``shard_axis="draw"`` explicitly avoids the discarded first attempt.
 See :ref:`faq-model-compatibility` for the model patterns that trigger a rerun and those that stay unsupported.
-The kernels below contrast a compatible model with one that triggers the rerun; a runnable version is in :doc:`disk_and_on_batch`.
+The kernels below contrast a compatible model with one that triggers the rerun; a runnable version is in :doc:`streaming_and_on_batch`.
 
 .. code-block:: python
 

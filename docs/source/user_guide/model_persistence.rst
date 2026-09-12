@@ -13,8 +13,7 @@ An alternative is `dill <https://pypi.org/project/dill/>`__, which offers simila
 
 .. note::
 
-   For MLflow users, see the :doc:`mlflow` page for details on saving and loading
-   models with MLflow.
+   For MLflow users, see the :doc:`mlflow` page for details on saving and loading models with MLflow.
 
 
 Model Training
@@ -87,7 +86,7 @@ Deserialization
 
 Load a previously saved :class:`~aimz.ImpactModel` (and optionally its input data) from disk in a fresh new session or different runtime environment.
 To use the loaded model correctly, the same dependencies, imports, and any constants or variables that the ``model`` relied on when it was saved must be available.
-Any JAX array—whether part of the :class:`~aimz.ImpactModel` or the input data—will be placed on the default device.
+Any JAX array, whether part of the :class:`~aimz.ImpactModel` or the input data, will be placed on the default device.
 
 .. jupyter-execute::
     :hide-output:

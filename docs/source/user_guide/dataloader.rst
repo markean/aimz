@@ -204,6 +204,6 @@ You can reuse the same loop pattern for prediction or likelihood evaluation:
 
 See Also
 --------
-* `PyTorch DataLoader <https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader>`__ – Widely used reference implementation.
-* `Grain <https://google-grain.readthedocs.io/>`__ – JAX-native scalable input pipeline.
-* `Dataloader for JAX <https://birkhoffg.github.io/jax-dataloader/>`__ – Minimal NumPy/JAX DataLoader.
+* `PyTorch DataLoader <https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader>`__: Widely used reference implementation.
+* `Grain <https://google-grain.readthedocs.io/>`__: JAX-native scalable input pipeline.
+* `Dataloader for JAX <https://birkhoffg.github.io/jax-dataloader/>`__: Minimal NumPy/JAX DataLoader.

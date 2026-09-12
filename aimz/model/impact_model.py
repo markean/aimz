@@ -296,7 +296,7 @@ class ImpactModel(BaseModel):
         """Variational inference result, or ``None`` if not set.
 
         :setter: This sets :external:data:`~numpyro.infer.svi.SVIRunResult` without
-            marking the model fitted. It does not perform posterior sampling — use
+            marking the model fitted. It does not perform posterior sampling; use
             :meth:`~aimz.ImpactModel.sample` separately to obtain samples.
         """
         return self._vi_result
@@ -306,11 +306,11 @@ class ImpactModel(BaseModel):
         """Set the variational inference result manually.
 
         Args:
-            vi_result (SVIRunResult): The result from a prior variational inference run.
+            vi_result: The result from a prior variational inference run.
                 It must be a NamedTuple or similar object with the following fields:
-                - params (dict): Learned parameters from inference.
-                - state (SVIState): Internal SVI state object.
-                - losses (ArrayLike): Loss values recorded during optimization.
+                - params: Learned parameters from inference.
+                - state: Internal SVI state object.
+                - losses: Loss values recorded during optimization.
 
         Note:
             This stores the result but does not mark the model fitted or draw
@@ -605,7 +605,7 @@ class ImpactModel(BaseModel):
         """Draw samples from the prior predictive distribution.
 
         Args:
-            X (ArrayLike): Input data. The leading axis is the observation axis.
+            X: Input data. The leading axis is the observation axis.
             num_samples: The number of samples to draw.
             rng_key: A pseudo-random number generator key. By default, an internal key
                 is used and split as needed.
@@ -673,7 +673,7 @@ class ImpactModel(BaseModel):
         results in host memory instead.
 
         Args:
-            X (ArrayLike): Input data. The leading axis is the observation axis.
+            X: Input data. The leading axis is the observation axis.
             num_samples: The number of samples to draw.
             rng_key: A pseudo-random number generator key. By default, an internal key
                 is used and split as needed.
@@ -796,9 +796,9 @@ class ImpactModel(BaseModel):
             Posterior samples.
 
         Raises:
-            NotFittedError: If there is no inference state to sample from — no
+            NotFittedError: If there is no inference state to sample from (no
                 completed MCMC run, or no ``vi_result`` when the inference method
-                is SVI.
+                is SVI).
             TypeError: If :attr:`~aimz.ImpactModel.param_output` is not passed as an
                 argument when the inference method is MCMC.
         """
@@ -833,7 +833,7 @@ class ImpactModel(BaseModel):
                 _sample_forward(
                     substitute(
                         self.inference.guide,
-                        data=cast("SVIRunResult", self.vi_result).params,
+                        data=self.vi_result.params,
                     ),
                     rng_keys=random.split(rng_key, num=num_samples),
                     return_sites=self._coerce_return_sites(return_sites)
@@ -866,7 +866,7 @@ class ImpactModel(BaseModel):
         set to ``True``.
 
         Args:
-            X (ArrayLike): Input data. The leading axis is the observation axis.
+            X: Input data. The leading axis is the observation axis.
             intervention: A dictionary mapping sample sites to their corresponding
                 intervention values. Interventions enable counterfactual analysis by
                 modifying the specified sample sites during prediction (posterior
@@ -920,9 +920,9 @@ class ImpactModel(BaseModel):
         ``in_sample`` automatically set to ``True``.
 
         Args:
-            X (ArrayLike | ArrayLoader): Input data. If array-like, the leading axis is
-                the observation axis. Alternatively, a data loader that holds all
-                array-like objects and handles batching internally.
+            X: Input data. If array-like, the leading axis is the observation axis.
+                Alternatively, a data loader that holds all array-like objects and
+                handles batching internally.
             intervention: A dictionary mapping sample sites to their corresponding
                 intervention values. Interventions enable counterfactual analysis by
                 modifying the specified sample sites during prediction (posterior
@@ -998,8 +998,8 @@ class ImpactModel(BaseModel):
         """Run a single VI step on the given batch of data.
 
         Args:
-            X (ArrayLike): Input data. The leading axis is the observation axis.
-            y (ArrayLike): Output data. The leading axis is the observation axis.
+            X: Input data. The leading axis is the observation axis.
+            y: Output data. The leading axis is the observation axis.
             rng_key: A pseudo-random number generator key. By default, an internal key
                 is used and split as needed. The key is only used for initialization if
                 the internal SVI state is not yet set.
@@ -1073,8 +1073,8 @@ class ImpactModel(BaseModel):
             :external:class:`~numpyro.infer.mcmc.MCMC` instance from `NumPyro`_.
 
         Args:
-            X (ArrayLike): Input data. The leading axis is the observation axis.
-            y (ArrayLike): Output data. The leading axis is the observation axis.
+            X: Input data. The leading axis is the observation axis.
+            y: Output data. The leading axis is the observation axis.
             num_steps: Number of steps for variational inference optimization. Ignored
                 if the inference method is MCMC.
             num_samples: The number of posterior samples to draw. Ignored if the
@@ -1171,11 +1171,11 @@ class ImpactModel(BaseModel):
         then posterior samples are drawn from the fitted model.
 
         Args:
-            X (ArrayLike | ArrayLoader): Input data. If array-like, the leading axis is
-                the observation axis. Alternatively, a data loader that holds all
-                array-like objects and handles batching internally.
-            y (ArrayLike | None): Output data. The leading axis is the observation axis.
-                Must be ``None`` if ``X`` is a data loader.
+            X: Input data. If array-like, the leading axis is the observation axis.
+                Alternatively, a data loader that holds all array-like objects and
+                handles batching internally.
+            y: Output data. The leading axis is the observation axis. Must be ``None``
+                if ``X`` is a data loader.
             num_samples: The number of posterior samples to draw.
             rng_key: A pseudo-random number generator key. By default, an internal key
                 is used and split as needed.
@@ -1312,10 +1312,10 @@ class ImpactModel(BaseModel):
         :meth:`~aimz.ImpactModel.fit` or :meth:`~aimz.ImpactModel.fit_on_batch`.
 
         It is primarily intended for workflows where posterior sampling is performed
-        manually—for example, using `NumPyro`_'s
+        manually, for example, using `NumPyro`_'s
         :external:class:`~numpyro.infer.svi.SVI` (or
         :external:class:`~numpyro.infer.mcmc.MCMC`) with the
-        :external:class:`~numpyro.infer.util.Predictive` API—and the resulting
+        :external:class:`~numpyro.infer.util.Predictive` API, and the resulting
         posterior samples are injected into the model for further use.
 
         Internally, ``batch_ndims`` is set to ``1`` by default to correctly handle the
@@ -1340,7 +1340,7 @@ class ImpactModel(BaseModel):
             ``return_sites``.
 
             Include only latent sample sites. The output site is removed with a
-            warning, but ``deterministic`` sites must be excluded by the caller —
+            warning, but ``deterministic`` sites must be excluded by the caller:
             if present, they override the values recomputed by
             :meth:`~aimz.ImpactModel.log_likelihood`.
         """
@@ -1411,7 +1411,7 @@ class ImpactModel(BaseModel):
             parallelism.
 
         Args:
-            X (ArrayLike): Input data. The leading axis is the observation axis.
+            X: Input data. The leading axis is the observation axis.
             intervention: A dictionary mapping sample sites to their corresponding
                 intervention values. Interventions enable counterfactual analysis by
                 modifying the specified sample sites during prediction (posterior
@@ -1498,9 +1498,9 @@ class ImpactModel(BaseModel):
         host memory instead.
 
         Args:
-            X (ArrayLike | ArrayLoader): Input data. If array-like, the leading axis is
-            the observation axis. Alternatively, a data loader that holds all array-like
-            objects and handles batching internally.
+            X: Input data. If array-like, the leading axis is the observation axis.
+                Alternatively, a data loader that holds all array-like objects and
+                handles batching internally.
             intervention: A dictionary mapping sample sites to their corresponding
                 intervention values. Interventions enable counterfactual analysis by
                 modifying the specified sample sites during prediction (posterior
@@ -1764,11 +1764,11 @@ class ImpactModel(BaseModel):
         results in host memory instead.
 
         Args:
-            X (ArrayLike | ArrayLoader): Input data. If array-like, the leading axis is
-            the observation axis. Alternatively, a data loader that holds all array-like
-            objects and handles batching internally.
-            y (ArrayLike | None): Output data. The leading axis is the observation axis.
-                Must be ``None`` if ``X`` is a data loader.
+            X: Input data. If array-like, the leading axis is the observation axis.
+                Alternatively, a data loader that holds all array-like objects and
+                handles batching internally.
+            y: Output data. The leading axis is the observation axis. Must be ``None``
+                if ``X`` is a data loader.
             shard_axis: Multi-device sharding strategy; no effect on a single device.
                 ``"obs"`` (default) shards the input across devices and replicates the
                 posterior. ``"draw"`` shards the posterior across devices and replicates
@@ -1898,7 +1898,7 @@ class ImpactModel(BaseModel):
         method explicitly is recommended for timely resource release.
 
         See Also:
-            :meth:`~aimz.ImpactModel.cleanup_models` — clean temporary directories for
+            :meth:`~aimz.ImpactModel.cleanup_models`: clean temporary directories for
             all tracked model instances.
         """
         if hasattr(self, "_temp_dir") and self._temp_dir is not None:
@@ -1912,7 +1912,7 @@ class ImpactModel(BaseModel):
         """Clean up temporary directories for all :class:`~aimz.ImpactModel` instances.
 
         See Also:
-            :meth:`~aimz.ImpactModel.cleanup` — clean the temporary directory for a
+            :meth:`~aimz.ImpactModel.cleanup`: clean the temporary directory for a
             single instance.
         """
         for model in cls._models:

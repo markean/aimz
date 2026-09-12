@@ -517,7 +517,7 @@ def load_model(model_uri: str, dst_path: str | None = None) -> ImpactModel:
             - ``models:/<model_name>/<stage>``
 
             For more information about supported URI schemes, see
-            `Referencing Artifacts <https://www.mlflow.org/docs/latest/concepts.html#
+            `Referencing Artifacts <https://www.mlflow.org/docs/latest/tracking.html#
             artifact-locations>`_.
         dst_path: The local filesystem path to which to download the model artifact.
             This directory must already exist. If unspecified, a local output
@@ -661,10 +661,13 @@ def autolog(
         """Patch for the fitting method to log information.
 
         Args:
-            original (Callable): The original method.
-            self (ImpactModel): The instance being fitted.
-            *args (object): Positional arguments for the method.
-            **kwargs (object): Keyword arguments for the method.
+            original: The original method.
+            self: The instance being fitted.
+            *args: Positional arguments for the method.
+            **kwargs: Keyword arguments for the method.
+
+        Returns:
+            The fitted model returned by the original fitting method.
         """
         autologging_client = MlflowAutologgingQueueingClient()
         run_id = cast("ActiveRun", mlflow.active_run()).info.run_id
@@ -774,10 +777,10 @@ def _run_params(
     """Collect the parameters to log for a fitting-method call.
 
     Args:
-        model (ImpactModel): The model instance being fitted.
-        original (Callable): The original fitting method.
-        args (tuple): Positional arguments passed to the fitting method.
-        kwargs (dict): Keyword arguments passed to the fitting method.
+        model: The model instance being fitted.
+        original: The original fitting method.
+        args: Positional arguments passed to the fitting method.
+        kwargs: Keyword arguments passed to the fitting method.
 
     Returns:
         The model attributes and explicitly passed fitting-method arguments to log as
@@ -812,9 +815,9 @@ def _get_input_example(
     training.
 
     Args:
-        model (ImpactModel): The model instance being fitted.
-        args (tuple): Positional arguments passed to the fitting method.
-        kwargs (dict): Keyword arguments passed to the fitting method.
+        model: The model instance being fitted.
+        args: Positional arguments passed to the fitting method.
+        kwargs: Keyword arguments passed to the fitting method.
 
     Returns:
         A copy of the first few rows of the training data.
@@ -857,7 +860,7 @@ def _log_model_with_signature(
     """Log the fitted model, resolving its input example and signature.
 
     Args:
-        model (ImpactModel): The fitted model to log.
+        model: The fitted model to log.
         model_id: The ID of the logged model to which the artifacts belong.
         input_example: An input example copied from the training data prior to
             training, or ``None`` if collecting it failed.
@@ -917,11 +920,11 @@ def _log_aimz_dataset(
     """Log the dataset information to MLflow.
 
     Args:
-        aimz_model (ImpactModel): The model instance being fitted.
-        args (tuple): Positional arguments passed to the fitting method.
-        kwargs (dict): Keyword arguments passed to the fitting method.
-        source (CodeDatasetSource): The dataset source to record.
-        context (str): The context tag of the dataset (e.g. ``"train"``).
+        aimz_model: The model instance being fitted.
+        args: Positional arguments passed to the fitting method.
+        kwargs: Keyword arguments passed to the fitting method.
+        source: The dataset source to record.
+        context: The context tag of the dataset (e.g. ``"train"``).
         model_id: The ID of the logged model to link the dataset to, if any.
         name: The name of the dataset, if any.
     """

@@ -54,7 +54,7 @@ def test_predict_draw_local_latent_no_fallback(
     pp = dt["posterior_predictive"]
     assert pp["y"].sizes["draw"] == _n_draws(im)
     assert pp["y"].shape[-1] == len(X)
-    # `z` is a local latent of shape (num_samples, n_obs) — the case that the
+    # `z` is a local latent of shape (num_samples, n_obs), the case that the
     # data-parallel path cannot stream.
     assert pp["z"].sizes["draw"] == _n_draws(im)
     assert pp["z"].shape[-1] == len(X)

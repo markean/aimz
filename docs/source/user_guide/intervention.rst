@@ -22,7 +22,8 @@ The ``intervention`` argument is a mapping (``dict[str, ArrayLike]``) from sampl
 Values must broadcast to the site’s per‑observation shape (e.g., intervening on a length‑``N`` vector site generally requires shape ``(N,)``).
 You can modify multiple sites at once; any not specified follow their posterior (or prior) distribution.
 
-Setting ``in_sample=True`` stores draws under ``posterior_predictive`` while ``in_sample=False`` stores them under ``predictions``—the group must match between baseline and intervention scenarios when computing effects.
+Setting ``in_sample=True`` stores draws under ``posterior_predictive`` while ``in_sample=False`` stores them under ``predictions``.
+The group must match between baseline and intervention scenarios when computing effects.
 Deterministic downstream sites automatically reflect the intervened values.
 
 .. code-block:: python
@@ -107,7 +108,7 @@ Any subsequent summary (e.g. mean, intervals) can be computed using Xarray, Arvi
 
    :meth:`~aimz.ImpactModel.estimate_effect` computes the posterior predictive contrast between two scenarios under structural interventions, propagating full posterior uncertainty through the difference.
    Whether this contrast admits a causal interpretation depends on the structural assumptions encoded in the model (the kernel): causal identification is a property of the model specification, not the estimation procedure.
-   When the user-defined model encodes appropriate causal assumptions—such as conditioning on confounders and specifying correct functional relationships—this contrast corresponds to a causal effect estimate.
+   When the user-defined model encodes appropriate causal assumptions, such as conditioning on confounders and specifying correct functional relationships, this contrast corresponds to a causal effect estimate.
 
 
 Example: Causal Network with Confounder

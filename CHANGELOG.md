@@ -102,7 +102,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A disk-backed method that fails before the write phase no longer leaves an orphaned subdirectory behind; the partially-created subdirectory is removed and the original error is re-raised ([#258](https://github.com/markean/aimz/issues/258)).
 - A model restored from disk with `pickle`/`cloudpickle` (e.g. through the `mlflow` integration) is now re-registered for class-level cleanup, so {meth}`~aimz.ImpactModel.cleanup_models` removes its temporary directory; previously only directly constructed models were tracked ([#260](https://github.com/markean/aimz/issues/260)).
 - Saving an aimz model with an input example (via {func}`~aimz.mlflow.save_model`, {func}`~aimz.mlflow.log_model`, or {func}`~aimz.mlflow.autolog`) no longer bakes an ephemeral temporary `output_dir` and a fixed `batch_size` into the logged model signature; MLflow replayed those machine-local defaults on reload/serving, which broke prediction on a different machine and forced tiny batches ([#262](https://github.com/markean/aimz/issues/262)).
-- {func}`~aimz.mlflow.autolog` no longer crashes when a `rng_key` is passed to {meth}`~aimz.ImpactModel.fit` / {meth}`~aimz.ImpactModel.fit_on_batch` — the typed PRNG key was routed into the logged input example and raised, so MLflow silently skipped logging the model artifact. It also no longer leaks the observed label into the logged input example and signature when a custom `param_output` is used ([#262](https://github.com/markean/aimz/issues/262)).
+- {func}`~aimz.mlflow.autolog` no longer crashes when a `rng_key` is passed to {meth}`~aimz.ImpactModel.fit` / {meth}`~aimz.ImpactModel.fit_on_batch`: the typed PRNG key was routed into the logged input example and raised, so MLflow silently skipped logging the model artifact. It also no longer leaks the observed label into the logged input example and signature when a custom `param_output` is used ([#262](https://github.com/markean/aimz/issues/262)).
 
 ## [v0.12.0](https://github.com/markean/aimz/releases/tag/v0.12.0) - 2026-05-23
 
@@ -127,7 +127,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Removed package-level logging configuration from `aimz/__init__.py`. `aimz` no longer sets a log level, attaches a `StreamHandler(sys.stdout)`, or calls `logging.captureWarnings(True)` on import; the `aimz` logger now only has a `logging.NullHandler()` attached.
 Configuring handlers, levels, and warnings capture is the responsibility of the application.
-Log messages emitted by {class}`~aimz.ImpactModel` were also refined—trailing ellipses were removed and posterior sampling now reports the number of samples being drawn—and the output-directory cleanup notice raised when {meth}`~aimz.ImpactModel.predict_on_batch` and {meth}`~aimz.ImpactModel.log_likelihood` encounter an error is now logged at the `warning` level (previously `debug`) ([#192](https://github.com/markean/aimz/issues/192)).
+Log messages emitted by {class}`~aimz.ImpactModel` were also refined (trailing ellipses were removed and posterior sampling now reports the number of samples being drawn), and the output-directory cleanup notice raised when {meth}`~aimz.ImpactModel.predict_on_batch` and {meth}`~aimz.ImpactModel.log_likelihood` encounter an error is now logged at the `warning` level (previously `debug`) ([#192](https://github.com/markean/aimz/issues/192)).
 
 ### Fixed
 

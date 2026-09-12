@@ -5,13 +5,13 @@ Frequently Asked Questions
 What is a kernel?
 -----------------
 A kernel in aimz is a user-defined `NumPyro`_ model (a stochastic function or :class:`~collections.abc.Callable`) built with primitives like :external:func:`~numpyro.primitives.sample` and :external:func:`~numpyro.primitives.deterministic`.
-Its signature and body define the inputs and output (e.g., ``X``, ``y``, ...), encoding the probabilistic structure—priors, likelihood, and latent variables.
+Its signature and body define the inputs and output (e.g., ``X``, ``y``, ...), encoding the probabilistic structure: priors, likelihood, and latent variables.
 
 
 How do I use different argument names than ``X`` and ``y``?
 -----------------------------------------------------------
 By default, aimz expects your kernel signature to include parameters named ``X`` (input) and ``y`` (output).
-If you use different names—e.g. ``features`` / ``target`` or ``covariates`` / ``outcome``—declare them when instantiating :class:`~aimz.ImpactModel`:
+If you use different names (e.g. ``features`` / ``target`` or ``covariates`` / ``outcome``), declare them when instantiating :class:`~aimz.ImpactModel`:
 
 .. code-block:: python
 
@@ -85,7 +85,7 @@ What kinds of data can aimz handle?
 aimz accepts NumPy or JAX arrays of any shape with at least one dimension; the leading axis is treated as the observation axis.
 This covers tabular inputs (``(n, d)``), 1D inputs (``(n,)``), and higher-rank inputs such as sequences (``(n, seq_len, d)``) or images (``(n, h, w, c)``).
 Multiple named arrays are supported as long as they share the same leading-axis size.
-The output variable has the same flexibility — it can be 1D for scalar targets, 2D for multi-output regression, or higher-rank as the model requires — provided its leading axis matches the input.
+The output variable has the same flexibility: it can be 1D for scalar targets, 2D for multi-output regression, or higher-rank as the model requires, provided its leading axis matches the input.
 Ragged or nested structures are not currently supported.
 If native support for a specific structure is important for your use case, opening an issue helps prioritize it, and contributions are welcome.
 
@@ -93,28 +93,28 @@ If native support for a specific structure is important for your use case, openi
 Can I use aimz for general-purpose Bayesian inference?
 ------------------------------------------------------
 Yes.
-aimz is a flexible, object-oriented interface to `NumPyro`_ and supports a wide range of Bayesian modeling tasks—regression, classification, uncertainty quantification, and predictive simulation—even if your application doesn’t involve interventions or causal analysis.
+aimz is a flexible, object-oriented interface to `NumPyro`_ and supports a wide range of Bayesian modeling tasks (regression, classification, uncertainty quantification, and predictive simulation), even if your application doesn’t involve interventions or causal analysis.
 
 
 Can I use posterior samples generated elsewhere?
 ------------------------------------------------
-Yes—you do not need to train a model from scratch and sample posteriors.
+Yes, you do not need to train a model from scratch and sample posteriors.
 After initializing an :class:`~aimz.ImpactModel` with your model, call :meth:`~aimz.ImpactModel.set_posterior_sample` with a dictionary mapping site names to arrays.
 Each array must share the same leading dimension (number of draws), and the dictionary must not be empty.
 Once injected, the model is treated as fitted, and the prediction, log-likelihood, and posterior predictive methods will use the supplied samples.
-For :meth:`~aimz.ImpactModel.log_likelihood`, the samples must cover every latent site of the kernel—a partial posterior raises an error—whereas the predictive methods draw any missing sites fresh.
+For :meth:`~aimz.ImpactModel.log_likelihood`, the samples must cover every latent site of the kernel (a partial posterior raises an error), whereas the predictive methods draw any missing sites fresh.
 
 
 When should I use the ``*_on_batch`` variants?
 ----------------------------------------------
 Use the batch-specific variants only when you need explicit, single-batch control (e.g., custom training loops, micro‑benchmarking, or integrating with external schedulers).
 The higher-level methods handle internal batching, iteration, shuffling, streaming, and aggregation automatically and are preferred for typical workflows.
-See :doc:`user_guide/disk_and_on_batch` for a detailed comparison of both approaches and guidance on when to use each.
+See :doc:`user_guide/streaming_and_on_batch` for a detailed comparison of both approaches and guidance on when to use each.
 
 
 How do I control which variables (sites) are sampled?
 -----------------------------------------------------
-By default, prediction and sampling methods use the set of return sites cached in :attr:`~aimz.model.KernelSpec.return_sites`—typically the model output plus any deterministic sites discovered during the first trace.
+By default, prediction and sampling methods use the set of return sites cached in :attr:`~aimz.model.KernelSpec.return_sites`, typically the model output plus any deterministic sites discovered during the first trace.
 To override this behavior, pass ``return_sites=(...)`` explicitly to the relevant methods.
 
 
@@ -131,7 +131,7 @@ To fully reproduce results, log the initial seed along with other artifacts.
 Why do some methods return :class:`~xarray.DataTree`?
 -----------------------------------------------------
 A :class:`~xarray.DataTree` organizes heterogeneous groups (``posterior``, ``posterior_predictive``, ``predictions``) with labeled dimensions and coordinates, facilitating I/O, slicing, and downstream analysis.
-It can also be easily converted to an :external:class:`arviz.InferenceData` object using :external:func:`arviz.from_datatree`.
+It can also be passed directly to `ArviZ`_ functions.
 If desired, you can pass ``return_datatree=False`` to methods such as :meth:`~aimz.ImpactModel.predict_on_batch` to return a plain dictionary instead.
 
 
@@ -141,7 +141,7 @@ It appears in the returned :class:`~xarray.DataTree` only if posterior samples a
 
 
 Where is the persistent output written?
-------------------------------------
+---------------------------------------
 Currently, persistent-store outputs (the streaming methods' default) are written under the directory passed via ``output_dir``.
 If ``output_dir=None``, a temporary directory is created (accessible via :attr:`~aimz.ImpactModel.temp_dir`) and removed when the model is cleaned up (either explicitly with :meth:`~aimz.ImpactModel.cleanup` or when the instance is garbage collected).
 The returned :class:`~xarray.DataTree` records the call's artifact path in an ``artifact_path`` attribute on both the root tree and the group node; its parent is the ``output_dir`` (or temporary root) it was written under.
