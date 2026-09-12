@@ -566,18 +566,17 @@ class _AimzModelWrapper:
             Model predictions.
         """
         # Results default to the in-memory store
+        kwargs: dict[str, Any]
         if isinstance(data, dict):
-            return self.aimz_model.predict(
-                **{
-                    "store": "memory",
-                    **cast("dict[str, Any]", data),
-                    **(params or {}),
-                },
-            )
-        return self.aimz_model.predict(
-            cast("Any", data),
-            **{"store": "memory", **(params or {})},
-        )
+            kwargs = {
+                "store": "memory",
+                **cast("dict[str, Any]", data),
+                **(params or {}),
+            }
+            return self.aimz_model.predict(**kwargs)
+        kwargs = {"store": "memory", **(params or {})}
+
+        return self.aimz_model.predict(cast("Any", data), **kwargs)
 
 
 @autologging_integration(FLAVOR_NAME)
@@ -672,8 +671,8 @@ def autolog(
         autologging_client = MlflowAutologgingQueueingClient()
         run_id = cast("ActiveRun", mlflow.active_run()).info.run_id
 
-        # Log the source code of the kernel function as an artifact.
-        mlflow.log_text(getsource(self.kernel), artifact_file="model.py")
+        # Log the source code of the kernel function as an artifact
+        _log_kernel_source(self)
 
         params = _run_params(self, original, args, kwargs)
         autologging_client.log_params(run_id=run_id, params=params)
@@ -766,6 +765,21 @@ def autolog(
         manage_run=True,
         extra_tags=extra_tags,
     )
+
+
+def _log_kernel_source(model: ImpactModel) -> None:
+    """Log the source code of the model's kernel function as an artifact.
+
+    Args:
+        model: The model instance being fitted.
+    """
+    try:
+        mlflow.log_text(getsource(model.kernel), artifact_file="model.py")
+    except Exception:
+        _logger.exception(
+            "Failed to log the kernel source code. aimz autologging will ignore the "
+            "failure and continue."
+        )
 
 
 def _run_params(
@@ -879,10 +893,16 @@ def _log_model_with_signature(
         # `ImpactModel.predict` returns an `xarray.DataTree`, which schema inference
         # does not support, so the signature is inferred through the same helper used
         # at save time, with the `progress` parameter recorded in the signature.
-        return _infer_signature_from_input_example(
-            _Example((input_example, {"progress": False})),
-            _AimzModelWrapper(model),
-        )
+        # Signature inference runs a real prediction; restore the rng key so that
+        # autologging does not change the model's future prediction stream.
+        rng_key = model.rng_key
+        try:
+            return _infer_signature_from_input_example(
+                _Example((input_example, {"progress": False})),
+                _AimzModelWrapper(model),
+            )
+        finally:
+            model._rng_key = rng_key
 
     # Will only resolve `input_example` and `signature` if `log_models` is `True`.
     input_example, signature = resolve_input_example_and_signature(

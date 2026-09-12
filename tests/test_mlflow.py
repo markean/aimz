@@ -33,6 +33,7 @@ pytest.importorskip("mlflow")
 
 import mlflow.models
 import mlflow.pyfunc
+from mlflow.entities import LoggedModelStatus
 from mlflow.exceptions import MlflowException
 
 from aimz.mlflow import (
@@ -51,9 +52,11 @@ def _isolate_mlflow_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
 
     Saving/loading and autologging create a tracking store (and artifact directory)
     relative to the working directory; chdir into ``tmp_path`` and pin the tracking URI
-    there so nothing is written into the working tree.
+    there so nothing is written into the working tree. Autologging errors are re-raised
+    instead of being logged as warnings, so a failed autolog step fails the test.
     """
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MLFLOW_AUTOLOGGING_TESTING", "true")
     mlflow.set_tracking_uri(f"sqlite:///{tmp_path}/mlflow.db")
 
 
@@ -119,7 +122,7 @@ def test_save_model_with_conda_env_and_metadata(
     im_lm_svi_fitted: ImpactModel,
     tmp_path: Path,
 ) -> None:
-    """An explicit ``conda_env`` is honored and ``metadata`` is recorded."""
+    """An explicit ``conda_env`` is accepted and ``metadata`` is recorded."""
     conda_env = get_default_conda_env(include_cloudpickle=True)
 
     save_model(
@@ -286,6 +289,7 @@ def test_autolog_logs_model_when_rng_key_passed(
         autolog(disable=True)
 
     assert len(logged) == 1
+    assert logged[0].status == LoggedModelStatus.READY
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
@@ -343,6 +347,7 @@ def test_autolog_logs_elbo_history_dataset_and_model_params(
     # The metrics are also attached to the logged model entity
     assert sum(m.key == "elbo_loss" for m in logged[0].metrics or []) == num_steps
     # The training data is logged as a run input tagged as the train context
+    assert run_data.inputs is not None
     dataset_inputs = run_data.inputs.dataset_inputs
     assert len(dataset_inputs) == 1
     assert [t.value for t in dataset_inputs[0].tags] == ["train"]
@@ -357,7 +362,7 @@ def test_autolog_logs_model_with_loader_input(
     synthetic_data: tuple[Array, Array],
     vi: SVI,
 ) -> None:
-    """Autologging builds the input example (excluding the label) from a data loader."""
+    """Autologging logs the fitted model when fitting on a data loader."""
     X, y = synthetic_data
     autolog()
     try:
@@ -377,3 +382,4 @@ def test_autolog_logs_model_with_loader_input(
         autolog(disable=True)
 
     assert len(logged) == 1
+    assert logged[0].status == LoggedModelStatus.READY
