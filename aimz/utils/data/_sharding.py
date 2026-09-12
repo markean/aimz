@@ -55,18 +55,18 @@ def _create_sharded_sampler(
 
     Returns:
         A sharded function that takes the following arguments:
-            - kernel (Callable): A probabilistic model with NumPyro primitives.
-            - num_samples (int): The number of samples to draw (per-device under
-                ``"draw"`` sharding).
+            - kernel: A probabilistic model with NumPyro primitives.
+            - num_samples: The number of samples to draw (per-device under ``"draw"``
+                sharding).
             - rng_key: A scalar PRNG key under ``"obs"`` sharding, or a pre-split
                 ``(num_samples,)`` key array under ``"draw"`` sharding.
-            - return_sites (tuple[str, ...]): Names of variables (sites) to return.
-            - samples (dict): A dictionary of samples to condition on.
-            - param_input (str): The name of the parameter in the ``kernel`` for the
-                input data.
-            - kwargs_key (tuple[str, ...]): A tuple of keyword argument names.
-            - X (Array): Input data.
-            - *args (tuple): Additional arguments constructed from the original keyword
+            - return_sites: Names of variables (sites) to return.
+            - samples: A dictionary of samples to condition on.
+            - param_input: The name of the parameter in the ``kernel`` for the input
+                data.
+            - kwargs_key: A tuple of keyword argument names.
+            - X: Input data.
+            - *args: Additional arguments constructed from the original keyword
                 arguments (both array-like and non-array-like).
     """
     draws = shard_axis == "draw"
@@ -187,16 +187,16 @@ def _create_sharded_log_likelihood(
 
     Returns:
         A sharded function that takes the following arguments:
-            - kernel (Callable): A probabilistic model with NumPyro primitives.
-            - samples (dict): A dictionary of posterior samples to condition on.
-            - param_input (str): The name of the parameter in the ``kernel`` for the
-                input data.
-            - param_output (str): The name of the parameter in the ``kernel`` for the
-                output data.
-            - kwargs_key (tuple[str, ...]): A tuple of keyword argument names.
-            - X (Array): Input data.
-            - y (Array): Output data.
-            - *args (tuple): Additional arguments constructed from the original keyword
+            - kernel: A probabilistic model with NumPyro primitives.
+            - samples: A dictionary of posterior samples to condition on.
+            - param_input: The name of the parameter in the ``kernel`` for the input
+                data.
+            - param_output: The name of the parameter in the ``kernel`` for the output
+                data.
+            - kwargs_key: A tuple of keyword argument names.
+            - X: Input data.
+            - y: Output data.
+            - *args: Additional arguments constructed from the original keyword
                 arguments (both array-like and non-array-like).
     """
     draws = shard_axis == "draw"

@@ -2,14 +2,14 @@ Streaming vs. On-Batch Methods
 ==============================
 
 .. image:: https://colab.research.google.com/assets/colab-badge.svg
-   :target: https://colab.research.google.com/github/markean/aimz/blob/main/docs/notebooks/disk_and_on_batch.ipynb
+   :target: https://colab.research.google.com/github/markean/aimz/blob/main/docs/notebooks/streaming_and_on_batch.ipynb
    :alt: Open In Colab
 
 \
 
 This page explains and compares the two complementary execution styles provided by :class:`~aimz.ImpactModel`:
 
-* **Streaming** (default) methods iterate over the input in chunks, materialize results incrementally, and can distribute the computation across devices. Where the streamed results accumulate is a separate choice — the *result store*: a persisted Zarr_ artifact (default) or host memory; see :ref:`result-store`.
+* **Streaming** (default) methods iterate over the input in chunks, materialize results incrementally, and can distribute the computation across devices. Where the streamed results accumulate is a separate choice called the *result store*: a persisted Zarr_ artifact (default) or host memory; see :ref:`result-store`.
 * **On-batch** (``*_on_batch`` suffix) methods execute a single, fully in-memory pass and can optionally return a plain :class:`dict` instead of a :external:class:`xarray.DataTree`. The naming mirrors the Keras convention to signal an immediate, single-batch, memory-resident operation.
 
 
@@ -28,7 +28,7 @@ The non-``*_on_batch`` methods default to a streaming (chunked) execution model 
 
 Comparison
 ----------
-Streaming variants target larger datasets, enable chunked processing, multi-device parallelism, and — with the persistent store — stable artifact generation.
+Streaming variants target larger datasets, enable chunked processing, multi-device parallelism, and, with the persistent store, stable artifact generation.
 These methods build internal data loaders, iterate in chunks, and decouple sampling from result handling, enabling concurrent execution.
 Outputs consolidate into a single lazy, Dask_-backed :external:class:`xarray.DataTree` whose chunks live in a Zarr_ store or directly in host memory, depending on the result store.
 On-batch variants, in contrast, favor minimal overhead, immediate return, and greater flexibility when posterior sample shapes are not shard-friendly.
@@ -125,20 +125,20 @@ Memory
 
     dt = im.predict(X, store="memory")
 
-The returned :external:class:`xarray.DataTree` has the same groups, dimensions, coordinates, and chunk structure as the persistent result — a lazy, Dask_-backed tree — except that its chunks *are* the resident batch arrays.
+The returned :external:class:`xarray.DataTree` has the same groups, dimensions, coordinates, and chunk structure as the persistent result (a lazy, Dask_-backed tree), except that its chunks *are* the resident batch arrays.
 Downstream summaries, group-bys, quantiles, and :meth:`~aimz.ImpactModel.estimate_effect` contrasts still parallelize across chunks exactly as they do for the persistent tree, but read directly from memory with no file I/O or chunk decoding.
-Call :external:meth:`~xarray.DataTree.load` on the result (or :external:meth:`~xarray.DataArray.load` on a variable) to materialize plain eager NumPy arrays — for example when iterating on many small selections, where per-operation Dask_ scheduling overhead dominates.
+Call :external:meth:`~xarray.DataTree.load` on the result (or :external:meth:`~xarray.DataArray.load` on a variable) to materialize plain eager NumPy arrays, for example when iterating on many small selections, where per-operation Dask_ scheduling overhead dominates.
 
 Use it when the complete result comfortably fits in host memory.
 ``output_dir`` does not apply and must be left ``None``.
-Unlike the on-batch methods, ``store="memory"`` still batches — and, on multiple devices, shards — the computation, so it handles inputs that a single unbatched pass cannot.
+Unlike the on-batch methods, ``store="memory"`` still batches (and, on multiple devices, shards) the computation, so it handles inputs that a single unbatched pass cannot.
 
 
 Quick Recommendations
 ---------------------
 * Moderate or large data: use the streaming methods (e.g., :meth:`~aimz.ImpactModel.fit`, :meth:`~aimz.ImpactModel.predict`).
 * Need results beyond the model's lifetime: keep the default persistent store and pass an explicit ``output_dir``.
-* Results fit in RAM and you iterate on summaries, group-bys, or plots: pass ``store="memory"`` to skip the Zarr_ layer — same lazy Dask_ tree, chunks resident in memory — while keeping batched (and sharded) execution; see :ref:`in-memory-results`.
+* Results fit in RAM and you iterate on summaries, group-bys, or plots: pass ``store="memory"`` to skip the Zarr_ layer (same lazy Dask_ tree, chunks resident in memory) while keeping batched (and sharded) execution; see :ref:`in-memory-results`.
 * Small data, rapid iteration, CI, or read-only / ephemeral filesystem: use on-batch (``*_on_batch``), or streaming with ``store="memory"``, which also writes nothing.
 * If :meth:`~aimz.ImpactModel.predict` warns that posterior sample shapes are not compatible with ``shard_axis="obs"``, it automatically reruns under ``shard_axis="draw"``.
   Pass ``shard_axis="draw"`` explicitly to silence the warning.

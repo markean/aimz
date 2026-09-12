@@ -348,8 +348,8 @@ def _validate_X_y_to_jax(
     when available.
 
     Args:
-        X (ArrayLike): Input data. The leading axis is the observation axis.
-        y (ArrayLike): Output data. The leading axis is the observation axis.
+        X: Input data. The leading axis is the observation axis.
+        y: Output data. The leading axis is the observation axis.
 
     Returns:
         Validated JAX arrays, returning ``X`` if only X is provided, or a tuple

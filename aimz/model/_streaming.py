@@ -16,7 +16,7 @@
 
 :class:`_OutputStreamer` owns the streaming subsystem extracted from
 :class:`~aimz.ImpactModel`: it builds (and caches) the sharded callables, places the
-posterior on devices, and drives the data- and draw-parallel write paths — into a Zarr
+posterior on devices, and drives the data- and draw-parallel write paths into a Zarr
 store on disk or accumulated in host memory, per the request. The model passes a stable
 :class:`_RuntimeContext` once and a per-call :class:`_WriteRequest` each time.
 """
@@ -94,7 +94,7 @@ class _Step(NamedTuple):
     A write strategy assembles a ``_Step`` for each item it streams (an observation
     batch or a draw chunk) and hands it to a ``compute`` closure that forwards it to the
     sharded sampler / log-likelihood function. The strategy fills the fields differently
-    — whole vs. sliced — but the ``compute`` signature is identical, which keeps the
+    (whole vs. sliced), but the ``compute`` signature is identical, which keeps the
     strategy streamers kind-agnostic.
     """
 
@@ -273,10 +273,10 @@ class _OutputStreamer:
     ) -> dict[str, DaskArray] | None:
         """Stream predictive samples to the request's destination.
 
-        Builds the predictive ``compute`` — one sharded-sampler call per item — and
+        Builds the predictive ``compute`` (one sharded-sampler call per item) and
         dispatches to the strategy streamer. ``shard_axis="draw"`` chunks the draw axis;
         ``shard_axis="obs"`` shards the observation axis and conditions every batch on
-        the replicated posterior, or — for prior predictive — on the global prior
+        the replicated posterior, or, for prior predictive, on the global prior
         samples drawn once from a single-element probe (a sharded probe would propagate
         the mesh axis onto global sites via JAX's sharding-in-types).
 
@@ -406,8 +406,8 @@ class _OutputStreamer:
     ) -> dict[str, DaskArray] | None:
         """Stream the log-likelihood to the request's destination.
 
-        Builds the log-likelihood ``compute`` — one sharded call per item, keyed by the
-        output site — and dispatches to the strategy streamer.
+        Builds the log-likelihood ``compute`` (one sharded call per item, keyed by the
+        output site) and dispatches to the strategy streamer.
 
         Args:
             req: The streamed write job (its single return site is the output site).

@@ -55,8 +55,7 @@ def mcmc(request: pytest.FixtureRequest) -> MCMC:
     """Fixture for creating an MCMC object.
 
     Args:
-        request (pytest.FixtureRequest): The pytest request object to access the
-            parameter.
+        request: The pytest request object to access the parameter.
 
     Returns:
         An MCMC object configured with the provided model.
@@ -76,8 +75,7 @@ def vi(request: pytest.FixtureRequest) -> SVI:
     """Fixture for creating a variational inference object.
 
     Args:
-        request (pytest.FixtureRequest): The pytest request object to access the
-            parameter.
+        request: The pytest request object to access the parameter.
 
     Returns:
         A variational inference object configured with the provided model.

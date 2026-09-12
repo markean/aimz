@@ -248,8 +248,8 @@ def test_interrupted_memory_stream_releases_partial_batches(
 ) -> None:
     """An interrupted stream frees its retained batches despite a held traceback.
 
-    An exception's traceback keeps the interrupted call stack — including the write
-    strategy — reachable (e.g. a notebook's post-mortem state), so the failure path
+    An exception's traceback keeps the interrupted call stack (including the write
+    strategy) reachable (e.g. a notebook's post-mortem state), so the failure path
     must empty the retained batches rather than rely on the frames dying.
     """
     X, _ = synthetic_data

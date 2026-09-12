@@ -148,8 +148,8 @@ def _plan_writers(
     The single place where the host-memory envelope and the concurrency bounds meet.
     Invariants, stated once:
 
-    - In-flight host bytes — queued items, items being applied, and the pipelined
-      producer's :data:`_PIPELINE_DEPTH` pre-collected batches — stay within the
+    - In-flight host bytes (queued items, items being applied, and the pipelined
+      producer's :data:`_PIPELINE_DEPTH` pre-collected batches) stay within the
       memory available at planning time.
     - The pool never exceeds the strategy's ceiling, the batch count, the CPU-derived
       automatic cap (or the explicit request), or what the memory envelope can feed.
@@ -749,7 +749,7 @@ def _writer(
 
     If opening the group or a write fails, the error is logged, its details are put into
     ``error_queue``, and the shared ``stop`` event is set so every worker switches to
-    drain mode — subsequent items are discarded (still marked done, so the bounded
+    drain mode: subsequent items are discarded (still marked done, so the bounded
     producer cannot block and ``queue.join()`` can finish) rather than written into a
     store that is being torn down.
 
@@ -894,7 +894,7 @@ def _write_loop(
 
     Shared by the data- and draw-parallel write paths. Items are produced through
     :func:`_iter_pipelined`, which keeps consecutive items' computations in flight on
-    the device and finalizes them in item order — preserving the offset bookkeeping the
+    the device and finalizes them in item order, preserving the offset bookkeeping the
     strategies rely on. Array creation/enqueuing is delegated to ``strategy`` and
     writing to a shared pool of background writer threads. The pool size is chosen from
     the strategy's :attr:`~_WriteStrategy.max_writers` ceiling (``1`` pins an

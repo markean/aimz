@@ -15,7 +15,7 @@ Quick Install
 
          pip install -U aimz
 
-      Installs aimz with CPU-only JAX — no GPU drivers required.
+      Installs aimz with CPU-only JAX, with no GPU drivers required.
 
    .. tab-item:: GPU (CUDA 13)
 
@@ -37,7 +37,7 @@ Quick Install
          conda install conda-forge::aimz
 
       Installs the CPU version from conda-forge.
-      GPU support via conda is not yet available — use pip for GPU installs.
+      GPU support via conda is not yet available, so use pip for GPU installs.
 
 
 Optional Extras
