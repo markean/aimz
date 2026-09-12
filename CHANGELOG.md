@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file and are best
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.15.1](https://github.com/markean/aimz/releases/tag/v0.15.1) - 2026-09-12
+
+### Fixed
+
+- {func}`~aimz.mlflow.autolog` no longer skips all logging when the source code of the model's kernel cannot be retrieved.
+- {func}`~aimz.mlflow.autolog` no longer advances the model's internal PRNG key when inferring the model signature.
+
 ## [v0.15.0](https://github.com/markean/aimz/releases/tag/v0.15.0) - 2026-08-20
 
 ### Added
