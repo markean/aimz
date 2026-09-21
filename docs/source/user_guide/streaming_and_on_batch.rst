@@ -29,7 +29,7 @@ The non-``*_on_batch`` methods default to a streaming (chunked) execution model 
 Comparison
 ----------
 Streaming variants target larger datasets, enable chunked processing, multi-device parallelism, and, with the persistent store, stable artifact generation.
-These methods build internal data loaders, iterate in chunks, and decouple sampling from result handling, enabling concurrent execution.
+These methods iterate over the input in chunks, whether it is an array or a data loader you supply (see :doc:`dataloader`), and decouple sampling from result handling, enabling concurrent execution.
 Outputs consolidate into a single lazy, Dask_-backed :external:class:`xarray.DataTree` whose chunks live in a Zarr_ store or directly in host memory, depending on the result store.
 On-batch variants, in contrast, favor minimal overhead, immediate return, and greater flexibility when posterior sample shapes are not shard-friendly.
 
@@ -75,6 +75,10 @@ Feature Summary
      - Yes (``batch_size``)
      - Yes (``batch_size``)
      - No (single pass)
+   * - Data loader input
+     - Yes (see :doc:`dataloader`)
+     - Yes (see :doc:`dataloader`)
+     - No (arrays only)
    * - Device parallelism (sharding)
      - Yes
      - Yes

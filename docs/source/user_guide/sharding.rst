@@ -24,7 +24,7 @@ Data parallelism (``shard_axis="obs"``, default)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 The input is sharded across devices along axis 0 (the observation axis), while the posterior samples are **replicated** on every device.
 This is the standard `data-parallel <https://jax.readthedocs.io/en/latest/distributed_data_loading.html#data-parallelism>`__ pattern: each device holds the full posterior and processes a slice of the observations.
-Because it streams the input (an array or an :class:`~aimz.utils.data.ArrayLoader`), it scales to inputs larger than device memory.
+Because it streams the input (an array or a data loader, see :doc:`dataloader`), it scales to inputs larger than device memory.
 It does require a **replicable** posterior: every sample site must have a static shape that does not depend on the number of observations, which holds when all latents are global.
 
 Draw parallelism (``shard_axis="draw"``)
@@ -39,7 +39,7 @@ Choosing a Strategy
 ``shard_axis="obs"`` (the default) suits models with global latents and inputs that are large or supplied through a data loader.
 Prefer ``shard_axis="draw"`` when the model has local latents, or when the input is small relative to the number of draws so replicating it on every device stays cheap.
 
-Choosing a ``batch_size`` that is a multiple of :external:func:`jax.local_device_count` keeps the shards even and avoids padding the final batch.
+Choosing a ``batch_size`` that is a multiple of :external:func:`jax.local_device_count` keeps the shards even and avoids padding the final batch; the same applies to the batch sizes a data loader yields.
 
 
 Automatic Rerun for Incompatible Posteriors
