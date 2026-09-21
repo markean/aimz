@@ -1,7 +1,46 @@
-Training & Inference with Data Loaders
-======================================
+Data Loaders
+============
 
-This guide explains how to use the built-in :class:`~aimz.utils.data.ArrayDataset` and :class:`~aimz.utils.data.ArrayLoader`, how they integrate with high-level methods like :meth:`~aimz.ImpactModel.fit` / :meth:`~aimz.ImpactModel.predict`, and how to construct fully custom training or inference loops (e.g., integrating a PyTorch ``DataLoader``).
+The streaming methods (:meth:`~aimz.ImpactModel.predict`, :meth:`~aimz.ImpactModel.sample_posterior_predictive`, :meth:`~aimz.ImpactModel.sample_prior_predictive`, and :meth:`~aimz.ImpactModel.log_likelihood`) accept their input either as arrays or as a *data loader*: any finite iterable that yields one batch at a time.
+This guide describes the batch contract a data loader must satisfy, the built-in :class:`~aimz.utils.data.ArrayDataset` and :class:`~aimz.utils.data.ArrayLoader`, how loaders integrate with the high-level methods, and how to use an external loader such as a PyTorch ``DataLoader`` for inference or in a custom training loop.
+
+
+The Batch Contract
+------------------
+A data loader is any finite iterable (a list, a generator, or an object defining ``__iter__``) whose items are mappings from kernel parameter names to NumPy or JAX arrays.
+Each batch must satisfy the following:
+
+* It contains the input field, named after :attr:`~aimz.ImpactModel.param_input` (``"X"`` by default).
+* For :meth:`~aimz.ImpactModel.log_likelihood`, it also contains the output field, named after :attr:`~aimz.ImpactModel.param_output` (``"y"`` by default).
+* Any additional array argument of the kernel is supplied as a field named after that parameter, not as a keyword argument alongside the loader.
+  Non-array keyword arguments are passed to the method as usual.
+* Every field has the batch's observations on its leading axis, and all fields share that axis size.
+* Field names and the shapes beyond the leading axis stay the same from batch to batch.
+
+Batches may differ in size, and the loader does not need to define ``__len__``.
+Padding for multi-device sharding and device placement are handled by aimz one batch at a time, so a loader yields exactly its own rows.
+Streamed results are written in the order the batches arrive, so a loader used for prediction or likelihood evaluation should yield the data in a fixed order.
+
+A generator is the simplest data loader:
+
+.. code-block:: python
+
+    def batches(X, y, size):
+        for start in range(0, len(X), size):
+            yield {"X": X[start : start + size], "y": y[start : start + size]}
+
+
+    dt = im.predict(batches(X, y, size=1000))
+    ll = im.log_likelihood(batches(X, y, size=1000))
+
+A generator is consumed once, so build a fresh one for each call.
+
+.. note::
+
+    Data loaders apply to the streaming methods under ``shard_axis="obs"`` (the default).
+    ``shard_axis="draw"`` holds the whole input resident on every device, so it requires an in-memory array (see :doc:`sharding`).
+    :meth:`~aimz.ImpactModel.fit` accepts arrays or an :class:`~aimz.utils.data.ArrayLoader`; for any other loader, write a training loop with :meth:`~aimz.ImpactModel.train_on_batch` (see :ref:`external-loaders`).
+    The ``batch_size`` argument of the streaming methods is ignored for a loader, which controls its own batching.
 
 
 Built-in Dataset & Loader
@@ -24,40 +63,32 @@ By default arrays are stored as supplied; pass ``to_jax=True`` to convert to JAX
 
 :class:`~aimz.utils.data.ArrayLoader`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-It consumes an :class:`~aimz.utils.data.ArrayDataset` and produces an iterator of ``(batch_dict, n_pad)`` pairs:
-
-* ``batch_dict`` maps each field name to a (possibly padded) mini-batch array.
-* ``n_pad`` is the number of synthetic examples added so the (possibly last) batch size is divisible by the number of local devices.
-  When no device is specified (``device=None``), no padding is performed and ``n_pad`` is always ``0``.
-  If set, batch is padded (if needed) then moved via :external:func:`jax.device_put`.
-  Padding uses :external:func:`jax.numpy.pad` with ``mode="edge"`` (it repeats the last row) so shapes align for sharded computations; callers can ignore those rows (track via ``n_pad``).
-  The ``batch_size`` must be a positive integer, and if using a device or sharding it is best to choose a multiple of :external:func:`jax.local_device_count()` to avoid padding.
+It consumes an :class:`~aimz.utils.data.ArrayDataset` and yields one batch mapping (field name to array) at a time, satisfying the contract above.
+Batches follow the dataset order, or a fresh permutation per epoch with ``shuffle=True``, seeded from ``rng_key``.
+``batch_size`` must be a positive integer; the last batch is smaller when the dataset size is not a multiple of it.
 
 .. code-block:: python
 
-   import jax
    from jax import random
    from aimz.utils.data import ArrayDataset, ArrayLoader
 
-   # Suppose local_device_count() == 8 and batch_size == 10 -> padded to 16
    loader = ArrayLoader(
-     ArrayDataset(X=X, y=y),
-     rng_key=random.key(0),
-     batch_size=10,
-     shuffle=True,
-     device=jax.devices()[0],  # or a Sharding spec
+       ArrayDataset(X=X, y=y),
+       rng_key=random.key(0),
+       batch_size=10,
+       shuffle=True,
    )
 
-   for batch, n_pad in loader:
-       # batch is a dict: {'X': ..., 'y': ...}; n_pad == 6
+   for batch in loader:
+       # batch is a dict: {'X': ..., 'y': ...}
        ...
 
 
 .. note::
     :class:`~aimz.utils.data.ArrayDataset` and :class:`~aimz.utils.data.ArrayLoader` are lightweight utilities for working with in-memory arrays.
-    They are intentionally minimal and primarily used internally to enable batching, optional shuffling, and (when required) padding for device sharding.
+    They are intentionally minimal and primarily used internally to enable batching and optional shuffling.
     The user can use them directly, but they are not meant to be a comprehensive data pipeline abstraction.
-    For out-of-core datasets, implement a generator that streams data in chunks from disk or cloud storage.
+    For out-of-core datasets, write a generator that streams batches from disk or cloud storage and pass it directly (see :ref:`external-loaders`).
 
 
 Storage and Device Transfer
@@ -65,6 +96,7 @@ Storage and Device Transfer
 When raw arrays are passed to high-level methods like :meth:`~aimz.ImpactModel.fit` or :meth:`~aimz.ImpactModel.predict`, aimz stores them as NumPy arrays on host memory and transfers one batch at a time to the device during iteration.
 JAX arrays passed in are converted to NumPy at this stage; their original device placement is not preserved.
 This allows datasets larger than device memory to be processed without modification.
+The batches a data loader yields are treated the same way: NumPy batches stay on the host until their turn, and each batch is padded for sharding if needed and placed on the model's device or sharding.
 You can keep arrays on device by constructing a loader explicitly with ``to_jax=True``:
 
 .. code-block:: python
@@ -79,10 +111,9 @@ You can keep arrays on device by constructing a loader explicitly with ``to_jax=
 
 Integration with High-Level Methods
 -----------------------------------
-High-level methods (:meth:`~aimz.ImpactModel.fit`, :meth:`~aimz.ImpactModel.predict`) accept either raw arrays (``X``, ``y``, etc.) or an :class:`~aimz.utils.data.ArrayLoader`.
+The streaming methods accept raw arrays (``X``, ``y``, etc.), an :class:`~aimz.utils.data.ArrayLoader`, or any data loader satisfying the contract above, while :meth:`~aimz.ImpactModel.fit` accepts raw arrays or an :class:`~aimz.utils.data.ArrayLoader`.
 Passing a loader gives finer control over batch size, ordering, shuffling, and storage backend (see above).
-Any model-level device or sharding configuration takes precedence over the loader's ``device`` argument.
-If the user pass raw arrays instead, :meth:`~aimz.ImpactModel.fit` may internally construct a temporary loader with heuristic batching.
+If the user passes raw arrays instead, :meth:`~aimz.ImpactModel.fit` may internally construct a temporary loader with heuristic batching.
 
 .. code-block:: python
 
@@ -115,11 +146,6 @@ If the user pass raw arrays instead, :meth:`~aimz.ImpactModel.fit` may internall
     :class:`~aimz.utils.data.ArrayLoader` does not shuffle by default (``shuffle=False``), which is what prediction requires: streamed output is written in input order, so a ``shuffle=True`` loader would misalign the results with the input rows.
     Enable ``shuffle=True`` only for training/fit loops.
 
-.. note::
-
-    A loader's dataset fields are bound to the kernel's parameters by name: the input field must match :attr:`~aimz.ImpactModel.param_input` (``"X"`` by default), the output field used by :meth:`~aimz.ImpactModel.log_likelihood` must match :attr:`~aimz.ImpactModel.param_output`, and any additional array fields must be named after the kernel parameters they supply.
-    Provide such extra arrays as loader fields rather than as keyword arguments alongside the loader.
-
 
 Custom Training Loops with :meth:`~aimz.ImpactModel.train_on_batch`
 -------------------------------------------------------------------
@@ -130,11 +156,7 @@ For fine-grained control (e.g., custom scheduling, gradient accumulation, or ear
     im = ImpactModel(...)
 
     for epoch in range(num_epochs):
-        for batch, n_pad in loader:  # `n_pad` may be > 0 when padded
-            if n_pad > 0:
-                # Optionally handle or ignore the extra padded rows
-                ...
-
+        for batch in loader:
             # Perform one update step on this batch
             im.train_on_batch(**batch)
             ...
@@ -142,18 +164,35 @@ For fine-grained control (e.g., custom scheduling, gradient accumulation, or ear
         # (Optional) validation, logging, early stop checks
 
 
-Using Other DataLoader Implementations
---------------------------------------
+.. _external-loaders:
+
+Using Other Data Loader Implementations
+---------------------------------------
 You are not restricted to the built-in loader.
-Any iterable that yields a mapping (field name -> array) per batch works with a custom loop, provided the arrays are convertible via :external:func:`jax.numpy.asarray`.
+For the streaming methods, wrap an external loader in a generator that converts each batch into a mapping of NumPy or JAX arrays keyed by the kernel's parameter names:
 
 .. code-block:: python
 
+    import numpy as np
+    from torch.utils.data import DataLoader, TensorDataset
+
     im = ImpactModel(...)
 
-    # PyTorch DataLoader example (CPU -> JAX conversion per batch)
-    dataset = TensorDataset(X, y)
-    loader = DataLoader(dataset, batch_size=10)
+    # PyTorch DataLoader example (CPU tensors -> NumPy conversion per batch)
+    loader = DataLoader(TensorDataset(X, y), batch_size=1000)
+
+
+    def batches():
+        for X_batch, y_batch in loader:
+            yield {"X": np.asarray(X_batch), "y": np.asarray(y_batch)}
+
+
+    dt = im.predict(batches())
+    ll = im.log_likelihood(batches())
+
+For training, iterate the loader yourself and call :meth:`~aimz.ImpactModel.train_on_batch` on each batch:
+
+.. code-block:: python
 
     losses = []
     for epoch in range(num_epochs):
@@ -186,20 +225,7 @@ After a manual training loop you can populate the model state so downstream call
     # Register the samples so predictive methods can use them
     im.set_posterior_sample(posterior_sample)
 
-You can reuse the same loop pattern for prediction or likelihood evaluation:
-
-.. code-block:: python
-
-    # Collect per-batch posterior predictive means for target 'y'
-    batch_means = []
-    for X_batch, _ in loader:
-        preds = im.predict_on_batch(X_batch, return_datatree=False)
-        # preds['y'] shape: (num_draws, batch_size, ...); average over draws
-        batch_means.append(preds["y"].mean(axis=0))
-
-    # Stitch back together along the observation axis
-    posterior_predictive_mean = jnp.concatenate(batch_means, axis=0)
-    # ... further metrics / evaluation
+The same wrapped loader then serves prediction and likelihood evaluation directly, as shown above.
 
 
 See Also
