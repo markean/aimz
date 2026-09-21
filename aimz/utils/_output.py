@@ -49,8 +49,6 @@ if TYPE_CHECKING:
     from tqdm.auto import tqdm
     from zarr import Array, Group
 
-    from aimz.utils.data import ArrayLoader
-
 
 # Maximum in-flight compute steps in `_write_loop`. Depth 2 dispatches the next step
 # before collecting the previous one, overlapping device compute with device-to-host
@@ -112,7 +110,7 @@ class _StreamPlan:
 
 def _determine_writer_count(
     max_writers: int,
-    num_items: int,
+    num_items: int | None,
     requested: int | None = None,
 ) -> int:
     """Determine the writer-thread pool size for a stream.
@@ -124,7 +122,7 @@ def _determine_writer_count(
 
     Args:
         max_writers: The write strategy's ceiling on concurrent writers.
-        num_items: Total number of items the producer will emit.
+        num_items: Total items, or ``None`` when the stream length is unknown.
         requested: Explicit writer count, or ``None`` to choose automatically.
 
     Returns:
@@ -133,12 +131,12 @@ def _determine_writer_count(
     auto = min(cpu_count() or 1, _WRITER_COUNT_MAX)
     n = auto if requested is None else requested
 
-    return max(1, min(n, max_writers, num_items))
+    return max(1, min(n, max_writers, num_items if num_items is not None else n))
 
 
 def _plan_writers(
     max_writers: int,
-    n_items: int,
+    n_items: int | None,
     item_nbytes: int,
     n_sites: int,
     requested: int | None = None,
@@ -159,8 +157,9 @@ def _plan_writers(
 
     Args:
         max_writers: The write strategy's ceiling on concurrent writers.
-        n_items: Total number of batches the producer will emit.
-        item_nbytes: Bytes one batch commits across all of its sites.
+        n_items: Total batches, or ``None`` when the stream length is unknown.
+        item_nbytes: Bytes the first batch commits across all sites. For variable
+            batch sizes this is an estimate; the queue remains bounded by item count.
         n_sites: Number of ``(site, payload)`` items each batch enqueues.
         requested: Explicit writer count, or ``None`` to choose automatically.
 
@@ -184,11 +183,16 @@ def _plan_writers(
     )
     queue_size = max(
         1,
-        min(_QUEUE_SIZE_MAX, n_items * n_sites, mem_slots) - n_writers,
+        min(
+            _QUEUE_SIZE_MAX,
+            n_items * n_sites if n_items is not None else _QUEUE_SIZE_MAX,
+            mem_slots,
+        )
+        - n_writers,
     )
     plan = _StreamPlan(n_writers=n_writers, queue_size=queue_size)
     logger.debug(
-        "Write plan: %d batches x %d site(s) (%d bytes/batch), %d writer(s), "
+        "Write plan: %s batches x %d site(s) (%d bytes/batch), %d writer(s), "
         "queue depth %d",
         n_items,
         n_sites,
@@ -215,7 +219,7 @@ def _validate_streamed_axis_size(
     axis: int,
     chunk_size: int,
 ) -> None:
-    """Verify a site's first batch emits the streamed axis at the batch size.
+    """Verify a site emits the streamed axis at the expected batch size.
 
     Contiguous batches must tile the streamed axis, so a site that does not emit it
     (e.g. a global site with no observation axis under ``axis=1``) cannot be streamed.
@@ -233,10 +237,10 @@ def _validate_streamed_axis_size(
     if arr.shape[axis] != chunk_size:
         requirement = "the input batch size" if axis == 1 else "the draw chunk size"
         msg = (
-            f"Slice writing requires each site's axis-{axis} size to match "
+            f"Streaming requires each site's axis-{axis} size to match "
             f"{requirement}. Site {site!r} emitted shape {arr.shape} for a batch "
             f"of size {chunk_size}; this kernel is not currently supported under "
-            "slice writing."
+            "streaming."
         )
         raise NotImplementedError(msg)
 
@@ -351,6 +355,7 @@ class _WriteStrategy(Protocol):
         at :attr:`sink`. An in-memory strategy overrides this to return its finished
         site arrays, Dask-backed over the retained host batches.
         """
+        return None
 
 
 class _AppendWriteStrategy(_WriteStrategy):
@@ -361,10 +366,8 @@ class _AppendWriteStrategy(_WriteStrategy):
     order-sensitive, so this strategy is not concurrency-safe. It must be written by a
     single consumer (:attr:`max_writers` is ``1``).
 
-    This is the designated fallback for data loaders with unknown length, broadening the
-    accepted loaders beyond :class:`~aimz.utils.data.ArrayLoader`. Note the write side
-    is not yet reachable by such loaders: see :func:`_select_write_strategy` for what
-    the streaming path still assumes. If single-consumer appends ever become the
+    This is the designated fallback for generic data loaders, including unknown-length
+    and variable-batch streams. If single-consumer appends ever become the
     bottleneck for that use case, a windowed hybrid (grow the array by a window of
     batches, slice-write concurrently within each window) can restore pool parallelism
     as a third strategy without touching :func:`_write_loop`.
@@ -555,22 +558,13 @@ class _MemoryWriteStrategy(_WriteStrategy):
     resident batches, mirroring the chunk layout the Zarr-backed strategies persist.
     """
 
-    def __init__(
-        self,
-        *,
-        total: int,
-        batch_size: int,
-        axis: int,
-    ) -> None:
+    def __init__(self, *, axis: int) -> None:
         """Initialize the in-memory write strategy.
 
         Args:
-            total: Full size of the streamed axis.
-            batch_size: Chunk length along the streamed axis.
             axis: The streamed axis the batches tile (``0`` for draws, ``1`` for
                 observations).
         """
-        self._chunk_size = min(batch_size, total)
         self._axis = axis
         self._batches: dict[str, list[np.ndarray]] = {}
 
@@ -596,26 +590,12 @@ class _MemoryWriteStrategy(_WriteStrategy):
     def create_arrays(self, site_arrays: Mapping[str, np.ndarray]) -> None:
         """Register batch lists for sites not yet seen.
 
-        On the first call (the first batch), every site is verified to emit a
-        streamed-axis size equal to the batch size; mismatches raise.
-
         Args:
             site_arrays: Mapping of site name to the (post-slice) sample array emitted
                 for the current batch.
-
-        Raises:
-            NotImplementedError: If any return site emits a streamed-axis size that does
-                not match the batch size.
         """
-        for site, arr in site_arrays.items():
-            if site not in self._batches:
-                _validate_streamed_axis_size(
-                    arr,
-                    site=site,
-                    axis=self._axis,
-                    chunk_size=self._chunk_size,
-                )
-                self._batches[site] = []
+        for site in site_arrays:
+            self._batches.setdefault(site, [])
 
     def result(self) -> dict[str, DaskArray]:
         """Assemble each site's retained batches into a lazy Dask array.
@@ -651,8 +631,7 @@ def _create_slice_strategy(
 ) -> _WriteStrategy:
     """Build the slice-writing strategy for a stream with a known streamed-axis size.
 
-    The single place where the destination is chosen: Zarr-backed when an artifact
-    path is given, host-memory accumulation otherwise.
+    Zarr-backed when an artifact path is given, host-memory accumulation otherwise.
 
     Args:
         artifact_path: Path of the Zarr group to create site arrays in, or ``None``
@@ -665,7 +644,7 @@ def _create_slice_strategy(
         The write strategy to use.
     """
     if artifact_path is None:
-        return _MemoryWriteStrategy(total=total, batch_size=batch_size, axis=axis)
+        return _MemoryWriteStrategy(axis=axis)
 
     return _SliceWriteStrategy(
         artifact_path=artifact_path,
@@ -677,54 +656,38 @@ def _create_slice_strategy(
 
 def _select_write_strategy(
     artifact_path: Path | None,
-    dataloader: ArrayLoader,
+    *,
+    total: int | None,
+    batch_size: int,
 ) -> _WriteStrategy:
-    """Build the data-parallel write strategy for a data loader.
+    """Build the observation writer for a regular loader or a generic stream.
 
-    Slice writing needs the batch count and dataset size up front; if either is
-    unavailable the append strategy is used instead. Both stream the observation
-    (axis-1) dimension.
-
-    The append fallback anticipates loaders with unknown length, but it is reachable
-    only by a loader that defines ``__len__`` while its dataset does not: the streaming
-    path upstream still assumes a known batch count, so a fully length-less loader fails
-    before strategy selection. Supporting such loaders means relaxing those assumptions
-    (e.g. lazy per-batch key derivation, an unknown progress total, and ``n_items=None``
-    planning) alongside an adapter for the batch format.
+    Host-memory accumulation needs no size information. On disk, a known total is
+    supplied only for regular, chunk-aligned batches; generic streams append serially
+    so variable batch boundaries cannot race on Zarr chunks.
 
     Args:
         artifact_path: Path of the Zarr group to create site arrays in, or ``None``
             to accumulate the results in host memory.
-        dataloader: The data loader the sample loop will iterate.
+        total: Exact row count for regular batches, or ``None`` for generic streams.
+        batch_size: Regular batch size, or the first generic batch's size.
 
     Returns:
         The write strategy to use.
-
-    Raises:
-        NotImplementedError: If the results are to accumulate in host memory while the
-            data loader's dataset size is unavailable (in-memory accumulation has no
-            append fallback).
     """
-    try:
-        len(dataloader)
-        n_obs = len(dataloader.dataset)
-    except (TypeError, AttributeError):
-        if artifact_path is None:
-            msg = (
-                "In-memory accumulation requires the data loader's dataset size up "
-                "front. Provide a sized dataset or use the persistent store."
-            )
-            raise NotImplementedError(msg) from None
+    if artifact_path is None:
+        return _MemoryWriteStrategy(axis=1)
+    if total is None:
         return _AppendWriteStrategy(
             artifact_path=artifact_path,
-            batch_size=dataloader.batch_size,
+            batch_size=batch_size,
             axis=1,
         )
 
-    return _create_slice_strategy(
-        artifact_path,
-        total=n_obs,
-        batch_size=dataloader.batch_size,
+    return _SliceWriteStrategy(
+        artifact_path=artifact_path,
+        total=total,
+        batch_size=batch_size,
         axis=1,
     )
 
@@ -883,7 +846,7 @@ def _discard_partial_output(sink: Path | MutableMapping[str, list[np.ndarray]]) 
 
 def _write_loop(
     items: Iterable,
-    n_items: int,
+    n_items: int | None,
     strategy: _WriteStrategy,
     dispatch: Callable[[object], object],
     finalize: Callable[[object], dict[str, np.ndarray]],
@@ -903,7 +866,7 @@ def _write_loop(
 
     Args:
         items: Items to iterate (batches paired with keys, or draw-chunk starts).
-        n_items: Number of items (used to size the writer queue and the pool).
+        n_items: Number of items, or ``None`` (used to size the queue and pool).
         strategy: Write strategy that creates and enqueues each item's site arrays
             and owns the destination (:attr:`~_WriteStrategy.sink`).
         dispatch: Launches one item's computation and returns its in-flight handle.

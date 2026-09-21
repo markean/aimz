@@ -72,6 +72,7 @@ from aimz.utils._validation import (
     _validate_store,
     _validate_X_y_to_jax,
 )
+from aimz.utils.data import ArrayLoader
 from aimz.utils.data._input_setup import (
     _fits_single_batch,
     _setup_inputs,
@@ -81,8 +82,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping, Sized
 
     from dask.array import Array as DaskArray
-
-    from aimz.utils.data import ArrayLoader
 
 logger = logging.getLogger(__name__)
 
@@ -499,7 +498,7 @@ class ImpactModel(BaseModel):
 
     def _plan_obs_batching(
         self,
-        X: ArrayLike | ArrayLoader,
+        X: ArrayLike | ArrayLoader | Iterable[Mapping[str, Array | np.ndarray]],
         batch_size: int | None,
     ) -> Literal["proceed", "whole", "fallback"]:
         """Decide how the observation axis may be batched given the posterior.
@@ -510,7 +509,8 @@ class ImpactModel(BaseModel):
         a single whole-input batch on a single device keeps it intact.
 
         Args:
-            X: Input data. If array-like, the leading axis is the observation axis.
+            X: Input array with observations on the leading axis, or a data loader
+                yielding batch mappings keyed by kernel parameter names.
             batch_size: The requested batch size, or ``None`` to use the default.
 
         Returns:
@@ -605,7 +605,7 @@ class ImpactModel(BaseModel):
         """Draw samples from the prior predictive distribution.
 
         Args:
-            X: Input data. The leading axis is the observation axis.
+            X: Input array with observations on the leading axis.
             num_samples: The number of samples to draw.
             rng_key: A pseudo-random number generator key. By default, an internal key
                 is used and split as needed.
@@ -654,7 +654,7 @@ class ImpactModel(BaseModel):
 
     def sample_prior_predictive(
         self,
-        X: ArrayLike,
+        X: ArrayLike | ArrayLoader | Iterable[Mapping[str, Array | np.ndarray]],
         *,
         num_samples: int = 1000,
         rng_key: Array | None = None,
@@ -673,7 +673,8 @@ class ImpactModel(BaseModel):
         results in host memory instead.
 
         Args:
-            X: Input data. The leading axis is the observation axis.
+            X: Input array with observations on the leading axis, or a data loader
+                yielding batch mappings keyed by kernel parameter names.
             num_samples: The number of samples to draw.
             rng_key: A pseudo-random number generator key. By default, an internal key
                 is used and split as needed.
@@ -685,7 +686,7 @@ class ImpactModel(BaseModel):
             batch_size: Size of each batch, taken from the input under
                 ``shard_axis="obs"`` and from the draws under ``shard_axis="draw"``.
                 Also used as the chunk size when storing results. If ``None``, it is
-                chosen automatically.
+                chosen automatically. Ignored for an existing data loader.
             store: Where results accumulate. ``"persistent"`` (default) streams
                 batches to a
                 Zarr store under ``output_dir`` and returns a lazy, Dask-backed tree
@@ -728,7 +729,31 @@ class ImpactModel(BaseModel):
         _validate_store(store, output_dir=output_dir)
         _validate_aligned_inputs(X, y=None, kwargs=kwargs)
 
-        args_bound = self._bind_kernel_args(X, kwargs=kwargs)
+        stream = None
+        if isinstance(X, ArrayLike):
+            args_bound = self._bind_kernel_args(X, kwargs=kwargs)
+        else:
+            stream = self._streamer.setup_stream(
+                _WriteRequest(
+                    shard_axis,
+                    X=X,
+                    return_sites=(),
+                    num_samples=num_samples,
+                    batch_size=batch_size,
+                    artifact_path=None,
+                    progress=progress,
+                    loader_rng_key=self.rng_key,
+                    kwargs=kwargs,
+                ),
+                y=None,
+                stacklevel=4,
+            )
+            batch = dict(stream[2])
+            batch.pop(self.param_output, None)
+            args_bound = self._bind_kernel_args(
+                batch.pop(self.param_input),
+                kwargs={**kwargs, **batch},
+            )
 
         # Build the kernel spec from a single-row slice so the trace runs on a tiny
         # input. Only when the spec is not already cached (fitted models keep theirs),
@@ -762,6 +787,7 @@ class ImpactModel(BaseModel):
                 rng_key=rng_key,
                 group="prior_predictive",
                 posterior=self.posterior,
+                stream=stream,
             ),
             store=store,
             output_dir=output_dir,
@@ -866,7 +892,7 @@ class ImpactModel(BaseModel):
         set to ``True``.
 
         Args:
-            X: Input data. The leading axis is the observation axis.
+            X: Input array with observations on the leading axis.
             intervention: A dictionary mapping sample sites to their corresponding
                 intervention values. Interventions enable counterfactual analysis by
                 modifying the specified sample sites during prediction (posterior
@@ -902,7 +928,7 @@ class ImpactModel(BaseModel):
 
     def sample_posterior_predictive(
         self,
-        X: ArrayLike | ArrayLoader,
+        X: ArrayLike | ArrayLoader | Iterable[Mapping[str, Array | np.ndarray]],
         *,
         intervention: dict | None = None,
         rng_key: Array | None = None,
@@ -920,9 +946,8 @@ class ImpactModel(BaseModel):
         ``in_sample`` automatically set to ``True``.
 
         Args:
-            X: Input data. If array-like, the leading axis is the observation axis.
-                Alternatively, a data loader that holds all array-like objects and
-                handles batching internally.
+            X: Input array with observations on the leading axis, or a data loader
+                yielding batch mappings keyed by kernel parameter names.
             intervention: A dictionary mapping sample sites to their corresponding
                 intervention values. Interventions enable counterfactual analysis by
                 modifying the specified sample sites during prediction (posterior
@@ -998,8 +1023,8 @@ class ImpactModel(BaseModel):
         """Run a single VI step on the given batch of data.
 
         Args:
-            X: Input data. The leading axis is the observation axis.
-            y: Output data. The leading axis is the observation axis.
+            X: Input array with observations on the leading axis.
+            y: Output array with observations on the leading axis.
             rng_key: A pseudo-random number generator key. By default, an internal key
                 is used and split as needed. The key is only used for initialization if
                 the internal SVI state is not yet set.
@@ -1073,8 +1098,8 @@ class ImpactModel(BaseModel):
             :external:class:`~numpyro.infer.mcmc.MCMC` instance from `NumPyro`_.
 
         Args:
-            X: Input data. The leading axis is the observation axis.
-            y: Output data. The leading axis is the observation axis.
+            X: Input array with observations on the leading axis.
+            y: Output array with observations on the leading axis.
             num_steps: Number of steps for variational inference optimization. Ignored
                 if the inference method is MCMC.
             num_samples: The number of posterior samples to draw. Ignored if the
@@ -1171,10 +1196,9 @@ class ImpactModel(BaseModel):
         then posterior samples are drawn from the fitted model.
 
         Args:
-            X: Input data. If array-like, the leading axis is the observation axis.
-                Alternatively, a data loader that holds all array-like objects and
-                handles batching internally.
-            y: Output data. The leading axis is the observation axis. Must be ``None``
+            X: Input array with observations on the leading axis, or an
+                :class:`~aimz.utils.data.ArrayLoader`.
+            y: Output array with observations on the leading axis. Must be ``None``
                 if ``X`` is a data loader.
             num_samples: The number of posterior samples to draw.
             rng_key: A pseudo-random number generator key. By default, an internal key
@@ -1193,7 +1217,8 @@ class ImpactModel(BaseModel):
             The fitted model instance, enabling method chaining.
 
         Raises:
-            TypeError: If the inference method is MCMC.
+            TypeError: If the inference method is MCMC or ``X`` is a custom iterable
+                rather than arrays or an :class:`~aimz.utils.data.ArrayLoader`.
             ValueError: If ``y`` is missing when ``X`` is array-like, or the array
                 inputs do not share one leading-axis size.
 
@@ -1205,6 +1230,12 @@ class ImpactModel(BaseModel):
             similar constructs).
         """
         _validate_aligned_inputs(X, y=y, kwargs=kwargs)
+        if not isinstance(X, (ArrayLike, ArrayLoader)):
+            msg = (
+                "`fit()` requires arrays or an ArrayLoader; "
+                "use train_on_batch for custom loaders."
+            )
+            raise TypeError(msg)
         if y is None and isinstance(X, ArrayLike):
             msg = (
                 "`y` is required for `fit()` when `X` is array-like. "
@@ -1218,10 +1249,9 @@ class ImpactModel(BaseModel):
             )
             raise TypeError(msg)
 
-        self._num_samples = num_samples
-
+        rng_key_model = self._rng_key
         if rng_key is None:
-            self._rng_key, rng_key = random.split(self._rng_key)
+            rng_key_model, rng_key = random.split(self._rng_key)
 
         rng_key, rng_subkey = random.split(rng_key)
         dataloader, kwargs_extra = _setup_inputs(
@@ -1240,6 +1270,9 @@ class ImpactModel(BaseModel):
             stacklevel=3,
             **kwargs,
         )
+        # Commit model state only once the inputs are accepted
+        self._rng_key = rng_key_model
+        self._num_samples = num_samples
 
         logger.info("Performing variational inference optimization")
         losses: list[npt.NDArray] = []
@@ -1249,11 +1282,11 @@ class ImpactModel(BaseModel):
             pbar = tqdm(
                 dataloader,
                 desc=f"Epoch {epoch + 1}/{epochs}",
-                total=len(dataloader),
+                total=len(cast("ArrayLoader", dataloader)),
                 disable=not progress,
                 dynamic_ncols=True,
             )
-            for batch, _ in pbar:
+            for batch in pbar:
                 self._vi_state, loss = self.train_on_batch(
                     **batch,
                     **kwargs_extra,
@@ -1411,7 +1444,7 @@ class ImpactModel(BaseModel):
             parallelism.
 
         Args:
-            X: Input data. The leading axis is the observation axis.
+            X: Input array with observations on the leading axis.
             intervention: A dictionary mapping sample sites to their corresponding
                 intervention values. Interventions enable counterfactual analysis by
                 modifying the specified sample sites during prediction (posterior
@@ -1475,7 +1508,7 @@ class ImpactModel(BaseModel):
 
     def predict(
         self,
-        X: ArrayLike | ArrayLoader,
+        X: ArrayLike | ArrayLoader | Iterable[Mapping[str, Array | np.ndarray]],
         *,
         intervention: dict | None = None,
         rng_key: Array | None = None,
@@ -1498,9 +1531,8 @@ class ImpactModel(BaseModel):
         host memory instead.
 
         Args:
-            X: Input data. If array-like, the leading axis is the observation axis.
-                Alternatively, a data loader that holds all array-like objects and
-                handles batching internally.
+            X: Input array with observations on the leading axis, or a data loader
+                yielding batch mappings keyed by kernel parameter names.
             intervention: A dictionary mapping sample sites to their corresponding
                 intervention values. Interventions enable counterfactual analysis by
                 modifying the specified sample sites during prediction (posterior
@@ -1747,7 +1779,7 @@ class ImpactModel(BaseModel):
 
     def log_likelihood(
         self,
-        X: ArrayLike | ArrayLoader,
+        X: ArrayLike | ArrayLoader | Iterable[Mapping[str, Array | np.ndarray]],
         y: ArrayLike | None = None,
         *,
         shard_axis: Literal["obs", "draw"] = "obs",
@@ -1764,10 +1796,10 @@ class ImpactModel(BaseModel):
         results in host memory instead.
 
         Args:
-            X: Input data. If array-like, the leading axis is the observation axis.
-                Alternatively, a data loader that holds all array-like objects and
-                handles batching internally.
-            y: Output data. The leading axis is the observation axis. Must be ``None``
+            X: Input array with observations on the leading axis, or a data loader
+                yielding batch mappings keyed by kernel parameter names, including the
+                observed output.
+            y: Output array with observations on the leading axis. Must be ``None``
                 if ``X`` is a data loader.
             shard_axis: Multi-device sharding strategy; no effect on a single device.
                 ``"obs"`` (default) shards the input across devices and replicates the

@@ -73,7 +73,7 @@ class TestArrayLoader:
     @staticmethod
     def _shuffled_batches(loader: ArrayLoader) -> np.ndarray:
         """Concatenate one epoch's batches of `y` into a single array."""
-        return np.concatenate([batch["y"] for batch, _ in loader])
+        return np.concatenate([batch["y"] for batch in loader])
 
     def test_legacy_prng_key(self) -> None:
         """A legacy uint32 PRNGKey raises a UserWarning."""
@@ -96,17 +96,6 @@ class TestArrayLoader:
                 rng_key=random.key(42),
                 batch_size=0.5,
             )
-
-    def test_array_loader(self) -> None:
-        """Padding along unsupported axis in a 1D array raises a ValueError."""
-        y = jnp.array([1, 2, 3])
-        dataset = ArrayDataset(y=y)
-        loader = ArrayLoader(dataset, rng_key=random.key(42))
-        with pytest.raises(
-            ValueError,
-            match=r"Padding 1D arrays is only supported along axis 0.",
-        ):
-            loader.pad_array(y, n_pad=1, axis=1)
 
     def test_shuffle_is_deterministic_given_key(self) -> None:
         """Loaders built with the same key yield identical shuffled batches."""

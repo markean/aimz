@@ -22,22 +22,21 @@ from warnings import warn
 
 import jax.numpy as jnp
 import numpy as np
-from jax import Array, device_put, random
+from jax import Array, random
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
     import numpy.typing as npt
-    from jax.sharding import Sharding
 
     from aimz.utils.data.array_dataset import ArrayDataset
 
 
 class ArrayLoader:
-    """Data loader for batching and padding arrays.
+    """Data loader yielding mappings of named arrays.
 
-    Passing a loader to a model method adopts it for the call: the method sets
-    ``device`` to its own setting and, when shuffling, iteration advances ``rng_key``.
+    Shuffling advances ``rng_key`` on each iteration. Model methods handle device
+    placement and any padding required for sharding.
     """
 
     def __init__(
@@ -47,7 +46,6 @@ class ArrayLoader:
         *,
         batch_size: int = 32,
         shuffle: bool = False,
-        device: Sharding | None = None,
     ) -> None:
         """Initialize an ArrayLoader instance.
 
@@ -56,9 +54,6 @@ class ArrayLoader:
             rng_key: A pseudo-random number generator key.
             batch_size: The number of samples per batch.
             shuffle: Whether to shuffle the dataset before batching.
-            device: The device or sharding specification to which the data should be
-                moved. By default, no device transfer is applied. When used as an input
-                to a model, this will be overridden by the device setting of the model.
         """
         self.dataset = dataset
         if (
@@ -76,52 +71,12 @@ class ArrayLoader:
             warn(msg, category=UserWarning, stacklevel=2)
             rng_key = random.wrap_key_data(rng_key)
         self.rng_key = rng_key
-        self.device = device
 
-    def pad_array(
-        self,
-        x: Array | npt.NDArray,
-        n_pad: int,
-        axis: int = 0,
-    ) -> Array | npt.NDArray:
-        """Pad an array to ensure compatibility with sharding.
-
-        Args:
-            x: The input array to be padded.
-            n_pad: The number of padding elements to add.
-            axis: The axis along which to apply the padding.
-
-        Returns:
-            The padded array with padding applied along the specified axis.
-
-        Raises:
-            ValueError: If padding is requested along an unsupported axis for a 1D
-                array.
-        """
-        if x.ndim == 1:
-            if axis == 0:
-                pad_width = (0, n_pad)
-            else:
-                msg = "Padding 1D arrays is only supported along axis 0."
-                raise ValueError(msg)
-        else:
-            # Initialize all axes with no padding
-            pad_width = [(0, 0)] * x.ndim
-            # Apply padding to the specified axis
-            pad_width[axis] = (0, n_pad)
-
-        if isinstance(x, Array):
-            return jnp.pad(x, pad_width=pad_width, mode="edge")
-
-        # Pad using NumPy (prevents whole-dataset transfers to GPU)
-        return np.pad(x, pad_width=pad_width, mode="edge")
-
-    def __iter__(self) -> Iterator[tuple[dict[str, Array | npt.NDArray], int]]:
+    def __iter__(self) -> Iterator[dict[str, Array | npt.NDArray]]:
         """Iterate over the dataset in batches.
 
         Yields:
             A batch of arrays with data from the dataset.
-            The number of padded samples added for sharding compatibility.
         """
         indices = self.indices
         if self.shuffle:
@@ -131,29 +86,11 @@ class ArrayLoader:
         for start in range(0, len(self.dataset), self.batch_size):
             end = start + self.batch_size
             batch_idx = indices[start:end]
-            if self.device is not None:
-                n_pad = (-len(batch_idx)) % self.device.num_devices
-                if n_pad > 0:
-                    batch = {
-                        k: self.pad_array(arr[batch_idx], n_pad=n_pad)
-                        for k, arr in self.dataset.arrays.items()
-                        if arr is not None
-                    }
-                else:
-                    batch = {
-                        k: arr[batch_idx]
-                        for k, arr in self.dataset.arrays.items()
-                        if arr is not None
-                    }
-                batch = {k: device_put(v, self.device) for k, v in batch.items()}
-            else:
-                n_pad = 0
-                batch = {
-                    k: arr[batch_idx]
-                    for k, arr in self.dataset.arrays.items()
-                    if arr is not None
-                }
-            yield batch, n_pad
+            yield {
+                k: arr[batch_idx]
+                for k, arr in self.dataset.arrays.items()
+                if arr is not None
+            }
 
     def __len__(self) -> int:
         """Return the number of batches.

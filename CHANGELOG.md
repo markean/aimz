@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file and are best
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- The streaming methods ({meth}`~aimz.ImpactModel.predict`, {meth}`~aimz.ImpactModel.sample_posterior_predictive`, {meth}`~aimz.ImpactModel.sample_prior_predictive`, and {meth}`~aimz.ImpactModel.log_likelihood`) now accept any data loader as `X`: a finite iterable yielding batch mappings keyed by kernel parameter names with NumPy or JAX array values, such as a generator or a list of dictionaries, not only an {class}`~aimz.utils.data.ArrayLoader` ([#312](https://github.com/markean/aimz/issues/312)).
+
+### Changed
+
+- {class}`~aimz.utils.data.ArrayLoader` now yields plain batch mappings (array name to array) instead of `(batch, n_pad)` tuples, and no longer pads or moves batches itself: padding for sharding and device placement are handled by the model methods, so iterating a loader directly yields exactly the dataset's rows ([#312](https://github.com/markean/aimz/issues/312)).
+
+### Removed
+
+- The `device` argument and `pad_array` method of {class}`~aimz.utils.data.ArrayLoader`; the model methods now pad and place each batch themselves ([#312](https://github.com/markean/aimz/issues/312)).
+
+### Fixed
+
+- {meth}`~aimz.ImpactModel.fit` with an {class}`~aimz.utils.data.ArrayLoader` no longer silently drops array keyword arguments: they now raise a `ValueError` asking for them to be included as dataset fields, matching the streaming entry points ([#312](https://github.com/markean/aimz/issues/312)).
+- An empty data loader passed to a streaming entry point now raises a `ValueError` instead of returning an empty tree ([#312](https://github.com/markean/aimz/issues/312)).
+- {meth}`~aimz.ImpactModel.fit` no longer advances the model's internal PRNG key or updates its posterior draw count when it rejects its inputs ([#312](https://github.com/markean/aimz/issues/312)).
+
 ## [v0.15.1](https://github.com/markean/aimz/releases/tag/v0.15.1) - 2026-09-12
 
 ### Fixed

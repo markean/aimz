@@ -17,12 +17,14 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable, Mapping
 from os import cpu_count
 from typing import TYPE_CHECKING
 from warnings import warn
 
 import jax.numpy as jnp
 import numpy as np
+from jax import Array, device_put
 from jax.typing import ArrayLike
 
 from aimz.utils._kwargs import _group_kwargs
@@ -30,10 +32,67 @@ from aimz.utils._output import _WRITER_COUNT_MAX
 from aimz.utils.data import ArrayDataset, ArrayLoader
 
 if TYPE_CHECKING:
-    from jax import Array
     from jax.sharding import Sharding
 
 logger = logging.getLogger(__name__)
+
+
+def _prepare_batch(
+    batch: object,
+    *,
+    param_input: str,
+    device: Sharding | None = None,
+) -> tuple[dict[str, Array | np.ndarray], int]:
+    """Validate named observation arrays and optionally pad/place them for inference.
+
+    Used both to inspect a stream's first batch without device transfer and to
+    prepare each inference batch. The returned count excludes synthetic rows.
+
+    Args:
+        batch: Mapping of parameter names to NumPy or JAX arrays.
+        param_input: Required model input field.
+        device: Observation sharding, or ``None`` for unpadded inspection.
+
+    Returns:
+        The prepared mapping and the number of valid observations.
+
+    Raises:
+        TypeError: If the batch is not a mapping of named NumPy/JAX arrays.
+        ValueError: If the input is missing, empty, scalar, or misaligned.
+    """
+    if not isinstance(batch, Mapping):
+        msg = "Data loaders must yield mappings of parameter names to NumPy/JAX arrays."
+        raise TypeError(msg)
+
+    if param_input not in batch:
+        msg = f"The data loader has no field named {param_input!r} for the model input."
+        raise ValueError(msg)
+
+    arrays: dict[str, Array | np.ndarray] = {}
+    for name, arr in batch.items():
+        if not isinstance(name, str) or not isinstance(arr, (Array, np.ndarray)):
+            msg = "Batch fields must have string names and NumPy/JAX array values."
+            raise TypeError(msg)
+        if arr.ndim == 0 or arr.shape[0] == 0:
+            msg = f"Batch field {name!r} must have a nonempty observation axis."
+            raise ValueError(msg)
+        arrays[name] = arr
+    n_valid = arrays[param_input].shape[0]
+    if any(arr.shape[0] != n_valid for arr in arrays.values()):
+        msg = "All batch fields must have the same observation-axis size."
+        raise ValueError(msg)
+
+    if device is not None:
+        n_pad = -n_valid % device.num_devices
+        for name, value in arrays.items():
+            arr = value
+            if n_pad:
+                pad = jnp.pad if isinstance(arr, Array) else np.pad
+                arr = pad(arr, [(0, n_pad), *[(0, 0)] * (arr.ndim - 1)], mode="edge")
+            arrays[name] = device_put(arr, device)
+
+    return arrays, n_valid
+
 
 # Soft memory budget per batch or chunk, in bytes. The element cap is derived at call
 # time by dividing this by the output dtype's item size, so the budget tracks precision:
@@ -121,7 +180,7 @@ def _fits_single_batch(axis_size: int, other_size: int) -> bool:
 
 def _setup_inputs(
     *,
-    X: ArrayLike | ArrayLoader,
+    X: ArrayLike | ArrayLoader | Iterable[Mapping[str, Array | np.ndarray]],
     y: ArrayLike | None,
     param_input: str,
     param_output: str,
@@ -132,14 +191,13 @@ def _setup_inputs(
     device: Sharding | None = None,
     stacklevel: int = 2,
     **kwargs: object,
-) -> tuple[ArrayLoader, dict]:
-    """Prepare an dataloader and grouped keyword arguments.
+) -> tuple[Iterable[Mapping[str, Array | np.ndarray]], dict]:
+    """Prepare a batch iterable and grouped keyword arguments.
 
     Args:
-        X: Input data. If array-like, the leading axis is the observation axis.
-            Alternatively, a data loader that holds all array-like objects and handles
-            batching internally.
-        y: Output data. The leading axis is the observation axis. Must be ``None`` if
+        X: Input array with observations on the leading axis, or a data loader
+            yielding batch mappings keyed by kernel parameter names.
+        y: Output array with observations on the leading axis. Must be ``None`` if
             ``X`` is a data loader.
         param_input: Dataset key for ``X``, matching the kernel's input parameter so
             each batch is keyed as the downstream lookup expects.
@@ -148,9 +206,7 @@ def _setup_inputs(
         batch_size: The size of batches for data loading.
         num_samples: Number of samples to draw, which affects the size of batches.
         shuffle: Whether to shuffle the dataset before batching.
-        device: The device or sharding specification to which the data should be moved.
-            By default, no device transfer is applied. If ``X`` is a data loader, it
-            will override the device setting of the loader.
+        device: Sharding used to resolve an array input's batch size.
         stacklevel: Frames between this function and the user's call site, so the
             batch-size divisibility warning is attributed to the user's own line;
             each caller passes the depth of its chain.
@@ -170,11 +226,10 @@ def _setup_inputs(
         if X.ndim == 0:
             msg = "`X` must have at least 1 dimension."
             raise ValueError(msg)
-        if y is not None:
-            y = np.asarray(y)
-            if y.ndim == 0:
-                msg = "`y` must have at least 1 dimension."
-                raise ValueError(msg)
+        y = np.asarray(y) if y is not None else None
+        if y is not None and y.ndim == 0:
+            msg = "`y` must have at least 1 dimension."
+            raise ValueError(msg)
         num_devices = device.num_devices if device else 1
         if batch_size is None:
             batch_size = _resolve_batch_size(
@@ -200,20 +255,24 @@ def _setup_inputs(
             rng_key=rng_key,
             batch_size=batch_size,
             shuffle=shuffle,
-            device=device,
         )
-    elif isinstance(X, ArrayLoader):
+    elif isinstance(X, Iterable) and not isinstance(X, (str, bytes, Mapping)):
         if y is not None:
             msg = "`y` must be `None` when `X` is already a data loader."
             raise TypeError(msg)
-        if X.shuffle and not shuffle:
+        if kwargs_array:
+            msg = (
+                "Array keyword arguments are not supported alongside a data loader; "
+                "include them as batch fields instead."
+            )
+            raise ValueError(msg)
+        if isinstance(X, ArrayLoader) and X.shuffle and not shuffle:
             msg = (
                 "The data loader shuffles, so results will not follow the data order. "
                 "Use `shuffle=False` to preserve it."
             )
             warn(msg, category=UserWarning, stacklevel=stacklevel)
         loader = X
-        loader.device = device
     else:
         msg = f"`X` must be an array-like or a data loader, got {type(X).__name__!r}."
         raise TypeError(msg)
