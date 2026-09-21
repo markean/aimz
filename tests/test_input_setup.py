@@ -88,10 +88,10 @@ def test_y_zero_dim_raises() -> None:
 
 
 def test_x_wrong_type_raises() -> None:
-    """A non-array, non-loader ``X`` (e.g. a Python list) raises ``TypeError``."""
+    """A non-array, non-loader ``X`` (e.g. a dict) raises ``TypeError``."""
     with pytest.raises(TypeError, match=r"`X` must be an array-like or a data loader"):
         _setup_inputs(
-            X=[[1.0, 2.0], [3.0, 4.0]],
+            X={"X": jnp.ones((4, 2))},
             y=None,
             param_input="X",
             param_output="y",

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from itertools import chain
 from typing import TYPE_CHECKING, Literal, NamedTuple, cast
 
 from jax import Array, device_get, device_put, random, tree
@@ -35,11 +36,15 @@ from aimz.utils._kwargs import _group_kwargs
 from aimz.utils._output import (
     _create_slice_strategy,
     _select_write_strategy,
+    _validate_streamed_axis_size,
     _write_loop,
 )
-from aimz.utils._validation import _is_arraylike
 from aimz.utils.data import ArrayLoader
-from aimz.utils.data._input_setup import _resolve_batch_size, _setup_inputs
+from aimz.utils.data._input_setup import (
+    _prepare_batch,
+    _resolve_batch_size,
+    _setup_inputs,
+)
 from aimz.utils.data._sharding import (
     _create_sharded_log_likelihood,
     _create_sharded_sampler,
@@ -48,11 +53,10 @@ from aimz.utils.data._sharding import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sized
+    from collections.abc import Callable, Iterable, Iterator, Mapping, Sized
     from pathlib import Path
 
     import numpy as np
-    import numpy.typing as npt
     from dask.array import Array as DaskArray
     from jax.sharding import Mesh, Sharding
     from jax.typing import ArrayLike
@@ -77,7 +81,7 @@ class _WriteRequest:
     """The invariants of one streamed write job (shared by both write strategies)."""
 
     shard_axis: Literal["obs", "draw"]
-    X: ArrayLike | ArrayLoader
+    X: ArrayLike | ArrayLoader | Iterable[Mapping[str, Array | np.ndarray]]
     return_sites: tuple[str, ...]
     num_samples: int
     batch_size: int | None
@@ -104,9 +108,9 @@ class _Step(NamedTuple):
     """Per-draw keys for predictive sampling; ``None`` for log-likelihood."""
     samples: dict[str, Array]
     """Conditioning samples: the whole posterior (data) or one draw chunk (draw)."""
-    x: Array
+    x: Array | np.ndarray
     """Input data: one observation batch (data) or the whole replicated input (draw)."""
-    y: Array | None
+    y: Array | np.ndarray | None
     """Output data (log-likelihood only)."""
     tail: tuple
     """Array-kwargs and extra-kwargs values forwarded after ``x``."""
@@ -175,53 +179,82 @@ class _OutputStreamer:
     def _resolve_kwarg_key(
         self,
         req: _WriteRequest,
+        batch: Mapping[str, Array | np.ndarray] | None = None,
     ) -> tuple[tuple[str, ...], int, dict]:
         """Resolve the ordered kwarg names, array count, and extras for a stream.
 
         The names drive both the ``shard_map`` in-spec arity and the by-name binding
         in ``dispatch``, so they come from a single source and cannot drift. Array
-        arguments come from the data loader's dataset fields when ``req.X`` is an
-        :class:`~aimz.utils.data.ArrayLoader`; otherwise from the call kwargs. Non-array
-        extras always come from the call kwargs.
+        arguments come from the retained first observation batch, or from the call
+        kwargs for draw streaming. Non-array extras come from the call kwargs.
 
         Args:
             req: The streamed write job.
+            batch: The first observation batch, or ``None`` for draw streaming.
 
         Returns:
             - The ordered ``kwargs_key`` (array names then extra names).
             - The number of array arguments.
             - The extras dict (the non-array call kwargs).
-
-        Raises:
-            ValueError: If array keyword arguments are passed alongside a data loader,
-                or the loader has no field matching
-                :attr:`~aimz.ImpactModel.param_input`.
         """
         kwargs_array, kwargs_extra = _group_kwargs(req.kwargs)
-        if isinstance(req.X, ArrayLoader):
-            if kwargs_array:
-                msg = (
-                    "Array keyword arguments are not supported alongside a data "
-                    "loader; include them as fields of the loader's dataset instead: "
-                    f"{sorted(kwargs_array)}."
-                )
-                raise ValueError(msg)
-            fields = req.X.dataset.arrays
-            if self._ctx.param_input not in fields:
-                msg = (
-                    f"The data loader has no field named {self._ctx.param_input!r} "
-                    "for the model input; name the input array to match `param_input`."
-                )
-                raise ValueError(msg)
+        if batch is not None:
             array_names = tuple(
                 name
-                for name in fields
+                for name in batch
                 if name not in (self._ctx.param_input, self._ctx.param_output)
             )
         else:
             array_names = tuple(kwargs_array)
 
         return (*array_names, *kwargs_extra), len(array_names), kwargs_extra
+
+    def setup_stream(
+        self,
+        req: _WriteRequest,
+        y: ArrayLike | None,
+        *,
+        stacklevel: int = 7,
+    ) -> tuple[
+        Iterable[Mapping[str, Array | np.ndarray]],
+        Iterator,
+        dict[str, Array | np.ndarray],
+    ]:
+        """Open one observation iterator and retain its validated first batch.
+
+        Args:
+            req: The streamed write job.
+            y: Observed outputs supplied alongside an array input.
+            stacklevel: Warning attribution depth passed to input setup.
+
+        Returns:
+            The loader, its iterator including the first batch, and that batch.
+
+        Raises:
+            ValueError: If the loader is empty.
+        """
+        loader, _ = _setup_inputs(
+            X=req.X,
+            y=y,
+            param_input=self._ctx.param_input,
+            param_output=self._ctx.param_output,
+            rng_key=req.loader_rng_key,
+            batch_size=req.batch_size,
+            num_samples=req.num_samples,
+            shuffle=False,
+            device=self._ctx.partitioned_sharding,
+            stacklevel=stacklevel,
+            **req.kwargs,
+        )
+        batches = iter(loader)
+        try:
+            first = next(batches)
+        except StopIteration:
+            msg = "The data loader must yield at least one nonempty batch."
+            raise ValueError(msg) from None
+        first, _ = _prepare_batch(first, param_input=self._ctx.param_input)
+
+        return loader, chain((first,), batches), first
 
     def place_posterior(
         self,
@@ -270,6 +303,14 @@ class _OutputStreamer:
         rng_key: Array,
         group: str,
         posterior: dict[str, Array] | None,
+        stream: (
+            tuple[
+                Iterable[Mapping[str, Array | np.ndarray]],
+                Iterator,
+                dict[str, Array | np.ndarray],
+            ]
+            | None
+        ) = None,
     ) -> dict[str, DaskArray] | None:
         """Stream predictive samples to the request's destination.
 
@@ -287,6 +328,7 @@ class _OutputStreamer:
             group: Output group (``"posterior_predictive"``, ``"predictions"``, or
                 ``"prior_predictive"``).
             posterior: The posterior to condition on (ignored for prior predictive).
+            stream: An already opened observation stream, when used to trace the model.
 
         Returns:
             The site arrays, Dask-backed over the retained host batches, when
@@ -294,7 +336,12 @@ class _OutputStreamer:
 
         .. _NumPyro: https://num.pyro.ai/
         """
-        kwargs_key, n_kwargs_array, kwargs_extra = self._resolve_kwarg_key(req)
+        if req.shard_axis == "obs" and stream is None:
+            stream = self.setup_stream(req, y=None)
+        kwargs_key, n_kwargs_array, kwargs_extra = self._resolve_kwarg_key(
+            req,
+            batch=stream[2] if stream is not None else None,
+        )
         kind = "prior_predictive" if group == "prior_predictive" else "predict"
         fn = self._cached_fn(
             kind,
@@ -323,7 +370,8 @@ class _OutputStreamer:
             disable=not req.progress,
             dynamic_ncols=True,
         )
-        if req.shard_axis == "draw":
+        # Draw-parallel opened no observation stream
+        if stream is None:
             chunk_posterior = (
                 {}
                 if group == "prior_predictive"
@@ -339,39 +387,9 @@ class _OutputStreamer:
             )
 
         if group == "prior_predictive":
-            # Single-element, unsharded probe draws the global prior samples once; the
-            # return sites are dropped so they are redrawn per batch. Prior samples are
-            # redrawn every call, so this is a one-shot (not cached) placement. The
-            # probe is built from a single-row slice so the whole input is not converted
-            # to host just to draw one batch.
-            if isinstance(req.X, ArrayLoader):
-                X_probe, kwargs_probe = req.X, req.kwargs
-            else:
-                # Anything non-array-like is passed through unsliced so that
-                # `_setup_inputs` rejects it with its usual error.
-                X_probe = (
-                    cast("Array | npt.NDArray", req.X)[:1]
-                    if _is_arraylike(req.X)
-                    else req.X
-                )
-                kwargs_probe = {
-                    k: cast("Array | npt.NDArray", v)[:1] if _is_arraylike(v) else v
-                    for k, v in req.kwargs.items()
-                }
-            probe, _ = _setup_inputs(
-                X=X_probe,
-                y=None,
-                param_input=self._ctx.param_input,
-                param_output=self._ctx.param_output,
-                rng_key=req.loader_rng_key,
-                batch_size=1,
-                num_samples=req.num_samples,
-                shuffle=False,
-                device=None,
-                stacklevel=6,
-                **kwargs_probe,
-            )
-            batch, _ = next(iter(probe))
+            # Single-row probe from the retained first batch, so the stream is neither
+            # consumed nor restarted and the trace runs on a tiny input.
+            batch = {name: arr[:1] for name, arr in stream[2].items()}
             rng_key, rng_subkey = random.split(rng_key)
             samples = _sample_forward(
                 kernel,
@@ -389,7 +407,7 @@ class _OutputStreamer:
         return self._write_data(
             req,
             compute=compute,
-            y=None,
+            stream=stream,
             samples=samples,
             kwargs_key=kwargs_key,
             rng_key=rng_key,
@@ -423,7 +441,17 @@ class _OutputStreamer:
         .. _NumPyro: https://num.pyro.ai/
         """
         site = self._ctx.param_output
-        kwargs_key, n_kwargs_array, kwargs_extra = self._resolve_kwarg_key(req)
+        stream = self.setup_stream(req, y=y) if req.shard_axis == "obs" else None
+        if stream is not None and site not in stream[2]:
+            msg = (
+                f"Log likelihood requires the observed output field {site!r} "
+                "in each batch."
+            )
+            raise ValueError(msg)
+        kwargs_key, n_kwargs_array, kwargs_extra = self._resolve_kwarg_key(
+            req,
+            batch=stream[2] if stream is not None else None,
+        )
         fn = self._cached_fn(
             "log_likelihood",
             shard_axis=req.shard_axis,
@@ -451,7 +479,8 @@ class _OutputStreamer:
             disable=not req.progress,
             dynamic_ncols=True,
         )
-        if req.shard_axis == "draw":
+        # Draw-parallel opened no observation stream
+        if stream is None:
             return self._write_draws(
                 req,
                 compute=compute,
@@ -464,7 +493,7 @@ class _OutputStreamer:
         return self._write_data(
             req,
             compute=compute,
-            y=y,
+            stream=stream,
             samples=self.place_posterior(
                 posterior,
                 self._ctx.replicated_sharding,
@@ -478,7 +507,11 @@ class _OutputStreamer:
         self,
         req: _WriteRequest,
         compute: Callable[[_Step], dict[str, Array]],
-        y: ArrayLike | None,
+        stream: tuple[
+            Iterable[Mapping[str, Array | np.ndarray]],
+            Iterator,
+            dict[str, Array | np.ndarray],
+        ],
         samples: dict[str, Array],
         kwargs_key: tuple[str, ...],
         rng_key: Array | None,
@@ -497,7 +530,7 @@ class _OutputStreamer:
             req: The streamed write job.
             compute: Closure that runs the sharded sampler / log-likelihood on a
                 :class:`_Step`.
-            y: Output data, for log-likelihood; ``None`` otherwise.
+            stream: The loader, opened iterator, and retained first batch.
             samples: The whole (replicated) posterior to condition every batch on.
             kwargs_key: Ordered kwarg names (array names then extra names) used to bind
                 each batch's ``tail`` by name.
@@ -509,31 +542,30 @@ class _OutputStreamer:
             Zarr-backed write.
         """
         _, kwargs_extra = _group_kwargs(req.kwargs)
-        dataloader, _ = _setup_inputs(
-            X=req.X,
-            y=y,
-            param_input=self._ctx.param_input,
-            param_output=self._ctx.param_output,
-            rng_key=req.loader_rng_key,
-            batch_size=req.batch_size,
-            num_samples=req.num_samples,
-            shuffle=False,
-            device=self._ctx.partitioned_sharding,
-            stacklevel=7,
-            **req.kwargs,
-        )
-        n_batches = len(dataloader)
+        dataloader, batches, first = stream
+        # Only the built-in loader guarantees exact length and aligned chunks.
+        # External lengths may be estimates or raise; execution never queries them.
+        known_size = type(dataloader) is ArrayLoader
+        n_batches = len(dataloader) if known_size else None
         pbar.reset(total=n_batches)
-        if rng_key is None:
-            subkeys = [None] * n_batches
-        else:
-            # One fresh key per batch; the sampler splits it into per-draw keys.
-            rng_key, *subkeys = random.split(rng_key, num=n_batches + 1)
-            if self._ctx.replicated_sharding is not None:
-                subkeys = device_put(subkeys, device=self._ctx.replicated_sharding)
 
-        def dispatch(item: object) -> tuple[dict[str, Array], int]:
-            (batch, n_pad), subkey = cast("tuple", item)
+        def dispatch(item: object) -> tuple[dict[str, Array], int, int]:
+            nonlocal rng_key
+            batch, n_valid = _prepare_batch(
+                item,
+                param_input=self._ctx.param_input,
+                device=self._ctx.partitioned_sharding,
+            )
+            if batch.keys() != first.keys() or any(
+                arr.shape[1:] != first[name].shape[1:] for name, arr in batch.items()
+            ):
+                msg = "Batch fields and non-observation shapes must remain consistent."
+                raise ValueError(msg)
+            subkey = None
+            if rng_key is not None:
+                # One fresh key per batch; the sampler splits it into per-draw keys.
+                rng_key, subkey = random.split(rng_key)
+                subkey = device_put(subkey, self._ctx.replicated_sharding)
             # Bind by name (array kwargs from the batch, extras from the call) in
             # `kwargs_key` order, so positions match the sharded callable's in-specs.
             tail = tuple(
@@ -551,19 +583,29 @@ class _OutputStreamer:
             out = compute(step)
             tree.map(lambda arr: arr.copy_to_host_async(), out)
 
-            return out, n_pad
+            return out, n_valid, batch[self._ctx.param_input].shape[0]
 
         def finalize(pending: object) -> dict[str, np.ndarray]:
-            out, n_pad = cast("tuple[dict[str, Array], int]", pending)
+            out, n_valid, n_padded = cast("tuple[dict[str, Array], int, int]", pending)
+            result = {}
+            for site, value in device_get(out).items():
+                arr = value[:, None] if value.ndim == 1 else value
+                _validate_streamed_axis_size(
+                    arr,
+                    site=site,
+                    axis=1,
+                    chunk_size=n_padded,
+                )
+                result[site] = arr[:, :n_valid]
+            return result
 
-            return {
-                site: arr[:, None] if arr.ndim == 1 else arr[:, : -n_pad or None]
-                for site, arr in device_get(out).items()
-            }
-
-        strategy = _select_write_strategy(req.artifact_path, dataloader=dataloader)
+        strategy = _select_write_strategy(
+            req.artifact_path,
+            total=len(dataloader.dataset) if known_size else None,
+            batch_size=first[self._ctx.param_input].shape[0],
+        )
         _write_loop(
-            items=zip(dataloader, subkeys, strict=True),
+            items=batches,
             n_items=n_batches,
             strategy=strategy,
             dispatch=dispatch,

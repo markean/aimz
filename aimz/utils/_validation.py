@@ -30,7 +30,7 @@ from aimz._exceptions import KernelValidationError, NotFittedError
 
 if TYPE_CHECKING:
     from collections import OrderedDict
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
     from pathlib import Path
 
     import xarray as xr
@@ -111,7 +111,10 @@ def _validate_group(dt_baseline: xr.DataTree, dt_intervention: xr.DataTree) -> s
     return group
 
 
-def _validate_shard_axis(shard_axis: str, X: ArrayLike | ArrayLoader) -> None:
+def _validate_shard_axis(
+    shard_axis: str,
+    X: ArrayLike | ArrayLoader | Iterable[Mapping[str, Array | np.ndarray]],
+) -> None:
     """Validate a multi-device sharding strategy and its input compatibility.
 
     Checked before any ``shard_axis`` coercion so the contract holds regardless of
@@ -156,7 +159,10 @@ def _validate_store(store: str, output_dir: str | Path | None) -> None:
         raise ValueError(msg)
 
 
-def _validate_batch_size(batch_size: int | None, X: ArrayLike | ArrayLoader) -> None:
+def _validate_batch_size(
+    batch_size: int | None,
+    X: ArrayLike | ArrayLoader | Iterable[Mapping[str, Array | np.ndarray]],
+) -> None:
     """Validate an explicit ``batch_size`` for the streaming entry points.
 
     ``batch_size`` is ignored for a data loader (it batches internally) and ``None``
@@ -183,7 +189,7 @@ def _validate_batch_size(batch_size: int | None, X: ArrayLike | ArrayLoader) -> 
 
 
 def _validate_aligned_inputs(
-    X: ArrayLike | ArrayLoader,
+    X: ArrayLike | ArrayLoader | Iterable[Mapping[str, Array | np.ndarray]],
     y: ArrayLike | None,
     kwargs: dict,
 ) -> None:
