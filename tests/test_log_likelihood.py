@@ -123,6 +123,20 @@ def test_log_likelihood_requires_y(
         im_lm_svi_fitted.log_likelihood(X, progress=False)
 
 
+def test_log_likelihood_requires_output_field(
+    synthetic_data: tuple[Array, Array],
+    im_lm_svi_fitted: ImpactModel,
+) -> None:
+    """`log_likelihood()` requires the output field in every loader batch."""
+    X, _ = synthetic_data
+    with pytest.raises(ValueError, match="requires the observed output field 'y'"):
+        im_lm_svi_fitted.log_likelihood(
+            iter([{"X": X}]),
+            store="memory",
+            progress=False,
+        )
+
+
 def test_log_likelihood_cleans_subdir_on_write_failure(
     synthetic_data: tuple[Array, Array],
     im_lm_svi_fitted: ImpactModel,

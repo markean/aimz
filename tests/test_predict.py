@@ -14,9 +14,11 @@
 
 """Tests for the `.predict()` method."""
 
+from collections.abc import Iterator
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import numpy as np
 import numpyro.distributions as dist
 import pytest
 from jax import Array, random
@@ -29,6 +31,21 @@ from aimz import ImpactModel
 from aimz._exceptions import NotFittedError
 from aimz.model._streaming import _OutputStreamer, _RuntimeContext
 from tests.conftest import lm
+
+
+def _iter_batches(
+    X: Array,
+    sizes: list[int],
+    y: Array | None = None,
+) -> Iterator[dict[str, Array]]:
+    """Yield consecutive batches of the given sizes as a one-shot generator."""
+    start = 0
+    for size in sizes:
+        batch = {"X": X[start : start + size]}
+        if y is not None:
+            batch["y"] = y[start : start + size]
+        yield batch
+        start += size
 
 
 def test_model_not_fitted() -> None:
@@ -216,3 +233,50 @@ def test_predict_cleans_subdir_on_write_failure(
             im.predict(X, output_dir=output_dir, batch_size=3, progress=False)
         # The just-created timestamped subdir was reclaimed, not orphaned.
         assert not any(Path(output_dir).iterdir())
+
+
+def test_predict_generator_matches_array(
+    synthetic_data: tuple[Array, Array],
+    im_lm_svi_fitted: ImpactModel,
+) -> None:
+    """A one-shot generator of regular batches reproduces the array result exactly.
+
+    The last batch of 4 is padded to the 3 host devices and trimmed on the way out,
+    and the persistent store takes the append strategy since the generator has no
+    length.
+    """
+    X, _ = synthetic_data
+    im = im_lm_svi_fitted
+    rng_key = random.key(7)
+    ref = im.predict(X, rng_key=rng_key, batch_size=6, progress=False)
+    via = im.predict(
+        _iter_batches(X, sizes=[6] * 16 + [4]), rng_key=rng_key, progress=False
+    )
+
+    np.testing.assert_array_equal(
+        ref.posterior_predictive["y"].values,
+        via.posterior_predictive["y"].values,
+    )
+
+
+@pytest.mark.parametrize(
+    ("batches", "exc", "match"),
+    [
+        ([np.ones((4, 10))], TypeError, "must yield mappings"),
+        ([], ValueError, "at least one nonempty batch"),
+        (
+            [{"X": np.ones((4, 10))}, {"X": np.ones((4, 10)), "y": np.ones(4)}],
+            ValueError,
+            "must remain consistent",
+        ),
+    ],
+)
+def test_predict_loader_batch_contract(
+    batches: list,
+    exc: type[Exception],
+    match: str,
+    im_lm_svi_fitted: ImpactModel,
+) -> None:
+    """A loader yielding non-mappings, nothing, or inconsistent batches raises."""
+    with pytest.raises(exc, match=match):
+        im_lm_svi_fitted.predict(iter(batches), store="memory", progress=False)
