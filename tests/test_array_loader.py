@@ -149,6 +149,28 @@ class TestArrayLoader:
         im.fit(X=dataloader)
 
     @pytest.mark.parametrize("vi", [lm], indirect=True)
+    def test_rejected_fit_leaves_model_state_untouched(
+        self,
+        synthetic_data: tuple[Array, Array],
+        vi: SVI,
+    ) -> None:
+        """A rejected `fit` changes neither the key nor the draw count."""
+        X, y = synthetic_data
+        num_samples = 5
+        im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
+        im.fit(X=X, y=y, num_samples=num_samples, batch_size=len(X), progress=False)
+        key_before = random.key_data(im.rng_key)
+        loader = ArrayLoader(ArrayDataset(X=X, y=y), rng_key=random.key(0))
+
+        with pytest.raises(ValueError, match="not supported alongside a data loader"):
+            im.fit(X=loader, c=y, progress=False)
+
+        np.testing.assert_array_equal(random.key_data(im.rng_key), key_before)
+        assert im._num_samples == num_samples
+        out = im.predict(X, store="memory", progress=False)
+        assert out.posterior_predictive["y"].sizes["draw"] == num_samples
+
+    @pytest.mark.parametrize("vi", [lm], indirect=True)
     def test_fit_consistency_with_array_and_dataloader(
         self,
         synthetic_data: tuple[Array, Array],
