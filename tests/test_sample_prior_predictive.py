@@ -18,6 +18,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
+import numpy as np
 import pytest
 from jax import Array, random
 
@@ -139,3 +140,42 @@ def test_sample_prior_predictive_cleans_subdir_on_write_failure(
             )
         # The just-created timestamped subdir was reclaimed, not orphaned.
         assert not any(Path(output_dir).iterdir())
+
+
+@pytest.mark.parametrize("store", ["memory", "persistent"])
+@pytest.mark.parametrize(
+    ("shard_axis", "use_loader"),
+    [("obs", False), ("obs", True), ("draw", False)],
+)
+def test_sample_prior_predictive_intervention(
+    *,
+    shard_axis: str,
+    use_loader: bool,
+    store: str,
+    tmp_path: Path,
+) -> None:
+    """Interventions change downstream prior draws across stores and sharding modes."""
+    X = np.arange(24, dtype=np.float32).reshape(12, 2) / 24
+    im = ImpactModel(lm, rng_key=random.key(0), inference=_make_svi(lm))
+    draws = []
+    for value in (0.0, 1.0):
+        inputs = (
+            ({"X": X[start : start + 6]} for start in range(0, len(X), 6))
+            if use_loader
+            else X
+        )
+        dt = im.sample_prior_predictive(
+            inputs,
+            intervention={"w": np.full(2, value), "b": 2 * value},
+            rng_key=random.key(1),
+            num_samples=9,
+            batch_size=6,
+            shard_axis=shard_axis,
+            store=store,
+            output_dir=tmp_path if store == "persistent" else None,
+            progress=False,
+        )
+        draws.append(dt["prior_predictive"]["y"].values)
+
+    expected = np.broadcast_to(X.sum(axis=1) + 2, (1, 9, len(X)))
+    np.testing.assert_allclose(draws[1] - draws[0], expected, atol=1e-6)

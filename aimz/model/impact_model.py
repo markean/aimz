@@ -596,6 +596,7 @@ class ImpactModel(BaseModel):
         self,
         X: ArrayLike,
         *,
+        intervention: dict | None = None,
         num_samples: int = 1000,
         rng_key: Array | None = None,
         return_sites: str | Iterable[str] | None = None,
@@ -606,6 +607,8 @@ class ImpactModel(BaseModel):
 
         Args:
             X: Input array with observations on the leading axis.
+            intervention: A dictionary mapping sample sites to replacement values
+                applied with NumPyro's ``do`` handler during prior predictive sampling.
             num_samples: The number of samples to draw.
             rng_key: A pseudo-random number generator key. By default, an internal key
                 is used and split as needed.
@@ -633,9 +636,14 @@ class ImpactModel(BaseModel):
         if rng_key is None:
             self._rng_key, rng_key = random.split(self._rng_key)
 
+        if intervention is None:
+            kernel = self.kernel
+        else:
+            kernel = do(self.kernel, data=intervention)
+
         prior_predictive_samples = device_get(
             _sample_forward(
-                self.kernel,
+                kernel,
                 rng_keys=random.split(rng_key, num=num_samples),
                 return_sites=self._coerce_return_sites(return_sites),
                 samples=None,
@@ -656,6 +664,7 @@ class ImpactModel(BaseModel):
         self,
         X: ArrayLike | ArrayLoader | Iterable[Mapping[str, Array | np.ndarray]],
         *,
+        intervention: dict | None = None,
         num_samples: int = 1000,
         rng_key: Array | None = None,
         return_sites: str | Iterable[str] | None = None,
@@ -675,6 +684,8 @@ class ImpactModel(BaseModel):
         Args:
             X: Input array with observations on the leading axis, or a data loader
                 yielding batch mappings keyed by kernel parameter names.
+            intervention: A dictionary mapping sample sites to replacement values
+                applied with NumPyro's ``do`` handler during prior predictive sampling.
             num_samples: The number of samples to draw.
             rng_key: A pseudo-random number generator key. By default, an internal key
                 is used and split as needed.
@@ -770,6 +781,11 @@ class ImpactModel(BaseModel):
         if rng_key is None:
             self._rng_key, rng_key = random.split(self._rng_key)
 
+        if intervention is None:
+            kernel = self.kernel
+        else:
+            kernel = do(self.kernel, data=intervention)
+
         return self._stream_to_datatree(
             lambda artifact_path: self._streamer.write_predictive(
                 _WriteRequest(
@@ -783,7 +799,7 @@ class ImpactModel(BaseModel):
                     loader_rng_key=self.rng_key,
                     kwargs=kwargs,
                 ),
-                kernel=self.kernel,
+                kernel=kernel,
                 rng_key=rng_key,
                 group="prior_predictive",
                 posterior=self.posterior,

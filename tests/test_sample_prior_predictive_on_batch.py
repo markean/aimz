@@ -15,6 +15,7 @@
 """Tests for the `.sample_prior_predictive_on_batch()` method."""
 
 import jax.numpy as jnp
+import numpy as np
 import numpyro.distributions as dist
 import pytest
 from jax import Array, random
@@ -25,7 +26,7 @@ from numpyro.optim import Adam
 
 from aimz import ImpactModel
 from aimz._exceptions import KernelValidationError
-from tests.conftest import lm
+from tests.conftest import _make_svi, lm
 
 
 def test_kernel_without_output(synthetic_data: tuple[Array, Array]) -> None:
@@ -91,3 +92,31 @@ def test_sample_prior_predictive_on_batch_lm(
     assert samples_dict["y"].shape == (99, len(X))
     assert im_lm_svi_fitted.kernel_spec.traced
     assert im_lm_svi_fitted.kernel_spec.output_observed
+
+
+@pytest.mark.parametrize("return_datatree", [True, False])
+def test_sample_prior_predictive_on_batch_intervention(
+    *,
+    return_datatree: bool,
+) -> None:
+    """Prior interventions change downstream draws without fitting the model."""
+    X = np.arange(24, dtype=np.float32).reshape(12, 2) / 24
+    im = ImpactModel(lm, rng_key=random.key(0), inference=_make_svi(lm))
+    draws = []
+    for value in (0.0, 1.0):
+        samples = im.sample_prior_predictive_on_batch(
+            X,
+            intervention={"w": np.full(2, value), "b": 2 * value},
+            rng_key=random.key(1),
+            num_samples=9,
+            return_datatree=return_datatree,
+        )
+        draws.append(
+            samples["y"]
+            if isinstance(samples, dict)
+            else samples["prior_predictive"]["y"].values
+        )
+
+    shape = (1, 9, len(X)) if return_datatree else (9, len(X))
+    expected = np.broadcast_to(X.sum(axis=1) + 2, shape)
+    np.testing.assert_allclose(draws[1] - draws[0], expected, atol=1e-6)
