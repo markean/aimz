@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- {meth}`~aimz.ImpactModel.estimate_effect` now draws one sampling key and shares it between lazily generated baseline and intervention scenarios, so their draws are paired and per-unit contrasts no longer carry independent likelihood noise from both scenarios. Explicit ``rng_key`` entries in the argument dictionaries are used as before ([#315](https://github.com/markean/aimz/issues/315)).
 - {class}`~aimz.utils.data.ArrayLoader` now yields plain batch mappings (array name to array) instead of `(batch, n_pad)` tuples, and no longer pads or moves batches itself: padding for sharding and device placement are handled by the model methods, so iterating a loader directly yields exactly the dataset's rows ([#312](https://github.com/markean/aimz/issues/312)).
 
 ### Removed

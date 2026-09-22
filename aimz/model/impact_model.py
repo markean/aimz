@@ -1725,6 +1725,21 @@ class ImpactModel(BaseModel):
 
         _predict = self.predict_on_batch if on_batch else self.predict
 
+        # Lazily generated scenarios share one sampling key, so their contrast carries
+        # only the intervention.
+        rng_key_model = self._rng_key
+        if (
+            output_baseline is None
+            and output_intervention is None
+            and args_baseline is not None
+            and args_intervention is not None
+            and "rng_key" not in args_baseline
+            and "rng_key" not in args_intervention
+        ):
+            rng_key_model, rng_key = random.split(self._rng_key)
+            args_baseline = {**args_baseline, "rng_key": rng_key}
+            args_intervention = {**args_intervention, "rng_key": rng_key}
+
         if output_baseline is not None:
             dt_baseline = output_baseline
         elif args_baseline is not None:
@@ -1742,6 +1757,7 @@ class ImpactModel(BaseModel):
                 "Either `output_intervention` or `args_intervention` must be provided."
             )
             raise ValueError(msg)
+        self._rng_key = rng_key_model
 
         if isinstance(dt_baseline, dict):
             in_sample = args_baseline.get("in_sample", True) if args_baseline else True
@@ -1767,13 +1783,16 @@ class ImpactModel(BaseModel):
         # Record each scenario's artifact path when the scenario was computed by a
         # disk-backed method. In-memory (on_batch / *_on_batch / store="memory")
         # results carry no artifact attrs.
-        for suffix, tree in (
-            ("baseline", dt_baseline),
-            ("intervention", dt_intervention),
-        ):
-            artifact_path = tree.attrs.get("artifact_path")
-            if artifact_path is not None:
-                out.attrs[f"artifact_path_{suffix}"] = artifact_path
+        out.attrs.update(
+            {
+                f"artifact_path_{suffix}": path
+                for suffix, tree in (
+                    ("baseline", dt_baseline),
+                    ("intervention", dt_intervention),
+                )
+                if (path := tree.attrs.get("artifact_path")) is not None
+            },
+        )
 
         return out
 
