@@ -1,66 +1,64 @@
 Interventions & Effect Estimation
 =================================
-This guide covers two closely related functionalities:
-
-* The ``intervention`` argument available in predictive methods like :meth:`~aimz.ImpactModel.predict`, :meth:`~aimz.ImpactModel.predict_on_batch`, and their posterior predictive counterparts.
-  Internally, this enables hard (``do``) interventions on specified sample sites using NumPyro_'s :external:class:`~numpyro.handlers.do` effect handler to generate counterfactual draws without rewriting the model.
-
-* The :meth:`~aimz.ImpactModel.estimate_effect` method, which computes the elementwise difference between an intervention (counterfactual) scenario and a baseline (factual) scenario to quantify causal or policy impact.
-
-Typical workflow:
-
-1. Generate one predictive result under factual conditions (optionally also using ``intervention`` if you want to hold certain sites at specific values).
-2. Generate another predictive result under a modified ``intervention`` mapping.
-3. Pass both results (or the argument dictionaries to generate them lazily) to :meth:`~aimz.ImpactModel.estimate_effect` to obtain the effect output.
-
-Each scenario is a :class:`~xarray.DataTree` produced by the prediction API or materialized on-demand via argument dictionaries.
+Interventions let you explore how a model's predictions change when specified variables are set to chosen values.
+You can use them with prior predictive sampling to explore the implications of your assumptions, or with posterior predictive sampling to incorporate what the model has learned from data.
+For posterior predictive scenarios, :meth:`~aimz.ImpactModel.estimate_effect` computes the difference between a baseline and an intervention scenario while preserving the individual draws.
 
 
 Interventions
 -------------
-The ``intervention`` argument is a mapping (``dict[str, ArrayLike]``) from sample site name to a replacement value; during predictive sampling each listed site is fixed, enabling counterfactual or policy analysis.
-Values must broadcast to the site’s per‑observation shape (e.g., intervening on a length‑``N`` vector site generally requires shape ``(N,)``).
-You can modify multiple sites at once; any not specified follow their posterior (or prior) distribution.
+The ``intervention`` argument maps sample site names to replacement values, for example ``{"z": 0.0}``.
+The predictive methods apply this mapping through NumPyro_'s :external:class:`~numpyro.handlers.do` effect handler, so downstream computations use the specified values without requiring changes to the kernel.
+This includes deterministic downstream sites.
+You can intervene on multiple sites in the same call.
 
-Setting ``in_sample=True`` stores draws under ``posterior_predictive`` while ``in_sample=False`` stores them under ``predictions``.
-The group must match between baseline and intervention scenarios when computing effects.
-Deterministic downstream sites automatically reflect the intervened values.
+Values must broadcast to the shape expected by downstream computations.
+A scalar can set a site to the same value for every observation; an array can specify a different value for each observation when using an ``_on_batch`` method.
+For example, a length-``N`` site can take a replacement array of shape ``(N,)``.
+
+The choice of predictive method determines how the remaining sites are sampled and where results appear in the returned :class:`~xarray.DataTree`:
+
+* **Prior predictive:** :meth:`~aimz.ImpactModel.sample_prior_predictive` and :meth:`~aimz.ImpactModel.sample_prior_predictive_on_batch` sample from the model's priors without requiring a fitted model.
+  Results are stored in ``prior_predictive``.
+* **Posterior predictive:** :meth:`~aimz.ImpactModel.predict` and :meth:`~aimz.ImpactModel.predict_on_batch` use the stored posterior samples, as do their :meth:`~aimz.ImpactModel.sample_posterior_predictive` and :meth:`~aimz.ImpactModel.sample_posterior_predictive_on_batch` counterparts.
+  Results are stored in ``posterior_predictive`` when ``in_sample=True`` and in ``predictions`` when ``in_sample=False``.
+
+Suppose the kernel defines a sample site named ``z`` that influences the outcome.
+Before fitting, you can explore the model's prior predictions with ``z`` fixed at zero:
 
 .. code-block:: python
 
-    # Minimal sketch of a model exposing a stochastic site 'z'
-    def model(X, Z, y=None):
-        ...
-        # site we may choose to override at prediction time
-        z = numpyro.sample("z", ...)
-        ...
+    im = ImpactModel(model, ...)  # Supply the inference configuration.
+    prior = im.sample_prior_predictive_on_batch(X, intervention={"z": 0.0})
 
-    # Fit (details elided);
-    im = ImpactModel(model, ...).fit_on_batch(...)
+After fitting, the same mapping applies the intervention while using posterior samples for the other latent sites.
+Here, the baseline holds ``z`` at one and the modified scenario holds it at zero:
 
-    # Baseline scenario: set 'z' to its observed/factual value Z
-    baseline = im.predict_on_batch(X, intervention={"z": Z})
+.. code-block:: python
 
-    # Modified scenario: counterfactual where we overwrite 'z' with zeros
+    im.fit_on_batch(X, y)
+
+    baseline = im.predict_on_batch(
+        X,
+        intervention={"z": 1.0},
+        in_sample=False,
+    )
     modified = im.predict_on_batch(
         X,
-        intervention={"z": jnp.zeros_like(Z)},
+        intervention={"z": 0.0},
+        in_sample=False,
     )
 
 
 Effect Estimation
 -----------------
-The :meth:`~aimz.ImpactModel.estimate_effect` method computes an elementwise difference between two predictive scenarios (``intervention - baseline``) and returns a single-group :class:`~xarray.DataTree` that preserves sampling dimensions.
+The :meth:`~aimz.ImpactModel.estimate_effect` method compares two posterior predictive scenarios by computing their elementwise difference (``intervention - baseline``).
+It requires a fitted model and accepts scenarios in ``posterior_predictive`` or ``predictions``; it does not accept ``prior_predictive`` results.
+The returned :class:`~xarray.DataTree` contains the differences in the shared predictive group, preserving the ``chain`` and ``draw`` dimensions, and includes the stored posterior samples when available.
 
 One baseline and one intervention scenario must be provided, either eagerly (``output_baseline`` / ``output_intervention``) or lazily through argument dictionaries (``args_baseline`` / ``args_intervention``).
 Mixing is allowed; for example, a precomputed baseline can be supplied with ``output_baseline`` while the intervention is generated lazily with ``args_intervention`` (or the reverse).
-Both scenarios must come from the same predictive group (both ``posterior_predictive`` or both ``predictions``) with matching variable sets and shapes.
-
-The result contains that shared group name and each variable is the elementwise difference
-
-.. math:: \text{intervention} - \text{baseline}
-
-retaining leading ``draw`` / ``chain`` dimensions.
+Use the same predictive group, variable sets, and shapes for both scenarios so their draws can be compared.
 
 Eager (precomputed scenarios)::
 
@@ -74,12 +72,12 @@ Lazy (defer prediction)::
     effect = im.estimate_effect(
         args_baseline={
             "X": X,
-            "intervention": {"z": Z},
+            "intervention": {"z": 1.0},
             "in_sample": False,
         },
         args_intervention={
             "X": X,
-            "intervention": {"z": jnp.zeros_like(Z)},
+            "intervention": {"z": 0.0},
             "in_sample": False,
         },
     )
@@ -90,7 +88,7 @@ Mixed (precomputed baseline, lazy intervention)::
         output_baseline=baseline,
         args_intervention={
             "X": X,
-            "intervention": {"z": jnp.zeros_like(Z)},
+            "intervention": {"z": 0.0},
             "in_sample": False,
         },
     )
@@ -113,7 +111,8 @@ Any subsequent summary (e.g. mean, intervals) can be computed using Xarray, Arvi
 
 Example: Causal Network with Confounder
 ---------------------------------------
-This example illustrates a simple causal network. The variable ``Z`` has a direct causal effect on the outcome ``Y``, while both are influenced by a shared confounder, ``C``.
+The following example uses posterior predictive interventions to estimate effects in a simple causal network.
+The variable ``Z`` has a direct causal effect on the outcome ``Y``, while both are influenced by a shared confounder, ``C``.
 An additional variable, ``X``, is an observed exogenous factor that influences ``Z`` but has no direct effect on ``Y``.
 
 Our objective is to estimate the causal effect of ``Z`` (or alternatively ``X``) on ``Y``, while properly accounting for the confounding influence of ``C``.
