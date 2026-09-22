@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- The streaming methods ({meth}`~aimz.ImpactModel.predict`, {meth}`~aimz.ImpactModel.sample_posterior_predictive`, {meth}`~aimz.ImpactModel.sample_prior_predictive`, and {meth}`~aimz.ImpactModel.log_likelihood`) now accept any data loader as `X`: a finite iterable yielding batch mappings keyed by kernel parameter names with NumPy or JAX array values, such as a generator or a list of dictionaries, not only an {class}`~aimz.utils.data.ArrayLoader` ([#312](https://github.com/markean/aimz/issues/312)).
+- The streaming methods accept any data loader as `X`: a finite iterable yielding batch mappings keyed by kernel parameter names with NumPy or JAX array values, such as a generator or a list of dictionaries, not only an {class}`~aimz.utils.data.ArrayLoader` ([#312](https://github.com/markean/aimz/issues/312)).
 
 ### Changed
 
