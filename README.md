@@ -70,8 +70,8 @@ im = ImpactModel(
     inference=...,  # e.g., SVI (or MCMC)
 )
 
-# Fit model and draw posterior samples
-im.fit(X, y)
+# Fit model with minibatch SVI and draw posterior samples
+im.fit(X, y, batch_size=32, epochs=10)
 
 # Generate posterior predictive samples
 dt = im.predict(X)
