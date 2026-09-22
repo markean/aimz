@@ -262,7 +262,7 @@ def test_predict_generator_matches_array(
 @pytest.mark.parametrize(
     ("batches", "exc", "match"),
     [
-        ([np.ones((4, 10))], TypeError, "must yield mappings"),
+        ([np.ones((4, 10))], TypeError, "must be an array-like or a data loader"),
         ([], ValueError, "at least one nonempty batch"),
         (
             [{"X": np.ones((4, 10))}, {"X": np.ones((4, 10)), "y": np.ones(4)}],

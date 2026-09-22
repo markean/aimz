@@ -1232,7 +1232,7 @@ class ImpactModel(BaseModel):
         _validate_aligned_inputs(X, y=y, kwargs=kwargs)
         if not isinstance(X, (ArrayLike, ArrayLoader)):
             msg = (
-                "`fit()` requires arrays or an ArrayLoader; "
+                f"`fit()` requires arrays or an ArrayLoader, got {type(X).__name__!r}; "
                 "use train_on_batch for custom loaders."
             )
             raise TypeError(msg)

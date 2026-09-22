@@ -24,6 +24,7 @@ store on disk or accumulated in host memory, per the request. The model passes a
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from itertools import chain
 from typing import TYPE_CHECKING, Literal, NamedTuple, cast
@@ -53,7 +54,7 @@ from aimz.utils.data._sharding import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Iterator, Mapping, Sized
+    from collections.abc import Callable, Iterable, Iterator, Sized
     from pathlib import Path
 
     import numpy as np
@@ -231,6 +232,8 @@ class _OutputStreamer:
             The loader, its iterator including the first batch, and that batch.
 
         Raises:
+            TypeError: If ``req.X`` is neither an array nor a data loader yielding
+                batch mappings.
             ValueError: If the loader is empty.
         """
         loader, _ = _setup_inputs(
@@ -252,6 +255,12 @@ class _OutputStreamer:
         except StopIteration:
             msg = "The data loader must yield at least one nonempty batch."
             raise ValueError(msg) from None
+        if not isinstance(first, Mapping):
+            msg = (
+                "`X` must be an array-like or a data loader yielding batch mappings, "
+                f"got {type(req.X).__name__!r}."
+            )
+            raise TypeError(msg)
         first, _ = _prepare_batch(first, param_input=self._ctx.param_input)
 
         return loader, chain((first,), batches), first
