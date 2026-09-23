@@ -14,7 +14,20 @@
 
 """Module for processing keyword arguments for sharding."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import numpy as np
+
 from aimz.utils._validation import _is_arraylike
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+# Prefix of the reserved batch-field names that carry per-observation intervention
+# values alongside the input, so they are batched, padded, and sharded with it.
+_INTERVENTION_PREFIX = "__do__"
 
 
 def _group_kwargs(
@@ -48,3 +61,57 @@ def _group_kwargs(
     kwargs_extra = {k: v for k, v in kwargs.items() if not _is_arraylike(v)}
 
     return kwargs_array, kwargs_extra
+
+
+def _split_intervention(
+    intervention: dict | None,
+    n_obs: int | None,
+) -> tuple[dict, dict]:
+    """Separate per-observation intervention values from replicated constants.
+
+    Args:
+        intervention: A dictionary mapping sample site names to replacement values, or
+            ``None``.
+        n_obs: The number of observations in an array input, or ``None`` when the input
+            is a data loader.
+
+    Returns:
+        A tuple containing two dictionaries:
+            - constants: The replicated values keyed by site name.
+            - fields: The per-observation values keyed by reserved batch-field name.
+    """
+    constants, fields = {}, {}
+    for site, value in (intervention or {}).items():
+        if np.ndim(value) >= 1 and np.shape(value)[0] == n_obs:
+            fields[_INTERVENTION_PREFIX + site] = value
+        else:
+            constants[site] = value
+
+    return constants, fields
+
+
+def _split_intervention_fields(
+    kwargs: Mapping[str, object],
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Separate the reserved per-observation intervention fields from model kwargs.
+
+    Args:
+        kwargs: Keyword arguments bound by name, possibly including reserved fields.
+
+    Returns:
+        A tuple containing two dictionaries:
+            - model_kwargs: The arguments passed to the model.
+            - intervention: The per-observation values keyed by sample site name.
+    """
+    model_kwargs = {
+        name: value
+        for name, value in kwargs.items()
+        if not name.startswith(_INTERVENTION_PREFIX)
+    }
+    intervention = {
+        name.removeprefix(_INTERVENTION_PREFIX): value
+        for name, value in kwargs.items()
+        if name.startswith(_INTERVENTION_PREFIX)
+    }
+
+    return model_kwargs, intervention

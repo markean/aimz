@@ -157,6 +157,14 @@ def multidim_latent_model(X: Array, y: Array | None = None) -> None:
     numpyro.sample("y", dist.Normal(mu, 1.0), obs=y)
 
 
+def latent_intervention_model(X: Array, y: Array | None = None) -> None:
+    """Latent variable model with a deterministic site downstream of its latent."""
+    w = numpyro.sample("w", dist.Normal(0.0, 1.0))
+    z = numpyro.sample("z", dist.Normal(0.0, 1.0).expand([X.shape[0]]))
+    numpyro.deterministic("mu", z + X[:, 1] + w)
+    numpyro.sample("y", dist.Normal(z, 1.0), obs=y)
+
+
 def _make_svi(model: Callable) -> SVI:
 
     return SVI(

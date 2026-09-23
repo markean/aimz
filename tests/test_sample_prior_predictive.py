@@ -23,7 +23,7 @@ import pytest
 from jax import Array, random
 
 from aimz import ImpactModel
-from tests.conftest import _make_svi, lm
+from tests.conftest import _make_svi, latent_intervention_model, lm
 
 if TYPE_CHECKING:
     from numpyro.infer import SVI
@@ -179,3 +179,32 @@ def test_sample_prior_predictive_intervention(
 
     expected = np.broadcast_to(X.sum(axis=1) + 2, (1, 9, len(X)))
     np.testing.assert_allclose(draws[1] - draws[0], expected, atol=1e-6)
+
+
+def test_sample_prior_predictive_per_observation_intervention() -> None:
+    """A per-observation intervention array is sliced for the probe and each batch."""
+    X = np.arange(40, dtype=np.float32).reshape(20, 2) / 40
+    im = ImpactModel(
+        latent_intervention_model,
+        rng_key=random.key(0),
+        inference=_make_svi(latent_intervention_model),
+    )
+    intervention = {"z": np.linspace(-1.0, 1.0, 20), "w": 0.5}
+    streamed = im.sample_prior_predictive(
+        X,
+        intervention=intervention,
+        num_samples=9,
+        batch_size=6,
+        store="memory",
+        progress=False,
+    )
+    whole = im.sample_prior_predictive_on_batch(
+        X,
+        intervention=intervention,
+        num_samples=9,
+    )
+
+    np.testing.assert_array_equal(
+        streamed["prior_predictive"]["mu"].values,
+        whole["prior_predictive"]["mu"].values,
+    )
