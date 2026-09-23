@@ -312,6 +312,7 @@ class _OutputStreamer:
         rng_key: Array,
         group: str,
         posterior: dict[str, Array] | None,
+        intervention: dict | None = None,
         stream: (
             tuple[
                 Iterable[Mapping[str, Array | np.ndarray]],
@@ -337,6 +338,9 @@ class _OutputStreamer:
             group: Output group (``"posterior_predictive"``, ``"predictions"``, or
                 ``"prior_predictive"``).
             posterior: The posterior to condition on (ignored for prior predictive).
+            intervention: A dictionary mapping sample site names to replacement values
+                used during predictive sampling. Passed dynamically to the sampler
+                so the cached function keeps a stable kernel.
             stream: An already opened observation stream, when used to trace the model.
 
         Returns:
@@ -367,6 +371,7 @@ class _OutputStreamer:
                 step.keys,
                 req.return_sites,
                 step.samples,
+                intervention or {},
                 self._ctx.param_input,
                 kwargs_key,
                 step.x,
@@ -405,6 +410,7 @@ class _OutputStreamer:
                 rng_keys=random.split(rng_subkey, num=req.num_samples),
                 return_sites=None,
                 samples=None,
+                intervention=intervention,
                 model_kwargs={**batch, **kwargs_extra},
             )
             samples = {k: v for k, v in samples.items() if k not in req.return_sites}

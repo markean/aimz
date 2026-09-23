@@ -62,6 +62,9 @@ def _create_sharded_sampler(
                 ``(num_samples,)`` key array under ``"draw"`` sharding.
             - return_sites: Names of variables (sites) to return.
             - samples: A dictionary of samples to condition on.
+            - intervention: A dictionary mapping sample site names to replacement
+                values used during predictive sampling. Replicated across devices
+                as dynamic inputs rather than captured in a static kernel.
             - param_input: The name of the parameter in the ``kernel`` for the input
                 data.
             - kwargs_key: A tuple of keyword argument names.
@@ -80,6 +83,7 @@ def _create_sharded_sampler(
         rng_key: Array,
         return_sites: tuple[str, ...],
         samples: dict[str, Array],
+        intervention: dict,
         param_input: str,
         kwargs_key: tuple[str, ...],
         X: Array,
@@ -102,6 +106,7 @@ def _create_sharded_sampler(
             rng_keys=rng_keys,
             return_sites=return_sites,
             samples=samples,
+            intervention=intervention,
             model_kwargs={
                 param_input: X,
                 **dict(zip(kwargs_key, args, strict=True)),
@@ -153,6 +158,7 @@ def _create_sharded_sampler(
                 rng_spec,  # rng_key
                 None,  # return_sites
                 samples_spec,  # samples
+                PartitionSpec(),  # intervention
                 None,  # param_input
                 None,  # kwargs_key
                 x_spec,  # X

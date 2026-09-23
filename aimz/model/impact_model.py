@@ -42,7 +42,7 @@ from jax import (
 )
 from jax.sharding import AxisType, NamedSharding, PartitionSpec
 from jax.typing import ArrayLike
-from numpyro.handlers import do, seed, substitute, trace
+from numpyro.handlers import seed, substitute, trace
 from numpyro.infer import MCMC, SVI
 from numpyro.infer.svi import SVIRunResult, SVIState
 from tqdm.auto import tqdm
@@ -607,8 +607,8 @@ class ImpactModel(BaseModel):
 
         Args:
             X: Input array with observations on the leading axis.
-            intervention: A dictionary mapping sample sites to replacement values
-                applied with NumPyro's ``do`` handler during prior predictive sampling.
+            intervention: A dictionary mapping sample site names to replacement values
+                used during predictive sampling. No intervention is applied if ``None``.
             num_samples: The number of samples to draw.
             rng_key: A pseudo-random number generator key. By default, an internal key
                 is used and split as needed.
@@ -636,17 +636,13 @@ class ImpactModel(BaseModel):
         if rng_key is None:
             self._rng_key, rng_key = random.split(self._rng_key)
 
-        if intervention is None:
-            kernel = self.kernel
-        else:
-            kernel = do(self.kernel, data=intervention)
-
         prior_predictive_samples = device_get(
             _sample_forward(
-                kernel,
+                self.kernel,
                 rng_keys=random.split(rng_key, num=num_samples),
                 return_sites=self._coerce_return_sites(return_sites),
                 samples=None,
+                intervention=intervention,
                 model_kwargs=args_bound,
             ),
         )
@@ -684,8 +680,8 @@ class ImpactModel(BaseModel):
         Args:
             X: Input array with observations on the leading axis, or a data loader
                 yielding batch mappings keyed by kernel parameter names.
-            intervention: A dictionary mapping sample sites to replacement values
-                applied with NumPyro's ``do`` handler during prior predictive sampling.
+            intervention: A dictionary mapping sample site names to replacement values
+                used during predictive sampling. No intervention is applied if ``None``.
             num_samples: The number of samples to draw.
             rng_key: A pseudo-random number generator key. By default, an internal key
                 is used and split as needed.
@@ -781,11 +777,6 @@ class ImpactModel(BaseModel):
         if rng_key is None:
             self._rng_key, rng_key = random.split(self._rng_key)
 
-        if intervention is None:
-            kernel = self.kernel
-        else:
-            kernel = do(self.kernel, data=intervention)
-
         return self._stream_to_datatree(
             lambda artifact_path: self._streamer.write_predictive(
                 _WriteRequest(
@@ -799,10 +790,11 @@ class ImpactModel(BaseModel):
                     loader_rng_key=self.rng_key,
                     kwargs=kwargs,
                 ),
-                kernel=kernel,
+                kernel=self.kernel,
                 rng_key=rng_key,
                 group="prior_predictive",
                 posterior=self.posterior,
+                intervention=intervention,
                 stream=stream,
             ),
             store=store,
@@ -882,6 +874,7 @@ class ImpactModel(BaseModel):
                     if return_sites is not None
                     else None,
                     samples=None,
+                    intervention=None,
                     model_kwargs=None,
                 ),
             )
@@ -909,10 +902,8 @@ class ImpactModel(BaseModel):
 
         Args:
             X: Input array with observations on the leading axis.
-            intervention: A dictionary mapping sample sites to their corresponding
-                intervention values. Interventions enable counterfactual analysis by
-                modifying the specified sample sites during prediction (posterior
-                predictive sampling).
+            intervention: A dictionary mapping sample site names to replacement values
+                used during predictive sampling. No intervention is applied if ``None``.
             rng_key: A pseudo-random number generator key. By default, an internal key
                 is used and split as needed.
             return_sites: Names of variables (sites) to return. If ``None``, samples
@@ -964,10 +955,8 @@ class ImpactModel(BaseModel):
         Args:
             X: Input array with observations on the leading axis, or a data loader
                 yielding batch mappings keyed by kernel parameter names.
-            intervention: A dictionary mapping sample sites to their corresponding
-                intervention values. Interventions enable counterfactual analysis by
-                modifying the specified sample sites during prediction (posterior
-                predictive sampling).
+            intervention: A dictionary mapping sample site names to replacement values
+                used during predictive sampling. No intervention is applied if ``None``.
             rng_key: A pseudo-random number generator key. By default, an internal key
                 is used and split as needed.
             return_sites: Names of variables (sites) to return. If ``None``, samples
@@ -1175,6 +1164,7 @@ class ImpactModel(BaseModel):
                 rng_keys=random.split(rng_subkey, num=self._num_samples),
                 return_sites=None,
                 samples=None,
+                intervention=None,
                 model_kwargs=None,
             )
         elif isinstance(self.inference, MCMC):
@@ -1338,6 +1328,7 @@ class ImpactModel(BaseModel):
             rng_keys=random.split(rng_subkey, num=self._num_samples),
             return_sites=None,
             samples=None,
+            intervention=None,
             model_kwargs=None,
         )
         self._is_fitted = True
@@ -1461,10 +1452,8 @@ class ImpactModel(BaseModel):
 
         Args:
             X: Input array with observations on the leading axis.
-            intervention: A dictionary mapping sample sites to their corresponding
-                intervention values. Interventions enable counterfactual analysis by
-                modifying the specified sample sites during prediction (posterior
-                predictive sampling).
+            intervention: A dictionary mapping sample site names to replacement values
+                used during predictive sampling. No intervention is applied if ``None``.
             rng_key: A pseudo-random number generator key. By default, an internal key
                 is used and split as needed.
             in_sample: Specifies the group where posterior predictive samples are stored
@@ -1498,17 +1487,13 @@ class ImpactModel(BaseModel):
         if rng_key is None:
             self._rng_key, rng_key = random.split(self._rng_key)
 
-        if intervention is None:
-            kernel = self.kernel
-        else:
-            kernel = do(self.kernel, data=intervention)
-
         samples = device_get(
             _sample_forward(
-                kernel,
+                self.kernel,
                 rng_keys=random.split(rng_key, num=self._num_samples),
                 return_sites=self._coerce_return_sites(return_sites),
                 samples=self._streamer.place_posterior(self.posterior, sharding=None),
+                intervention=intervention,
                 model_kwargs=args_bound,
             ),
         )
@@ -1549,10 +1534,8 @@ class ImpactModel(BaseModel):
         Args:
             X: Input array with observations on the leading axis, or a data loader
                 yielding batch mappings keyed by kernel parameter names.
-            intervention: A dictionary mapping sample sites to their corresponding
-                intervention values. Interventions enable counterfactual analysis by
-                modifying the specified sample sites during prediction (posterior
-                predictive sampling).
+            intervention: A dictionary mapping sample site names to replacement values
+                used during predictive sampling. No intervention is applied if ``None``.
             rng_key: A pseudo-random number generator key. By default, an internal key
                 is used and split as needed.
             in_sample: Specifies the group where posterior predictive samples are stored
@@ -1655,11 +1638,6 @@ class ImpactModel(BaseModel):
         if rng_key is None:
             self._rng_key, rng_key = random.split(self._rng_key)
 
-        if intervention is None:
-            kernel = self.kernel
-        else:
-            kernel = do(self.kernel, data=intervention)
-
         return_sites = self._coerce_return_sites(return_sites)
 
         group = "posterior_predictive" if in_sample else "predictions"
@@ -1677,10 +1655,11 @@ class ImpactModel(BaseModel):
                     loader_rng_key=self.rng_key,
                     kwargs=kwargs,
                 ),
-                kernel=kernel,
+                kernel=self.kernel,
                 rng_key=rng_key,
                 group=group,
                 posterior=self.posterior,
+                intervention=intervention,
             ),
             store=store,
             output_dir=output_dir,
@@ -1699,10 +1678,7 @@ class ImpactModel(BaseModel):
         """Estimate the effect of an intervention.
 
         This computes (intervention - baseline) for every variable in the shared
-        predictive group, preserving sampling (chain/draw) dimensions. When
-        interventions are used in prediction they are applied internally through
-        `NumPyro`_'s :external:class:`~numpyro.handlers.do` effect handler (graph
-        surgery) without requiring model rewrites.
+        predictive group, preserving sampling (chain/draw) dimensions.
 
         Args:
             output_baseline: Precomputed output for the baseline scenario.
