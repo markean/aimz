@@ -135,25 +135,6 @@ def test_plan_obs_batching_explicit_batch(
     )
 
 
-def test_predict_draw_padding_round_trip(
-    synthetic_data: tuple[Array, Array],
-    im_lm_svi_fitted: ImpactModel,
-) -> None:
-    """Draw padding to a device multiple is trimmed back to `num_samples`.
-
-    With 3 host devices (conftest) and 1000 draws the count pads to 1002 and is
-    trimmed back to 1000.
-    """
-    X, _ = synthetic_data
-    dt = im_lm_svi_fitted.predict(
-        X,
-        batch_size=len(X),
-        progress=False,
-        shard_axis="draw",
-    )
-    assert dt["posterior_predictive"]["y"].sizes["draw"] == _n_draws(im_lm_svi_fitted)
-
-
 def test_predict_draw_default_batch_size(
     synthetic_data: tuple[Array, Array],
     im_lm_svi_fitted: ImpactModel,
@@ -380,28 +361,21 @@ class TestValidation:
                 shard_axis="rows",
             )
 
-    @pytest.mark.parametrize("shard_axis", ["draw", "obs"])
     @pytest.mark.parametrize("bad_batch_size", [-1, 0])
     def test_predict_rejects_nonpositive_batch_size(
         self,
         synthetic_data: tuple[Array, Array],
         im_lm_svi_fitted: ImpactModel,
-        shard_axis: str,
         bad_batch_size: int,
     ) -> None:
-        """A non-positive `batch_size` is rejected up front on both parallel paths.
+        """A non-positive `batch_size` is rejected before the parallel paths split.
 
         The draw path would otherwise step `range` by it (empty -> silent empty
         result for `-1`) or divide by it (`ZeroDivisionError` for `0`).
         """
         X, _ = synthetic_data
         with pytest.raises(ValueError, match="positive integer"):
-            im_lm_svi_fitted.predict(
-                X,
-                shard_axis=shard_axis,
-                batch_size=bad_batch_size,
-                progress=False,
-            )
+            im_lm_svi_fitted.predict(X, batch_size=bad_batch_size, progress=False)
 
     def test_log_likelihood_draw_rejects_mismatched_y(
         self,

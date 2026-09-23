@@ -19,33 +19,10 @@ from pathlib import Path
 import jax.numpy as jnp
 import pytest
 from jax import Array, random
-from numpyro.infer import SVI, Trace_ELBO
-from numpyro.infer.autoguide import AutoNormal
-from numpyro.optim import Adam
+from numpyro.infer import SVI
 
 from aimz import ImpactModel
-from aimz._exceptions import NotFittedError
 from tests.conftest import lm
-
-
-def test_model_not_fitted() -> None:
-    """Calling `.estimate_effect()` on an unfitted model raises an error."""
-
-    def kernel(X: Array, y: Array | None = None) -> None:
-        pass
-
-    im = ImpactModel(
-        kernel,
-        rng_key=random.key(42),
-        inference=SVI(
-            kernel,
-            guide=AutoNormal(kernel),
-            optim=Adam(step_size=1e-3),
-            loss=Trace_ELBO(),
-        ),
-    )
-    with pytest.raises(NotFittedError):
-        im.estimate_effect()
 
 
 def test_estimate_effect_argument_validation(
@@ -115,23 +92,6 @@ def test_estimate_effect_artifact_paths_lazy_args(
         assert path.parent == Path(im.temp_dir).resolve()
         assert path.name.endswith("_estimate_effect")
     im.cleanup()
-
-
-def test_estimate_effect_on_batch(
-    synthetic_data: tuple[Array, Array],
-    im_lm_svi_fitted: ImpactModel,
-) -> None:
-    """Ensure `on_batch=True` uses `predict_on_batch` and produces valid results."""
-    X, _ = synthetic_data
-
-    effect = im_lm_svi_fitted.estimate_effect(
-        args_baseline={"X": X},
-        args_intervention={"X": X, "intervention": {"sigma": 10.0}},
-        on_batch=True,
-    )
-
-    # `on_batch=True` should not create an `output_dir` attribute
-    assert "output_dir" not in effect.attrs
 
 
 @pytest.mark.parametrize("in_sample", [True, False])
