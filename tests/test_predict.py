@@ -30,7 +30,7 @@ from numpyro.optim import Adam
 from aimz import ImpactModel
 from aimz._exceptions import NotFittedError
 from aimz.model._streaming import _OutputStreamer, _RuntimeContext
-from tests.conftest import lm
+from tests.conftest import _make_svi, latent_intervention_model, lm
 
 
 def _iter_batches(
@@ -233,6 +233,32 @@ def test_predict_cleans_subdir_on_write_failure(
             im.predict(X, output_dir=output_dir, batch_size=3, progress=False)
         # The just-created timestamped subdir was reclaimed, not orphaned.
         assert not any(Path(output_dir).iterdir())
+
+
+def test_predict_per_observation_intervention() -> None:
+    """A per-observation intervention array is batched and sharded with ``X``."""
+    X = np.arange(40, dtype=np.float32).reshape(20, 2) / 40
+    im = ImpactModel(
+        latent_intervention_model,
+        rng_key=random.key(0),
+        inference=_make_svi(latent_intervention_model),
+    )
+    im.set_posterior_sample({"w": np.zeros(5)})
+    intervention = {"z": np.linspace(-1.0, 1.0, 20), "w": 0.5}
+    streamed = im.predict(
+        X,
+        intervention=intervention,
+        return_sites="mu",
+        batch_size=6,
+        store="memory",
+        progress=False,
+    )
+    whole = im.predict_on_batch(X, intervention=intervention, return_sites="mu")
+
+    np.testing.assert_array_equal(
+        streamed["posterior_predictive"]["mu"].values,
+        whole["posterior_predictive"]["mu"].values,
+    )
 
 
 def test_predict_generator_matches_array(

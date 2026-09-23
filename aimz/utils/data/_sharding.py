@@ -24,6 +24,7 @@ from jax import Array, device_put, jit, lax, random, shard_map
 from jax.sharding import PartitionSpec
 
 from aimz.sampling._forward import _sample_forward
+from aimz.utils._kwargs import _split_intervention_fields
 from aimz.utils._log_likelihood import _log_likelihood
 
 if TYPE_CHECKING:
@@ -101,16 +102,17 @@ def _create_sharded_sampler(
                 num=num_samples,
             )
 
+        model_kwargs, fields = _split_intervention_fields(
+            {param_input: X, **dict(zip(kwargs_key, args, strict=True))},
+        )
+
         return _sample_forward(
             kernel,
             rng_keys=rng_keys,
             return_sites=return_sites,
             samples=samples,
-            intervention=intervention,
-            model_kwargs={
-                param_input: X,
-                **dict(zip(kwargs_key, args, strict=True)),
-            },
+            intervention={**intervention, **fields},
+            model_kwargs=model_kwargs,
         )
 
     if mesh is None:

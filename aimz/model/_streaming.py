@@ -25,15 +25,20 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import chain
 from typing import TYPE_CHECKING, Literal, NamedTuple, cast
 
 from jax import Array, device_get, device_put, random, tree
+from jax.typing import ArrayLike
 from tqdm.auto import tqdm
 
 from aimz.sampling._forward import _sample_forward
-from aimz.utils._kwargs import _group_kwargs
+from aimz.utils._kwargs import (
+    _group_kwargs,
+    _split_intervention,
+    _split_intervention_fields,
+)
 from aimz.utils._output import (
     _create_slice_strategy,
     _select_write_strategy,
@@ -60,7 +65,6 @@ if TYPE_CHECKING:
     import numpy as np
     from dask.array import Array as DaskArray
     from jax.sharding import Mesh, Sharding
-    from jax.typing import ArrayLike
 
 logger = logging.getLogger(__name__)
 
@@ -349,6 +353,16 @@ class _OutputStreamer:
 
         .. _NumPyro: https://num.pyro.ai/
         """
+        # Per-observation values join the input as reserved batch fields, so they are
+        # batched, padded, and sharded with it; the rest stay replicated constants.
+        n_obs = (
+            len(cast("Sized", req.X))
+            if req.shard_axis == "obs" and isinstance(req.X, ArrayLike)
+            else None
+        )
+        intervention, fields = _split_intervention(intervention, n_obs=n_obs)
+        if fields:
+            req = replace(req, kwargs={**req.kwargs, **fields})
         if req.shard_axis == "obs" and stream is None:
             stream = self.setup_stream(req, y=None)
         kwargs_key, n_kwargs_array, kwargs_extra = self._resolve_kwarg_key(
@@ -371,7 +385,7 @@ class _OutputStreamer:
                 step.keys,
                 req.return_sites,
                 step.samples,
-                intervention or {},
+                intervention,
                 self._ctx.param_input,
                 kwargs_key,
                 step.x,
@@ -403,14 +417,16 @@ class _OutputStreamer:
         if group == "prior_predictive":
             # Single-row probe from the retained first batch, so the stream is neither
             # consumed nor restarted and the trace runs on a tiny input.
-            batch = {name: arr[:1] for name, arr in stream[2].items()}
+            batch, fields = _split_intervention_fields(
+                {name: arr[:1] for name, arr in stream[2].items()},
+            )
             rng_key, rng_subkey = random.split(rng_key)
             samples = _sample_forward(
                 kernel,
                 rng_keys=random.split(rng_subkey, num=req.num_samples),
                 return_sites=None,
                 samples=None,
-                intervention=intervention,
+                intervention={**intervention, **fields},
                 model_kwargs={**batch, **kwargs_extra},
             )
             samples = {k: v for k, v in samples.items() if k not in req.return_sites}

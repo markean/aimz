@@ -13,8 +13,10 @@ This includes deterministic downstream sites.
 You can intervene on multiple sites in the same call.
 
 Values must broadcast to the shape expected by downstream computations.
-A scalar can set a site to the same value for every observation; an array can specify a different value for each observation when using an ``_on_batch`` method.
+A scalar sets a site to the same value for every observation, and an array whose leading axis matches the number of observations sets a different value for each observation.
 For example, a length-``N`` site can take a replacement array of shape ``(N,)``.
+The streaming methods batch and shard such arrays together with an array ``X``, so per-observation interventions also work on inputs processed in several batches.
+Any other value is applied whole to every batch, as is every value when ``X`` is a data loader.
 
 The choice of predictive method determines how the remaining sites are sampled and where results appear in the returned :class:`~xarray.DataTree`:
 
