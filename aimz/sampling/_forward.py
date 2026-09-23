@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 from jax import Array, lax, vmap
 from jax.core import Tracer
-from numpyro.handlers import mask, seed, substitute, trace
+from numpyro.handlers import do, mask, seed, substitute, trace
 
 if TYPE_CHECKING:
     from collections import OrderedDict
@@ -29,9 +29,11 @@ if TYPE_CHECKING:
 
 def _sample_forward(
     model: Callable,
+    *,
     rng_keys: Array,
     return_sites: tuple[str, ...] | None,
     samples: dict[str, Array] | None,
+    intervention: dict | None,
     model_kwargs: Mapping[str, object] | None,
 ) -> dict[str, Array]:
     """Generates forward samples from a model conditioned on parameter draws.
@@ -57,12 +59,17 @@ def _sample_forward(
         return_sites: Names of variables (sites) to return.
         samples: A dictionary of samples to condition on, where each array has shape
             ``(num_samples, ...)``.
+        intervention: A dictionary mapping sample site names to replacement values
+            used during predictive sampling. Passed as dynamic inputs by compiled
+            callers so repeated interventions reuse the same program.
         model_kwargs: Additional arguments passed to the model.
 
     Returns:
         A dictionary mapping each return site to an array of traced values with shape
             ``(num_samples, ...)``.
     """
+    if intervention:
+        model = do(model, data=intervention)
 
     def _trace_one_sample(
         sample_input: tuple[Array, dict[str, Array]],
