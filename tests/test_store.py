@@ -293,17 +293,15 @@ def test_interrupted_memory_stream_releases_partial_batches(
     assert all(not sink for sink in sinks)
 
 
-@pytest.mark.parametrize(
-    "method",
-    [
+class TestValidation:
+    """Test class for `store` validation across the four streaming methods."""
+
+    METHODS = (
         "predict",
         "sample_posterior_predictive",
         "sample_prior_predictive",
         "log_likelihood",
-    ],
-)
-class TestValidation:
-    """Test class for `store` validation across the four streaming methods."""
+    )
 
     @staticmethod
     def _call(
@@ -323,31 +321,31 @@ class TestValidation:
         self,
         synthetic_data: tuple[Array, Array],
         im_lm_svi_fitted: ImpactModel,
-        method: str,
     ) -> None:
         """An unknown `store` raises an error."""
         X, y = synthetic_data
-        with pytest.raises(ValueError, match="`store` must be either"):
-            self._call(im_lm_svi_fitted, method, X, y, store="rows")
+        for method in self.METHODS:
+            with pytest.raises(ValueError, match="`store` must be either"):
+                self._call(im_lm_svi_fitted, method, X, y, store="rows")
 
     def test_output_dir_with_memory_store(
         self,
         synthetic_data: tuple[Array, Array],
         im_lm_svi_fitted: ImpactModel,
-        method: str,
         tmp_path: object,
     ) -> None:
         """`store="memory"` combined with an explicit `output_dir` raises an error."""
         X, y = synthetic_data
-        with pytest.raises(ValueError, match="`output_dir` must be `None`"):
-            self._call(
-                im_lm_svi_fitted,
-                method,
-                X,
-                y,
-                store="memory",
-                output_dir=str(tmp_path),
-            )
+        for method in self.METHODS:
+            with pytest.raises(ValueError, match="`output_dir` must be `None`"):
+                self._call(
+                    im_lm_svi_fitted,
+                    method,
+                    X,
+                    y,
+                    store="memory",
+                    output_dir=str(tmp_path),
+                )
 
 
 def test_estimate_effect_store_combinations_match(

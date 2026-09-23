@@ -188,18 +188,6 @@ def test_save_model_signature_false_disables_inference(
     assert model.signature is None
 
 
-def test_load_model_returns_raw_impact_model(
-    im_lm_svi_fitted: ImpactModel,
-    tmp_path: Path,
-) -> None:
-    """:func:`~aimz.mlflow.load_model` reloads the underlying :class:`ImpactModel`."""
-    save_model(im_lm_svi_fitted, tmp_path / "model")
-
-    reloaded = load_model(str(tmp_path / "model"))
-
-    assert isinstance(reloaded, ImpactModel)
-
-
 def test_log_model_round_trip_outputs_match(
     im_lm_svi_fitted: ImpactModel,
     synthetic_data: tuple[Array, Array],

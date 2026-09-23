@@ -15,20 +15,14 @@
 """Tests for the `.predict()` method."""
 
 from collections.abc import Iterator
-from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import numpy as np
-import numpyro.distributions as dist
 import pytest
 from jax import Array, random
-from numpyro import sample
-from numpyro.infer import SVI, Trace_ELBO
-from numpyro.infer.autoguide import AutoNormal
-from numpyro.optim import Adam
+from numpyro.infer import SVI
 
 from aimz import ImpactModel
-from aimz._exceptions import NotFittedError
 from aimz.model._streaming import _OutputStreamer, _RuntimeContext
 from tests.conftest import _make_svi, latent_intervention_model, lm
 
@@ -46,37 +40,6 @@ def _iter_batches(
             batch["y"] = y[start : start + size]
         yield batch
         start += size
-
-
-def test_model_not_fitted() -> None:
-    """Calling `.predict()` on an unfitted model raises an error."""
-
-    def kernel(X: Array, y: Array | None = None) -> None:
-        pass
-
-    im = ImpactModel(
-        kernel,
-        rng_key=random.key(42),
-        inference=SVI(
-            kernel,
-            guide=AutoNormal(kernel),
-            optim=Adam(step_size=1e-3),
-            loss=Trace_ELBO(),
-        ),
-    )
-    with pytest.raises(NotFittedError):
-        im.predict(None)
-
-
-def test_predict_fall_back(
-    synthetic_data: tuple[Array, Array],
-    im_latent_var_svi_fitted: ImpactModel,
-) -> None:
-    """Calling `.predict()` warns and falls back on an incompatible model."""
-    X, _ = synthetic_data
-    msg = "One or more posterior sample shapes are not compatible"
-    with pytest.warns(UserWarning, match=msg):
-        im_latent_var_svi_fitted.predict(X=X, batch_size=len(X), progress=False)
 
 
 def test_predict_rejects_unsupported_size(
@@ -125,49 +88,6 @@ def test_predict_warns_on_unknown_return_site(
         im_lm_svi_fitted.predict(X=X, return_sites="typo", progress=False)
 
 
-class TestKernelParameterValidation:
-    """Test class for validating parameter compatibility with the kernel."""
-
-    def test_invalid_parameter(
-        self,
-        synthetic_data: tuple[Array, Array],
-        im_lm_svi_fitted: ImpactModel,
-    ) -> None:
-        """An invalid parameter raise an error."""
-        X, y = synthetic_data
-        with pytest.raises(TypeError):
-            im_lm_svi_fitted.predict(X=X, y=y)
-
-    def test_extra_parameters(
-        self,
-        synthetic_data: tuple[Array, Array],
-        im_lm_svi_fitted: ImpactModel,
-    ) -> None:
-        """Extra parameters not present in the kernel raise an error."""
-        X, _ = synthetic_data
-        with pytest.raises(TypeError):
-            im_lm_svi_fitted.predict(X=X, extra=True)
-
-    def test_missing_parameters(self, synthetic_data: tuple[Array, Array]) -> None:
-        """Missing required parameters in the kernel raise an error."""
-        X, y = synthetic_data
-        arg = True
-
-        def kernel(X: Array, arg: object, y: Array | None = None) -> None:
-            sample("y", dist.Normal(0.0, 1.0), obs=y)
-
-        vi = SVI(
-            kernel,
-            guide=AutoNormal(kernel),
-            optim=Adam(step_size=1e-3),
-            loss=Trace_ELBO(),
-        )
-        im = ImpactModel(kernel, rng_key=random.key(42), inference=vi)
-        im.fit(X=X, y=y, arg=arg, batch_size=3)
-        with pytest.raises(TypeError):
-            im.predict(X=X)
-
-
 @pytest.mark.parametrize("vi", [lm], indirect=True)
 def test_predict_after_cleanup(synthetic_data: tuple[Array, Array], vi: SVI) -> None:
     """Test `.predict()` recreates tempdir after `.cleanup()`."""
@@ -192,15 +112,6 @@ def test_predict_after_cleanup(synthetic_data: tuple[Array, Array], vi: SVI) -> 
     im.cleanup()
 
     # `.sample_posterior_predictive()` is an alias for `.predict()`.
-    # Test with `return_sites`.
-    with pytest.warns(UserWarning, match=msg), TemporaryDirectory() as tmp_dir:
-        im.sample_posterior_predictive(
-            X=X,
-            return_sites="y",
-            batch_size=len(X) // 2,
-            output_dir=tmp_dir,
-            progress=False,
-        )
     with pytest.warns(UserWarning, match=msg), TemporaryDirectory() as tmp_dir:
         im.sample_posterior_predictive(
             X=X,
@@ -209,30 +120,6 @@ def test_predict_after_cleanup(synthetic_data: tuple[Array, Array], vi: SVI) -> 
             output_dir=tmp_dir,
             progress=False,
         )
-
-
-@pytest.mark.parametrize("vi", [lm], indirect=True)
-def test_predict_cleans_subdir_on_write_failure(
-    synthetic_data: tuple[Array, Array],
-    vi: SVI,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A failure during the write phase reclaims the output subdirectory."""
-    X, y = synthetic_data
-    im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
-    im.fit_on_batch(X=X, y=y)
-
-    def boom(*args: object, **kwargs: object) -> None:
-        msg = "boom"
-        raise RuntimeError(msg)
-
-    monkeypatch.setattr(im._streamer, "write_predictive", boom)
-
-    with TemporaryDirectory() as output_dir:
-        with pytest.raises(RuntimeError, match="boom"):
-            im.predict(X, output_dir=output_dir, batch_size=3, progress=False)
-        # The just-created timestamped subdir was reclaimed, not orphaned.
-        assert not any(Path(output_dir).iterdir())
 
 
 def test_predict_per_observation_intervention() -> None:

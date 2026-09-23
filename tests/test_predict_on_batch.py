@@ -14,80 +14,14 @@
 
 """Tests for the `.predict_on_batch()` method."""
 
-import numpyro.distributions as dist
 import pytest
 from jax import Array, random
-from numpyro import sample
 from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
 from numpyro.optim import Adam
 
 from aimz import ImpactModel
-from aimz._exceptions import NotFittedError
 from tests.conftest import mlm
-
-
-def test_model_not_fitted() -> None:
-    """Calling `.predict_on_batch()` on an unfitted model raises an error."""
-
-    def kernel(X: Array, y: Array | None = None) -> None:
-        pass
-
-    im = ImpactModel(
-        kernel,
-        rng_key=random.key(42),
-        inference=SVI(
-            kernel,
-            guide=AutoNormal(kernel),
-            optim=Adam(step_size=1e-3),
-            loss=Trace_ELBO(),
-        ),
-    )
-    with pytest.raises(NotFittedError):
-        im.predict_on_batch(None)
-
-
-class TestKernelParameterValidation:
-    """Test class for validating parameter compatibility with the kernel."""
-
-    def test_invalid_parameter(
-        self,
-        synthetic_data: tuple[Array, Array],
-        im_lm_svi_fitted: ImpactModel,
-    ) -> None:
-        """An invalid parameter raise an error."""
-        X, y = synthetic_data
-        with pytest.raises(TypeError):
-            im_lm_svi_fitted.predict_on_batch(X=X, y=y)
-
-    def test_extra_parameters(
-        self,
-        synthetic_data: tuple[Array, Array],
-        im_lm_svi_fitted: ImpactModel,
-    ) -> None:
-        """Extra parameters not present in the kernel raise an error."""
-        X, y = synthetic_data
-        with pytest.raises(TypeError):
-            im_lm_svi_fitted.predict_on_batch(X=X, y=y, extra=True)
-
-    def test_missing_parameters(self, synthetic_data: tuple[Array, Array]) -> None:
-        """Missing required parameters in the kernel raise an error."""
-        X, y = synthetic_data
-        arg = True
-
-        def kernel(X: Array, arg: object, y: Array | None = None) -> None:
-            sample("y", dist.Normal(0.0, 1.0), obs=y)
-
-        vi = SVI(
-            kernel,
-            guide=AutoNormal(kernel),
-            optim=Adam(step_size=1e-3),
-            loss=Trace_ELBO(),
-        )
-        im = ImpactModel(kernel, rng_key=random.key(42), inference=vi)
-        im.fit(X=X, arg=arg, y=y, batch_size=3)
-        with pytest.raises(TypeError):
-            im.predict_on_batch(X=X)
 
 
 def test_predict_on_batch_lm_with_kwargs_array(

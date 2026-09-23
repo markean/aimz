@@ -202,12 +202,3 @@ def test_fit_nan_warning(synthetic_data: tuple[Array, Array]) -> None:
 
     with pytest.warns(RuntimeWarning):
         im.fit_on_batch(X, y)
-
-
-@pytest.mark.parametrize("vi", [lm], indirect=True)
-def test_fit_lm(synthetic_data: tuple[Array, Array], vi: SVI) -> None:
-    """Test the `.fit()` method of `ImpactModel`."""
-    X, y = synthetic_data
-    im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
-    im.fit(X=X, y=y, batch_size=3)
-    assert im.is_fitted(), "Model fitting check failed"

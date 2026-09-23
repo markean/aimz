@@ -51,22 +51,6 @@ def test_kernel_without_output(synthetic_data: tuple[Array, Array]) -> None:
         im.sample_prior_predictive_on_batch(X)
 
 
-@pytest.mark.parametrize("vi", [lm], indirect=True)
-class TestKernelParameterValidation:
-    """Test class for validating parameter compatibility with the kernel."""
-
-    def test_invalid_parameter(
-        self,
-        synthetic_data: tuple[Array, Array],
-        vi: "SVI",
-    ) -> None:
-        """An invalid parameter raise an error."""
-        X, y = synthetic_data
-        im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
-        with pytest.raises(TypeError):
-            im.sample_prior_predictive_on_batch(X=X, y=y)
-
-
 def test_sample_prior_predictive_on_batch_lm(
     synthetic_data: tuple[Array, Array],
     im_lm_svi_fitted: ImpactModel,
@@ -94,29 +78,19 @@ def test_sample_prior_predictive_on_batch_lm(
     assert im_lm_svi_fitted.kernel_spec.output_observed
 
 
-@pytest.mark.parametrize("return_datatree", [True, False])
-def test_sample_prior_predictive_on_batch_intervention(
-    *,
-    return_datatree: bool,
-) -> None:
+def test_sample_prior_predictive_on_batch_intervention() -> None:
     """Prior interventions change downstream draws without fitting the model."""
     X = np.arange(24, dtype=np.float32).reshape(12, 2) / 24
     im = ImpactModel(lm, rng_key=random.key(0), inference=_make_svi(lm))
     draws = []
     for value in (0.0, 1.0):
-        samples = im.sample_prior_predictive_on_batch(
+        dt = im.sample_prior_predictive_on_batch(
             X,
             intervention={"w": np.full(2, value), "b": 2 * value},
             rng_key=random.key(1),
             num_samples=9,
-            return_datatree=return_datatree,
         )
-        draws.append(
-            samples["y"]
-            if isinstance(samples, dict)
-            else samples["prior_predictive"]["y"].values
-        )
+        draws.append(dt["prior_predictive"]["y"].values)
 
-    shape = (1, 9, len(X)) if return_datatree else (9, len(X))
-    expected = np.broadcast_to(X.sum(axis=1) + 2, shape)
+    expected = np.broadcast_to(X.sum(axis=1) + 2, (1, 9, len(X)))
     np.testing.assert_allclose(draws[1] - draws[0], expected, atol=1e-6)

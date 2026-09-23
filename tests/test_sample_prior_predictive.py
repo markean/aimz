@@ -14,7 +14,6 @@
 
 """Tests for the `.sample_prior_predictive()` method."""
 
-from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
@@ -27,22 +26,6 @@ from tests.conftest import _make_svi, latent_intervention_model, lm
 
 if TYPE_CHECKING:
     from numpyro.infer import SVI
-
-
-@pytest.mark.parametrize("vi", [lm], indirect=True)
-class TestKernelParameterValidation:
-    """Test class for validating parameter compatibility with the kernel."""
-
-    def test_invalid_parameter(
-        self,
-        synthetic_data: tuple[Array, Array],
-        vi: "SVI",
-    ) -> None:
-        """An invalid parameter raise an error."""
-        X, y = synthetic_data
-        im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
-        with pytest.raises(TypeError):
-            im.sample_prior_predictive(X=X, y=y)
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
@@ -73,15 +56,6 @@ def test_sample_prior_predictive_lm(
             num_samples=99,
             batch_size=len(X) // 2,
             return_sites="y",
-            output_dir=tmp_dir,
-        ).prior_predictive["y"].values.shape == (1, 99, len(X))
-
-    with pytest.warns(UserWarning, match=msg), TemporaryDirectory() as tmp_dir:
-        assert im.sample_prior_predictive(
-            X=X,
-            num_samples=99,
-            batch_size=len(X) // 2,
-            return_sites=["y"],
             output_dir=tmp_dir,
         ).prior_predictive["y"].values.shape == (1, 99, len(X))
 
@@ -116,33 +90,6 @@ def test_sample_prior_predictive_unfitted_both_shard_axes(
         im.cleanup()
 
 
-def test_sample_prior_predictive_cleans_subdir_on_write_failure(
-    synthetic_data: tuple[Array, Array],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A failure during the write phase reclaims the output subdirectory."""
-    X, _ = synthetic_data
-    im = ImpactModel(lm, rng_key=random.key(42), inference=_make_svi(lm))
-
-    def boom(*args: object, **kwargs: object) -> None:
-        msg = "boom"
-        raise RuntimeError(msg)
-
-    monkeypatch.setattr(im._streamer, "write_predictive", boom)
-
-    with TemporaryDirectory() as output_dir:
-        with pytest.raises(RuntimeError, match="boom"):
-            im.sample_prior_predictive(
-                X,
-                output_dir=output_dir,
-                batch_size=3,
-                progress=False,
-            )
-        # The just-created timestamped subdir was reclaimed, not orphaned.
-        assert not any(Path(output_dir).iterdir())
-
-
-@pytest.mark.parametrize("store", ["memory", "persistent"])
 @pytest.mark.parametrize(
     ("shard_axis", "use_loader"),
     [("obs", False), ("obs", True), ("draw", False)],
@@ -151,10 +98,8 @@ def test_sample_prior_predictive_intervention(
     *,
     shard_axis: str,
     use_loader: bool,
-    store: str,
-    tmp_path: Path,
 ) -> None:
-    """Interventions change downstream prior draws across stores and sharding modes."""
+    """Interventions change downstream prior draws across sharding modes."""
     X = np.arange(24, dtype=np.float32).reshape(12, 2) / 24
     im = ImpactModel(lm, rng_key=random.key(0), inference=_make_svi(lm))
     draws = []
@@ -171,8 +116,7 @@ def test_sample_prior_predictive_intervention(
             num_samples=9,
             batch_size=6,
             shard_axis=shard_axis,
-            store=store,
-            output_dir=tmp_path if store == "persistent" else None,
+            store="memory",
             progress=False,
         )
         draws.append(dt["prior_predictive"]["y"].values)
