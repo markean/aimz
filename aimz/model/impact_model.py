@@ -1715,11 +1715,19 @@ class ImpactModel(BaseModel):
         """
         _check_is_fitted(self)
 
+        if output_baseline is None and args_baseline is None:
+            msg = "Either `output_baseline` or `args_baseline` must be provided."
+            raise ValueError(msg)
+        if output_intervention is None and args_intervention is None:
+            msg = (
+                "Either `output_intervention` or `args_intervention` must be provided."
+            )
+            raise ValueError(msg)
+
         _predict = self.predict_on_batch if on_batch else self.predict
 
         # Lazily generated scenarios share one sampling key, so their contrast carries
         # only the intervention.
-        rng_key_model = self._rng_key
         if (
             output_baseline is None
             and output_intervention is None
@@ -1728,28 +1736,20 @@ class ImpactModel(BaseModel):
             and "rng_key" not in args_baseline
             and "rng_key" not in args_intervention
         ):
-            rng_key_model, rng_key = random.split(self._rng_key)
+            self._rng_key, rng_key = random.split(self._rng_key)
             args_baseline = {**args_baseline, "rng_key": rng_key}
             args_intervention = {**args_intervention, "rng_key": rng_key}
 
-        if output_baseline is not None:
-            dt_baseline = output_baseline
-        elif args_baseline is not None:
-            dt_baseline = _predict(**args_baseline)
-        else:
-            msg = "Either `output_baseline` or `args_baseline` must be provided."
-            raise ValueError(msg)
-
-        if output_intervention is not None:
-            dt_intervention = output_intervention
-        elif args_intervention is not None:
-            dt_intervention = _predict(**args_intervention)
-        else:
-            msg = (
-                "Either `output_intervention` or `args_intervention` must be provided."
-            )
-            raise ValueError(msg)
-        self._rng_key = rng_key_model
+        dt_baseline = (
+            output_baseline
+            if output_baseline is not None
+            else _predict(**cast("dict", args_baseline))
+        )
+        dt_intervention = (
+            output_intervention
+            if output_intervention is not None
+            else _predict(**cast("dict", args_intervention))
+        )
 
         if isinstance(dt_baseline, dict):
             in_sample = args_baseline.get("in_sample", True) if args_baseline else True
