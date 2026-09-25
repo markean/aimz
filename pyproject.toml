@@ -17,7 +17,7 @@ requires-python = ">=3.11"
 dependencies = [
     "dask>=2026.1",
     "jax>=0.10",
-    "numpyro>=0.21",
+    "numpyro>=0.22",
     "psutil>=6",
     "xarray>=2026.1",
     "zarr>=3,<4",

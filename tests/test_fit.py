@@ -185,7 +185,7 @@ def test_fit_raises_for_mcmc_inference(mcmc: MCMC) -> None:
 
 
 def test_fit_nan_warning(synthetic_data: tuple[Array, Array]) -> None:
-    """Test that `.fit()` emits a RuntimeWarning when NaN is in the loss."""
+    """A NaN loss warns, then the diverged posterior draw raises."""
     X, y = synthetic_data
     im = ImpactModel(
         lm,
@@ -197,8 +197,14 @@ def test_fit_nan_warning(synthetic_data: tuple[Array, Array]) -> None:
             loss=Trace_ELBO(),
         ),
     )
-    with pytest.warns(RuntimeWarning):
+    with (
+        pytest.warns(RuntimeWarning),
+        pytest.raises(ValueError, match="invalid loc parameter"),
+    ):
         im.fit(X, y, batch_size=len(X), epochs=3)
 
-    with pytest.warns(RuntimeWarning):
+    with (
+        pytest.warns(RuntimeWarning),
+        pytest.raises(ValueError, match="invalid loc parameter"),
+    ):
         im.fit_on_batch(X, y)
