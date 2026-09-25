@@ -1157,6 +1157,11 @@ class ImpactModel(BaseModel):
                 losses=device_get(vi_result.losses),
             )
             self._vi_state = self.vi_result.state
+
+            # The draw below rejects diverged guide parameters; clear the previous
+            # fit first so a failed refit does not keep a stale posterior.
+            self._is_fitted = False
+            self._posterior = None
             logger.info("Drawing posterior samples (num_samples=%d)", self._num_samples)
             rng_key, rng_subkey = random.split(rng_key)
             self._posterior = _sample_forward(
@@ -1293,7 +1298,7 @@ class ImpactModel(BaseModel):
                 dynamic_ncols=True,
             )
             for batch in pbar:
-                self._vi_state, loss = self.train_on_batch(
+                _, loss = self.train_on_batch(
                     **batch,
                     **kwargs_extra,
                     rng_key=rng_subkey,
@@ -1315,6 +1320,10 @@ class ImpactModel(BaseModel):
             losses=np.asarray(losses),
         )
 
+        # The draw below rejects diverged guide parameters; clear the previous
+        # fit first so a failed refit does not keep a stale posterior.
+        self._is_fitted = False
+        self._posterior = None
         logger.info(
             "Drawing posterior samples (num_samples=%d)",
             self._num_samples,
