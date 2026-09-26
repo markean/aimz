@@ -69,6 +69,8 @@ Draw-parallel sharding does not lift the static-shape requirement, so :external:
 
 A model with nested plates whose :external:func:`~numpyro.primitives.sample` sites are all observed (``obs=``) or whose latent shapes are fixed remains compatible; a model with a single plate containing one unobserved :external:func:`~numpyro.primitives.sample` site triggers the draw-parallel rerun.
 
+A kernel must also compute each observation from its own inputs (see :ref:`faq-cross-observation`).
+
 If you encounter an unsupported pattern (ideally with a minimal reproducible example), please `open an issue <https://github.com/markean/aimz/issues/new>`_ or submit a PR.
 We plan to broaden coverage based on user needs.
 
@@ -88,6 +90,31 @@ Multiple named arrays are supported as long as they share the same leading-axis 
 The output variable has the same flexibility: it can be 1D for scalar targets, 2D for multi-output regression, or higher-rank as the model requires, provided its leading axis matches the input.
 Ragged or nested structures are not currently supported.
 If native support for a specific structure is important for your use case, opening an issue helps prioritize it, and contributions are welcome.
+
+
+.. _faq-cross-observation:
+
+Can my kernel compute across observations?
+------------------------------------------
+Only when the observation axis stays whole and in order.
+aimz treats the leading axis as the observation axis and assumes observations are independent given the model parameters, so it may split and reorder that axis to scale.
+:meth:`~aimz.ImpactModel.fit` shuffles the rows by default and trains on batches of them.
+The streaming methods (:meth:`~aimz.ImpactModel.predict`, :meth:`~aimz.ImpactModel.sample_posterior_predictive`, :meth:`~aimz.ImpactModel.sample_prior_predictive`, and :meth:`~aimz.ImpactModel.log_likelihood`) process the input in batches and, under the default ``shard_axis="obs"``, split each batch across devices.
+A kernel that computes across observations, for example through a cumulative sum, a moving average, a value from a previous row, or a statistic such as the mean over all rows, then sees only part of the rows or sees them out of order.
+This happens without an error or a warning.
+Whether a split happens depends on the input size, ``batch_size``, and the number of devices, so such a kernel can give correct results on a small input on one device and wrong results on a larger input or on several devices.
+
+There are two ways to make such a kernel safe:
+
+* **Make each observation self-contained**
+
+  Pass what each observation needs from the rest of the input as part of its own inputs, for example a precomputed statistic repeated for every row, or ``L`` related rows gathered along an extra axis to give shape ``(n, L, d)``.
+  Observations are then independent, so every method and execution mode gives the same result.
+
+* **Keep the observation axis whole and in order**
+
+  Train with :meth:`~aimz.ImpactModel.fit_on_batch`, or with :meth:`~aimz.ImpactModel.fit` using ``shuffle=False`` and a ``batch_size`` that covers the whole input.
+  For the other methods, use the ``*_on_batch`` variants or pass ``shard_axis="draw"`` to the streaming methods, which then split the draws instead of the observations and require an array input.
 
 
 Can I use my own data loader?

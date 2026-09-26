@@ -37,7 +37,7 @@ Choosing a Strategy
 -------------------
 
 ``shard_axis="obs"`` (the default) suits models with global latents and inputs that are large or supplied through a data loader.
-Prefer ``shard_axis="draw"`` when the model has local latents, or when the input is small relative to the number of draws so replicating it on every device stays cheap.
+Prefer ``shard_axis="draw"`` when the model has local latents, when the kernel computes across observations (see :ref:`faq-cross-observation`), or when the input is small relative to the number of draws so replicating it on every device stays cheap.
 
 Choosing a ``batch_size`` that is a multiple of :external:func:`jax.local_device_count` keeps the shards even and avoids padding the final batch; the same applies to the batch sizes a data loader yields.
 
