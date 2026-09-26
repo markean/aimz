@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- {meth}`~aimz.ImpactModel.estimate_effect` now also warns when the baseline and intervention scenarios have the same dimension sizes but different coordinate labels, instead of silently computing the effect on the labels they share ([#327](https://github.com/markean/aimz/issues/327)).
 - The streaming predictive methods ({meth}`~aimz.ImpactModel.predict`, {meth}`~aimz.ImpactModel.sample_posterior_predictive`, {meth}`~aimz.ImpactModel.sample_prior_predictive`, and lazily generated scenarios in {meth}`~aimz.ImpactModel.estimate_effect`) now batch and shard per-observation `intervention` arrays together with an array `X` under `shard_axis="obs"`. Previously such an array was applied whole to every batch and raised a broadcasting error unless the input was processed as a single batch on one device ([#321](https://github.com/markean/aimz/issues/321)).
 - Repeated calls with `intervention` to the streaming predictive methods, including {meth}`~aimz.ImpactModel.estimate_effect`, no longer retain a new intervention wrapper and compiled program on every call ([#319](https://github.com/markean/aimz/issues/319)).
 - {meth}`~aimz.ImpactModel.fit` with an {class}`~aimz.utils.data.ArrayLoader` no longer silently drops array keyword arguments: they now raise a `ValueError` asking for them to be included as dataset fields, matching the streaming entry points ([#312](https://github.com/markean/aimz/issues/312)).
