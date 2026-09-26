@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     import xarray as xr
 
     from aimz import ImpactModel
+    from aimz.model.kernel_spec import KernelSpec
     from aimz.utils.data import ArrayLoader
 
 
@@ -122,6 +123,31 @@ def _validate_group(dt_baseline: xr.DataTree, dt_intervention: xr.DataTree) -> s
         warn(msg, category=UserWarning, stacklevel=3)
 
     return group
+
+
+def _validate_intervention(
+    intervention: dict | None,
+    kernel_spec: KernelSpec | None,
+) -> None:
+    """Validate that every intervened site is a sample site of the kernel.
+
+    Args:
+        intervention: Mapping from site names to replacement values, or ``None``.
+        kernel_spec: The model's cached kernel spec, or ``None``.
+
+    Raises:
+        ValueError: If ``intervention`` names a site that is not a sample site of the
+            kernel.
+    """
+    if intervention is None or kernel_spec is None or not kernel_spec.traced:
+        return
+    unknown = [site for site in intervention if site not in kernel_spec.sample_sites]
+    if unknown:
+        msg = (
+            f"Intervention site(s) not among the kernel's sample sites: "
+            f"{', '.join(map(repr, unknown))}."
+        )
+        raise ValueError(msg)
 
 
 def _validate_shard_axis(

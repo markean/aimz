@@ -17,10 +17,11 @@
 
 from pathlib import Path
 
+import jax.numpy as jnp
 import numpyro.distributions as dist
 import pytest
 from jax import Array, random
-from numpyro import sample
+from numpyro import deterministic, sample
 
 from aimz import ImpactModel
 from aimz._exceptions import NotFittedError
@@ -73,6 +74,43 @@ def test_kernel_argument_binding(
     im.fit_on_batch(X, y, arg=True, num_steps=1, num_samples=10, progress=False)
     with pytest.raises(TypeError):
         getattr(im, method)(X, **kwargs)
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
+        "predict",
+        "predict_on_batch",
+        "sample_prior_predictive",
+        "sample_prior_predictive_on_batch",
+    ],
+)
+@pytest.mark.parametrize(
+    "site",
+    ["mu", "bb", "X"],
+    ids=["deterministic", "misspelled", "argument"],
+)
+def test_intervention_on_non_sample_site(
+    synthetic_data: tuple[Array, Array],
+    method: str,
+    site: str,
+) -> None:
+    """Intervening on a non-sample site raises before sampling on every entry point."""
+    X, y = synthetic_data
+
+    def kernel(X: Array, y: Array | None = None) -> None:
+        b = sample("b", dist.Normal(0.0, 1.0))
+        mu = deterministic("mu", b + X.sum(axis=-1))
+        sample("y", dist.Normal(mu, 1.0), obs=y)
+
+    im = ImpactModel(kernel, rng_key=random.key(42), inference=_make_svi(kernel))
+    # The prior methods stay unfitted, so their check must follow their own trace.
+    if method.startswith("predict"):
+        im.fit_on_batch(X, y, num_steps=1, num_samples=10, progress=False)
+    rng_key = im.rng_key
+    with pytest.raises(ValueError, match="not among the kernel's sample sites"):
+        getattr(im, method)(X, intervention={site: 0.0})
+    assert jnp.allclose(im.rng_key, rng_key)
 
 
 @pytest.mark.parametrize(

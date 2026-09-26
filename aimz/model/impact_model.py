@@ -67,6 +67,7 @@ from aimz.utils._validation import (
     _validate_aligned_inputs,
     _validate_batch_size,
     _validate_group,
+    _validate_intervention,
     _validate_kernel_body,
     _validate_shard_axis,
     _validate_store,
@@ -624,6 +625,8 @@ class ImpactModel(BaseModel):
         Raises:
             TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
                 argument.
+            ValueError: If ``intervention`` names a site that is not a sample site of
+                the kernel.
 
         See Also:
             :meth:`~aimz.ImpactModel.sample_prior_predictive`
@@ -632,6 +635,7 @@ class ImpactModel(BaseModel):
 
         args_bound = self._bind_kernel_args(X, kwargs=kwargs)
         self._build_kernel_spec(args_bound, with_output=False)
+        _validate_intervention(intervention, kernel_spec=self._kernel_spec)
 
         if rng_key is None:
             self._rng_key, rng_key = random.split(self._rng_key)
@@ -719,8 +723,9 @@ class ImpactModel(BaseModel):
             TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
                 argument.
             ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``, ``store`` is
-                not ``"persistent"`` or ``"memory"``, or ``output_dir`` is passed with
-                ``store="memory"``.
+                not ``"persistent"`` or ``"memory"``, ``output_dir`` is passed with
+                ``store="memory"``, or ``intervention`` names a site that is not a
+                sample site of the kernel.
             NotImplementedError: If a return site's axis-1 size does not match the
                 input batch size (``shard_axis="obs"`` only).
 
@@ -771,6 +776,7 @@ class ImpactModel(BaseModel):
                 for k, v in args_bound.items()
             }
             self._build_kernel_spec(probe, with_output=False)
+        _validate_intervention(intervention, kernel_spec=self._kernel_spec)
 
         return_sites = self._coerce_return_sites(return_sites)
 
@@ -919,6 +925,8 @@ class ImpactModel(BaseModel):
         Raises:
             TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
                 argument.
+            ValueError: If ``intervention`` names a site that is not a sample site of
+                the kernel.
 
         See Also:
             :meth:`~aimz.ImpactModel.predict_on_batch`.
@@ -998,8 +1006,9 @@ class ImpactModel(BaseModel):
             TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
                 argument, or ``shard_axis="draw"`` is used with a data loader ``X``.
             ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``, ``store`` is
-                not ``"persistent"`` or ``"memory"``, or ``output_dir`` is passed with
-                ``store="memory"``.
+                not ``"persistent"`` or ``"memory"``, ``output_dir`` is passed with
+                ``store="memory"``, or ``intervention`` names a site that is not a
+                sample site of the kernel.
 
         See Also:
             :meth:`~aimz.ImpactModel.predict()`.
@@ -1486,8 +1495,11 @@ class ImpactModel(BaseModel):
             NotFittedError: If the model is not fitted.
             TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
                 argument.
+            ValueError: If ``intervention`` names a site that is not a sample site of
+                the kernel.
         """
         _check_is_fitted(self)
+        _validate_intervention(intervention, kernel_spec=self._kernel_spec)
 
         X = cast("Array", _validate_X_y_to_jax(X))
 
@@ -1594,8 +1606,9 @@ class ImpactModel(BaseModel):
                 argument, or ``shard_axis="draw"`` is used with a data loader ``X``.
             ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``, ``store`` is
                 not ``"persistent"`` or ``"memory"``, ``output_dir`` is passed with
-                ``store="memory"``, or the array inputs do not share one leading-axis
-                size.
+                ``store="memory"``, the array inputs do not share one leading-axis
+                size, or ``intervention`` names a site that is not a sample site of
+                the kernel.
             NotImplementedError: If a return site's axis-1 size does not match the
                 input batch size (``shard_axis="obs"`` only).
 
@@ -1604,6 +1617,7 @@ class ImpactModel(BaseModel):
             created.
         """
         _check_is_fitted(self)
+        _validate_intervention(intervention, kernel_spec=self._kernel_spec)
         _validate_shard_axis(shard_axis, X=X)
         _validate_batch_size(batch_size, X=X)
         _validate_store(store, output_dir=output_dir)
@@ -1715,14 +1729,25 @@ class ImpactModel(BaseModel):
         Raises:
             NotFittedError: If the model is not fitted.
             ValueError: If neither ``output_baseline`` nor ``args_baseline`` is
-                provided, or if neither ``output_intervention`` nor
-                ``args_intervention`` is provided.
+                provided, if neither ``output_intervention`` nor
+                ``args_intervention`` is provided, or if an ``intervention`` passed
+                through ``args_baseline`` or ``args_intervention`` names a site that
+                is not a sample site of the kernel.
 
         See Also:
             :meth:`~aimz.ImpactModel.cleanup` to remove the temporary directory if
             created.
         """
         _check_is_fitted(self)
+        for output, args in (
+            (output_baseline, args_baseline),
+            (output_intervention, args_intervention),
+        ):
+            if output is None and args is not None:
+                _validate_intervention(
+                    args.get("intervention"),
+                    kernel_spec=self._kernel_spec,
+                )
 
         if output_baseline is None and args_baseline is None:
             msg = "Either `output_baseline` or `args_baseline` must be provided."
