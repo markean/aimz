@@ -96,6 +96,7 @@ if TYPE_CHECKING:
     from types import ModuleType
     from typing import IO
 
+    import xarray as xr
     from mlflow.models import ModelInputExample, ModelSignature
     from mlflow.models.model import ModelInfo
     from mlflow.tracking.fluent import ActiveRun
@@ -109,7 +110,9 @@ SERIALIZATION_FORMAT_CLOUDPICKLE = "cloudpickle"
 
 SUPPORTED_SERIALIZATION_FORMATS = [SERIALIZATION_FORMAT_CLOUDPICKLE]
 
-_logger = logging.getLogger(__name__)
+# A child of MLflow's logger, so autologging messages are shown by default and
+# muted by `silent=True` like those of the built-in flavors.
+_logger = logging.getLogger("mlflow.aimz")
 
 
 def get_default_pip_requirements(*, include_cloudpickle: bool = False) -> list[str]:
@@ -504,7 +507,7 @@ def _load_pyfunc(path: str) -> _AimzModelWrapper:
     return _AimzModelWrapper(_load_model(path))
 
 
-def load_model(model_uri: str, dst_path: str | None = None) -> ImpactModel:
+def load_model(model_uri: str | Path, dst_path: str | None = None) -> ImpactModel:
     """Load an aimz model from a local file or a run.
 
     Args:
@@ -539,7 +542,7 @@ def load_model(model_uri: str, dst_path: str | None = None) -> ImpactModel:
         predictions = im.predict(X)
     """
     local_model_path = _download_artifact_from_uri(
-        artifact_uri=model_uri,
+        artifact_uri=str(model_uri),
         output_path=dst_path,
     )
     flavor_conf = _get_flavor_configuration(local_model_path, FLAVOR_NAME)
@@ -555,7 +558,11 @@ class _AimzModelWrapper:
         """Return the underlying model."""
         return self.aimz_model
 
-    def predict(self, data: object, params: dict[str, Any] | None = None):
+    def predict(
+        self,
+        data: object,
+        params: dict[str, Any] | None = None,
+    ) -> xr.DataTree:
         """Run predictions using the wrapped ImpactModel.
 
         Args:

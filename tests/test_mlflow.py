@@ -14,17 +14,22 @@
 
 """Tests for the MLflow integration."""
 
+import logging
+from functools import partial
+from logging.handlers import BufferingHandler
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import pytest
 from jax import Array, random
-from numpyro.infer import SVI
+from numpyro.infer import MCMC, NUTS, SVI, Trace_ELBO
+from numpyro.infer.autoguide import AutoNormal
+from numpyro.optim import Adam
 
 from aimz import ImpactModel
 from aimz.utils.data import ArrayDataset, ArrayLoader
-from tests.conftest import lm
+from tests.conftest import _make_svi, lm
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -75,11 +80,14 @@ def test_pyfunc_round_trip_predicts(
     wrapper's :meth:`~aimz.ImpactModel.predict` delegation.
     """
     X, _ = synthetic_data
+    rng_key = random.key_data(im_lm_svi_fitted.rng_key)
     save_model(
         im_lm_svi_fitted,
         tmp_path / "model",
         input_example=(np.asarray(X[:5]), {"progress": False}),
     )
+    # Signature inference runs a prediction but leaves the model's key unchanged
+    np.testing.assert_array_equal(random.key_data(im_lm_svi_fitted.rng_key), rng_key)
 
     loaded = mlflow.pyfunc.load_model(str(tmp_path / "model"))
 
@@ -93,6 +101,8 @@ def test_pyfunc_round_trip_predicts(
     out = cast("xr.DataTree", loaded.predict(np.asarray(X)))
 
     assert out["posterior_predictive"]["y"].sizes["y_dim_0"] == len(X)
+    # Predictions default to the in-memory store, which has no artifact on disk
+    assert "artifact_path" not in out.attrs
 
 
 def test_pyfunc_predict_with_dict_input(
@@ -267,6 +277,7 @@ def test_autolog_logs_model_when_rng_key_passed(
     autolog()
     try:
         im = ImpactModel(lm, rng_key=random.key(0), inference=vi)
+        rng_key = random.key_data(im.rng_key)
         with mlflow.start_run() as run:
             im.fit_on_batch(X=X, y=y, rng_key=random.key(1), num_steps=10)
         logged = mlflow.search_logged_models(
@@ -278,6 +289,8 @@ def test_autolog_logs_model_when_rng_key_passed(
 
     assert len(logged) == 1
     assert logged[0].status == LoggedModelStatus.READY
+    # Neither the keyed fit nor signature inference advances the model's key
+    np.testing.assert_array_equal(random.key_data(im.rng_key), rng_key)
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
@@ -323,10 +336,12 @@ def test_autolog_logs_elbo_history_dataset_and_model_params(
         client = mlflow.MlflowClient()
         history = client.get_metric_history(run.info.run_id, "elbo_loss")
         run_data = client.get_run(run.info.run_id)
+        artifacts = [f.path for f in client.list_artifacts(run.info.run_id)]
         logged = mlflow.search_logged_models(
             experiment_ids=[run.info.experiment_id],
             output_format="list",
         )
+        info = mlflow.models.get_model_info(f"models:/{logged[0].model_id}")
     finally:
         autolog(disable=True)
 
@@ -343,6 +358,9 @@ def test_autolog_logs_elbo_history_dataset_and_model_params(
     assert logged[0].params["num_steps"] == str(num_steps)
     # num_samples is attached post-fit via a separate log_model_params call
     assert logged[0].params["num_samples"] == str(im._num_samples)
+    # The kernel source is logged, and the model carries an inferred signature
+    assert "model.py" in artifacts
+    assert info.signature is not None
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
@@ -369,5 +387,106 @@ def test_autolog_logs_model_with_loader_input(
     finally:
         autolog(disable=True)
 
+    assert len(logged) == 1
+    assert logged[0].status == LoggedModelStatus.READY
+    # The loader's own batch size is logged, not fit's ignored argument
+    assert logged[0].params["batch_size"] == "3"
+
+
+def test_autolog_logs_mcmc_sampler_settings(
+    synthetic_data: tuple[Array, Array],
+) -> None:
+    """MCMC fits log the sampler settings instead of the ignored ``num_steps``."""
+    X, y = synthetic_data
+    autolog()
+    try:
+        im = ImpactModel(
+            lm,
+            rng_key=random.key(0),
+            inference=MCMC(NUTS(lm), num_warmup=10, num_samples=5, num_chains=2),
+        )
+        with mlflow.start_run() as run:
+            im.fit_on_batch(X=X, y=y)
+        params = mlflow.MlflowClient().get_run(run.info.run_id).data.params
+    finally:
+        autolog(disable=True)
+
+    assert params["num_chains"] == "2"
+    assert "num_steps" not in params
+
+
+def test_autolog_logs_elbo_when_fit_raises(
+    synthetic_data: tuple[Array, Array],
+) -> None:
+    """A fit raising after optimization keeps its ELBO curve.
+
+    The inference is a subclass of SVI, which is logged as SVI, with its optimizer.
+    """
+
+    class _SVI(SVI):
+        pass
+
+    num_steps = 10
+    X, y = synthetic_data
+    autolog()
+    try:
+        im = ImpactModel(
+            lm,
+            rng_key=random.key(0),
+            inference=_SVI(
+                lm,
+                guide=AutoNormal(lm),
+                optim=Adam(step_size=1e3),
+                loss=Trace_ELBO(),
+            ),
+        )
+        # The diverged parameters are rejected by the posterior draw after optimization
+        with (
+            pytest.warns(RuntimeWarning),
+            pytest.raises(ValueError, match="invalid loc parameter"),
+            mlflow.start_run() as run,
+        ):
+            im.fit_on_batch(X=X, y=y, num_steps=num_steps)
+        client = mlflow.MlflowClient()
+        history = client.get_metric_history(run.info.run_id, "elbo_loss")
+        params = client.get_run(run.info.run_id).data.params
+    finally:
+        autolog(disable=True)
+
+    assert sorted(m.step for m in history) == list(range(num_steps))
+    assert params["optimizer"] == "Adam"
+
+
+def test_autolog_reports_unreadable_kernel_source(
+    synthetic_data: tuple[Array, Array],
+) -> None:
+    """A kernel whose source cannot be read is reported and the model still logged.
+
+    The error goes through MLflow's logger, so it is shown by default like the messages
+    of the built-in flavors.
+    """
+    X, y = synthetic_data
+    # The source of a partial cannot be retrieved
+    kernel = partial(lm)
+    handler = BufferingHandler(capacity=100)
+    handler.setLevel(logging.ERROR)
+    logging.getLogger("mlflow").addHandler(handler)
+    autolog()
+    try:
+        im = ImpactModel(kernel, rng_key=random.key(0), inference=_make_svi(kernel))
+        with mlflow.start_run() as run:
+            im.fit_on_batch(X=X, y=y, num_steps=10)
+        logged = mlflow.search_logged_models(
+            experiment_ids=[run.info.experiment_id],
+            output_format="list",
+        )
+    finally:
+        autolog(disable=True)
+        logging.getLogger("mlflow").removeHandler(handler)
+
+    assert any(
+        "Failed to log the kernel source code" in record.getMessage()
+        for record in handler.buffer
+    )
     assert len(logged) == 1
     assert logged[0].status == LoggedModelStatus.READY
