@@ -29,7 +29,7 @@ from dataclasses import dataclass, replace
 from itertools import chain
 from typing import TYPE_CHECKING, Literal, NamedTuple, cast
 
-from jax import Array, device_get, device_put, random, tree
+from jax import Array, device_get, device_put, eval_shape, random, tree
 from jax.typing import ArrayLike
 from tqdm.auto import tqdm
 
@@ -415,21 +415,36 @@ class _OutputStreamer:
             )
 
         if group == "prior_predictive":
-            # Single-row probe from the retained first batch, so the stream is neither
-            # consumed nor restarted and the trace runs on a tiny input.
-            batch, fields = _split_intervention_fields(
-                {name: arr[:1] for name, arr in stream[2].items()},
-            )
+            # Single-row probe from the retained first batch draws the global latents
+            # once, so every batch shares them; the stream is neither consumed nor
+            # restarted and the trace runs on a tiny input.
+            first = stream[2]
             rng_key, rng_subkey = random.split(rng_key)
-            samples = _sample_forward(
-                kernel,
-                rng_keys=random.split(rng_subkey, num=req.num_samples),
-                return_sites=None,
-                samples=None,
-                intervention={**intervention, **fields},
-                model_kwargs={**batch, **kwargs_extra},
+            rng_keys = random.split(rng_subkey, num=req.num_samples)
+
+            def probe(batch: Mapping[str, object]) -> dict[str, Array]:
+                model_kwargs, fields = _split_intervention_fields(batch)
+                return _sample_forward(
+                    kernel,
+                    rng_keys=rng_keys,
+                    return_sites=None,
+                    samples=None,
+                    intervention={**intervention, **fields},
+                    model_kwargs={**model_kwargs, **kwargs_extra},
+                )
+
+            samples = probe({name: arr[:1] for name, arr in first.items()})
+            # A site whose shape follows the row count is per-observation; leave it
+            # out so each batch draws it fresh.
+            shapes = eval_shape(
+                probe,
+                {name: arr[:1].repeat(2, axis=0) for name, arr in first.items()},
             )
-            samples = {k: v for k, v in samples.items() if k not in req.return_sites}
+            samples = {
+                k: v
+                for k, v in samples.items()
+                if k not in req.return_sites and v.shape == shapes[k].shape
+            }
             if self._ctx.replicated_sharding is not None:
                 samples = device_put(samples, device=self._ctx.replicated_sharding)
         else:
