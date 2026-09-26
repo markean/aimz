@@ -907,9 +907,21 @@ class ImpactModel(BaseModel):
             if self.param_output not in args_bound:
                 msg = f"{self.param_output!r} must be provided in `.sample()`."
                 raise TypeError(msg)
+            # Continue the chain for this call only, so later fits keep their own warmup
+            # and number of samples
+            saved = self.inference.post_warmup_state, self.inference.num_samples
             self.inference.post_warmup_state = self.inference.last_state
             self.inference.num_samples = num_samples
-            self.inference.run(self.inference.post_warmup_state.rng_key, **args_bound)
+            try:
+                self.inference.run(
+                    self.inference.post_warmup_state.rng_key,
+                    **args_bound,
+                )
+            finally:
+                self.inference.post_warmup_state, self.inference.num_samples = saved
+                # Recompute the collection bounds from the restored number of samples,
+                # as each run does at its end
+                self.inference._set_collection_params()
             posterior_samples = device_get(self.inference.get_samples())
         else:
             if self.vi_result is None:

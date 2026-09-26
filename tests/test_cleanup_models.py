@@ -24,7 +24,7 @@ from tests.conftest import lm
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
-def test_predict_after_cleanup(
+def test_cleanup_models_removes_all_temp_dirs(
     synthetic_data: tuple[Array, Array],
     vi: SVI,
 ) -> None:
@@ -32,13 +32,13 @@ def test_predict_after_cleanup(
     X, y = synthetic_data
 
     im1 = ImpactModel(lm, rng_key=random.key(42), inference=vi)
-    im1.fit_on_batch(X=X, y=y)
+    im1.fit_on_batch(X=X, y=y, num_steps=10, num_samples=10, progress=False)
 
     im2 = ImpactModel(lm, rng_key=random.key(42), inference=vi)
-    im2.fit_on_batch(X=X, y=y)
+    im2.fit_on_batch(X=X, y=y, num_steps=10, num_samples=10, progress=False)
 
-    im1.predict(X, batch_size=3)
-    im2.predict(X, batch_size=3)
+    im1.predict(X, batch_size=3, progress=False)
+    im2.predict(X, batch_size=3, progress=False)
 
     ImpactModel.cleanup_models()
 
@@ -55,14 +55,14 @@ def test_cleanup_models_covers_unpickled_instance(
     X, y = synthetic_data
 
     im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
-    im.fit_on_batch(X=X, y=y)
+    im.fit_on_batch(X=X, y=y, num_steps=10, num_samples=10, progress=False)
 
     # cloudpickle bypasses `__init__` (only `__setstate__` runs), so the restored
     # instance must re-register itself in `_models`.
     restored = cloudpickle.loads(cloudpickle.dumps(im))
     assert restored in ImpactModel._models
 
-    restored.predict(X, batch_size=3)
+    restored.predict(X, batch_size=3, progress=False)
     assert restored.temp_dir is not None
 
     ImpactModel.cleanup_models()
