@@ -38,7 +38,8 @@ Enable autologging before you instantiate or fit a model (inside an active MLflo
 
     with mlflow.start_run():  # optional: autolog will create a managed run if absent
         im = ImpactModel(...)
-        im.fit(X, y)  # parameters, metrics, artifacts, and model logged automatically
+        # Parameters, metrics, artifacts, and model are logged automatically
+        im.fit(X, y, batch_size=32, epochs=5)
 
 
 When :func:`~aimz.mlflow.autolog` is active and you call :meth:`~aimz.ImpactModel.fit` or :meth:`~aimz.ImpactModel.fit_on_batch`, the following are captured:
@@ -80,10 +81,14 @@ Artifacts
     + An input example is copied from the first few rows of the data passed to :meth:`~aimz.ImpactModel.fit` or :meth:`~aimz.ImpactModel.fit_on_batch`, before training starts.
     + If the first positional argument (``X``) is an :class:`~aimz.utils.data.ArrayLoader`, the example is built from its underlying arrays except for the output variable.
     + A signature is inferred by running a short forward pass through :meth:`~aimz.ImpactModel.predict` on the input example, with the ``progress`` parameter recorded in the signature so it can be passed at inference time.
+    + Non-array keyword arguments passed to the kernel, such as a scalar hyperparameter, are logged as parameters but are left out of the example and the signature, and the model does not store them.
+      If the kernel requires such an argument, no signature is inferred, and the argument goes in the dict input when predicting.
+      If the kernel gives it a default, predictions through the pyfunc interface use that default instead of the training value, so log the model manually with the value in the params of the input example, such as ``input_example=(X[:5], {"scale": 2.0})``, to record it in the signature.
 
 
 .. note::
-   The autologging implementation may evolve. Pin versions in production pipelines for stability.
+   The autologging implementation may evolve.
+   Pin versions in production pipelines for stability.
 
 
 Custom Logging
@@ -96,10 +101,10 @@ Here is an example to save and reload a model manually:
     import numpy as np
 
     from aimz import ImpactModel
-    from aimz.mlflow import save_model, load_model
+    from aimz.mlflow import load_model, save_model
 
     # Train the model
-    im = ImpactModel(...).fit(X, y)
+    im = ImpactModel(...).fit(X, y, batch_size=32, epochs=5)
 
     # Save the model to a local path; the signature is inferred by running the
     # model on the input example. Pass a (data, params) tuple to also record
@@ -117,12 +122,21 @@ Here is an example to save and reload a model manually:
 The input example must be NumPy arrays.
 If the kernel takes additional array inputs, pass a dict of arrays such as ``{"X": X[:5], "z": z[:5]}`` as the input example.
 Pass ``signature=False`` to disable signature inference entirely.
+MLflow cannot describe the :class:`xarray.DataTree` predictions, so the signature records the output as ``any``, and the warning MLflow logs about the output schema is expected.
 Extra files can be bundled into the model directory with the ``extra_files`` argument of :func:`~aimz.mlflow.save_model` and :func:`~aimz.mlflow.log_model`.
 
 .. note::
-   aimz models are serialized with ``cloudpickle``.
+   aimz models are serialized with ``cloudpickle`` and have no pickle-free format.
    Loading honors MLflow's ``MLFLOW_ALLOW_PICKLE_DESERIALIZATION`` environment variable: if it is set to ``false``, loading pickled models is refused.
+   In Databricks Runtime and Databricks Model Serving, loading is always allowed regardless of this variable.
    Only load models from sources you trust.
+
+   A kernel defined in ``__main__``, such as in a script or a notebook, is stored by value, so the model loads without its source but only under the same Python minor version.
+   A kernel imported from a module is stored by reference, so that module must be importable when the model is loaded, and a changed module silently changes its predictions.
+   Pass the module to the ``code_paths`` argument of :func:`~aimz.mlflow.save_model` or :func:`~aimz.mlflow.log_model` to bundle it with the model.
+   Autologging cannot bundle code, and its ``model.py`` artifact is only a copy of the source for reference, so log a model with a module kernel manually.
+
+   The pickled model also holds some or all of the training data, because the ``inference`` object keeps references to it, even with ``log_datasets=False``.
 
 Logging directly to an active MLflow run:
 
@@ -137,7 +151,7 @@ Logging directly to an active MLflow run:
     X, y, z = ...
 
     # Train the model
-    im = ImpactModel(...).fit(X, y, z=z)
+    im = ImpactModel(...).fit(X, y, z=z, batch_size=100, epochs=5)
 
     with mlflow.start_run():
         # Log custom parameters
@@ -180,7 +194,12 @@ You can use :func:`mlflow.pyfunc.load_model` to load them and call ``predict`` i
 
 Dict input works only for models saved with a dict input example or without a signature.
 A model saved with an array input example accepts array input only.
-Under the hood the pyfunc wrapper delegates to :meth:`~aimz.ImpactModel.predict`.
+For a model saved with a signature, dict keys that are not inputs of the signature are dropped with a warning, and prediction arguments pass through ``params`` only when the signature records them, such as ``progress``.
+Inputs must also have the dtypes recorded in the signature, so cast new data accordingly, such as ``X_new.astype(np.float32)`` for a model saved with a ``float32`` example.
+Under the hood the pyfunc wrapper delegates to :meth:`~aimz.ImpactModel.predict`, keeping results in memory (``store="memory"``) instead of writing them to disk as :meth:`~aimz.ImpactModel.predict` does by default.
+
+.. note::
+   Predictions are returned as an :class:`xarray.DataTree`, which MLflow cannot serialize, so neither serving with ``mlflow models serve`` nor batch scoring with :func:`mlflow.models.predict` is supported.
 
 
 Environment & Dependencies

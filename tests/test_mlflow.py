@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import pytest
+import yaml
 from jax import Array, random
 from numpyro.infer import MCMC, NUTS, SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
@@ -144,7 +145,7 @@ def test_save_model_with_conda_env_and_metadata(
 
     model = mlflow.models.Model.load(str(tmp_path / "model"))
     assert model.metadata == {"key": "value"}
-    assert (tmp_path / "model" / "conda.yaml").exists()
+    assert yaml.safe_load((tmp_path / "model" / "conda.yaml").read_text()) == conda_env
 
 
 def test_save_model_with_extra_files(
@@ -175,7 +176,7 @@ def test_save_model_with_pip_requirements_and_constraints(
         pip_requirements=[f"-c {constraints}", "example-package"],
     )
 
-    assert (tmp_path / "model" / "requirements.txt").exists()
+    assert "example-package" in (tmp_path / "model" / "requirements.txt").read_text()
     assert (tmp_path / "model" / "constraints.txt").exists()
 
 
@@ -230,7 +231,7 @@ def test_load_model_disallowed_when_pickle_deserialization_disabled(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Loading raises when ``MLFLOW_ALLOW_PICKLE_DESERIALIZATION`` is disabled.
+    """Both loaders raise when ``MLFLOW_ALLOW_PICKLE_DESERIALIZATION`` is disabled.
 
     No other test exercises the gate: every other load runs with the permissive
     default, so a dropped gate would otherwise go unnoticed.
@@ -241,6 +242,8 @@ def test_load_model_disallowed_when_pickle_deserialization_disabled(
 
     with pytest.raises(MlflowException, match="pickle is disallowed"):
         load_model(str(tmp_path / "model"))
+    with pytest.raises(MlflowException, match="pickle is disallowed"):
+        mlflow.pyfunc.load_model(str(tmp_path / "model"))
 
 
 def test_load_model_rejects_unrecognized_serialization_format(
@@ -391,6 +394,34 @@ def test_autolog_logs_model_with_loader_input(
     assert logged[0].status == LoggedModelStatus.READY
     # The loader's own batch size is logged, not fit's ignored argument
     assert logged[0].params["batch_size"] == "3"
+
+
+@pytest.mark.parametrize("vi", [lm], indirect=True)
+def test_autolog_manages_run_without_model(
+    synthetic_data: tuple[Array, Array],
+    vi: SVI,
+) -> None:
+    """Without an active run, autologging creates, tags, and ends its own run.
+
+    With ``log_models=False``, no model is logged.
+    """
+    X, y = synthetic_data
+    autolog(log_models=False, extra_tags={"key": "value"})
+    try:
+        im = ImpactModel(lm, rng_key=random.key(0), inference=vi)
+        im.fit_on_batch(X=X, y=y, num_steps=10)
+        run = mlflow.last_active_run()
+        assert run is not None
+        logged = mlflow.search_logged_models(
+            experiment_ids=[run.info.experiment_id],
+            output_format="list",
+        )
+    finally:
+        autolog(disable=True)
+
+    assert run.info.status == "FINISHED"
+    assert run.data.tags["key"] == "value"
+    assert logged == []
 
 
 def test_autolog_logs_mcmc_sampler_settings(

@@ -20,8 +20,9 @@ aimz (native) format
     This is the main flavor that can be loaded back into aimz.
 :py:mod:`mlflow.pyfunc`
     Produced for generic pyfunc-based batch inference in Python. Predictions are
-    returned as an :py:class:`xarray.DataTree`, which the MLflow scoring server does
-    not serialize, so REST serving (e.g. ``mlflow models serve``) is not supported.
+    returned as an :py:class:`xarray.DataTree`, which MLflow does not serialize, so
+    neither REST serving (e.g. ``mlflow models serve``) nor
+    :py:func:`mlflow.models.predict` is supported.
 """
 
 from __future__ import annotations
@@ -176,7 +177,7 @@ def save_model(
         path: Local path where the model is to be saved.
         conda_env: {{ conda_env }}
         code_paths: {{ code_paths }}
-        mlflow_model: :py:mod:`mlflow.models.Model` this flavor is being added to.
+        mlflow_model: :py:class:`mlflow.models.Model` this flavor is being added to.
         signature: {{ signature }}
         input_example: {{ input_example }}
         pip_requirements: {{ pip_requirements }}
@@ -193,7 +194,7 @@ def save_model(
         from aimz import ImpactModel
 
         # Train the model
-        im = ImpactModel(...).fit(X, y)
+        im = ImpactModel(...).fit(X, y, batch_size=32, epochs=5)
 
         # Save the model
         path = "model"
@@ -375,7 +376,7 @@ def log_model(
         model_type: {{ model_type }}
         step: {{ step }}
         model_id: {{ model_id }}
-        kwargs: Extra arguments to pass to :py:func:`mlflow.models.Model.log`.
+        kwargs: Extra arguments to pass to :py:meth:`mlflow.models.Model.log`.
 
     Returns:
         A :py:class:`ModelInfo <mlflow.models.model.ModelInfo>` instance that contains
@@ -390,7 +391,7 @@ def log_model(
         from aimz import ImpactModel
 
         # Train the model
-        im = ImpactModel(...).fit(X, y)
+        im = ImpactModel(...).fit(X, y, batch_size=32, epochs=5)
 
         # Log the model
         with mlflow.start_run() as run:
