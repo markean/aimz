@@ -214,8 +214,8 @@ Once trained, we perform a counterfactual analysis to isolate the effect of ``Z`
 
 .. note::
 
-    This model contains a local latent variable, which requires :meth:`~aimz.ImpactModel.predict_on_batch` here.
-    Prefer :meth:`~aimz.ImpactModel.predict` whenever it is compatible with the model.
+    The example uses :meth:`~aimz.ImpactModel.predict_on_batch` for brevity.
+    :meth:`~aimz.ImpactModel.predict` also handles this model's local latent variable: with the default ``batch_size`` on a single device it processes the whole input as one batch, and otherwise it warns and reruns under ``shard_axis="draw"``.
     See :ref:`model compatibility <faq-model-compatibility>` for details.
 
 Comparing these two distributions allows us to estimate the effect of ``Z`` on ``Y``, adjusted for the influence of ``C``.

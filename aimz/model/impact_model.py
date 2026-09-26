@@ -1156,7 +1156,7 @@ class ImpactModel(BaseModel):
         """Fit the impact model to the provided batch of data.
 
         This method behaves differently depending on the inference method specified at
-        th initialization:
+        initialization:
 
         - SVI
             Runs variational inference on the provided batch by invoking the
@@ -1296,7 +1296,7 @@ class ImpactModel(BaseModel):
             The fitted model instance, enabling method chaining.
 
         Raises:
-            TypeError: If the inference method is MCMC or ``X`` is a custom iterable
+            TypeError: If the inference method is MCMC or ``X`` is another data loader
                 rather than arrays or an :class:`~aimz.utils.data.ArrayLoader`.
             ValueError: If ``y`` is missing when ``X`` is array-like, or the array
                 inputs do not share one leading-axis size.
@@ -1312,7 +1312,7 @@ class ImpactModel(BaseModel):
         if not isinstance(X, (ArrayLike, ArrayLoader)):
             msg = (
                 f"`fit()` requires arrays or an ArrayLoader, got {type(X).__name__!r}; "
-                "use train_on_batch for custom loaders."
+                "use `train_on_batch()` for other data loaders."
             )
             raise TypeError(msg)
         if y is None and isinstance(X, ArrayLike):
@@ -1527,7 +1527,7 @@ class ImpactModel(BaseModel):
             1) Models incompatible with :meth:`~aimz.ImpactModel.predict` due to their
             posterior sample shapes.
 
-            2) Scenarios where writing results to to files (e.g., disk, cloud storage)
+            2) Scenarios where writing results to files (e.g., disk, cloud storage)
             is not desired.
 
             3) Smaller datasets, as this method may be slower due to limited

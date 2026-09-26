@@ -192,7 +192,7 @@ def _setup_inputs(
     stacklevel: int = 2,
     **kwargs: object,
 ) -> tuple[Iterable[Mapping[str, Array | np.ndarray]], dict]:
-    """Prepare a batch iterable and grouped keyword arguments.
+    """Prepare a data loader and grouped keyword arguments.
 
     Args:
         X: Input array with observations on the leading axis, or a data loader
@@ -269,7 +269,7 @@ def _setup_inputs(
         if isinstance(X, ArrayLoader) and X.shuffle and not shuffle:
             msg = (
                 "The data loader shuffles, so results will not follow the data order. "
-                "Use `shuffle=False` to preserve it."
+                "Create the ArrayLoader with `shuffle=False` to preserve it."
             )
             warn(msg, category=UserWarning, stacklevel=stacklevel)
         loader = X

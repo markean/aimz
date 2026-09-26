@@ -20,7 +20,7 @@ Setting up Development Environment
 
     git checkout -b feature/my-change
 
-#. Install development dependencies (requires Python 3.11+).
+#. Install development dependencies (requires Python 3.12+).
    We recommend using `uv <https://docs.astral.sh/uv/>`_ as the package and environment manager. ::
 
     uv venv                     # create a virtual environment
@@ -36,7 +36,7 @@ Follow these principles when editing:
 * Prioritize clarity over clever abstractions; refactor only when duplication becomes costly.
 * Update or create tests and documentation alongside code changes (do not defer).
 
-After making your changes, stage it, for example::
+After making your changes, stage them, for example::
 
     git add <path/to/modified_file.py>
 

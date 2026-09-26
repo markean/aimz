@@ -13,7 +13,7 @@ authors = [
     { name = "Jirapat Samranvedhya", email = "jirapat.samranvedhya@lilly.com" },
 ]
 maintainers = [{ name = "Eunseop Kim", email = "markean@pm.me" }]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "dask>=2026.1",
     "jax>=0.10",
@@ -28,7 +28,6 @@ classifiers = [
     "Topic :: Scientific/Engineering",
     'Programming Language :: Python :: 3',
     'Programming Language :: Python :: 3 :: Only',
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
@@ -45,15 +44,15 @@ dev = [
 gpu = ["jax[cuda13]>=0.10"]
 mlflow = ["mlflow>=3.10"]
 docs = [
-    "arviz_base>=1; python_version >= '3.12'",
-    "arviz_plots>=1; python_version >= '3.12'",
-    "arviz_stats>=1; python_version >= '3.12'",
+    "arviz_base>=1",
+    "arviz_plots>=1",
+    "arviz_stats>=1",
     "flax>=0.12",
     "jupyter-sphinx>=0.5",
     "mlflow>=3.10",
     "myst-parser>=5",
     "pydata-sphinx-theme>=0.22",
-    "sphinx>=9",
+    "sphinx>=9.1",
     "sphinx-copybutton>=0.5",
     "sphinx-design>=0.7",
 ]

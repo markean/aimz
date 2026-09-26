@@ -1,7 +1,7 @@
 Installation
 ============
 
-aimz requires **Python 3.11 or higher** and is available via `PyPI <https://pypi.org/project/aimz/>`_ and `conda-forge <https://anaconda.org/conda-forge/aimz>`_.
+aimz requires **Python 3.12 or higher** and is available via `PyPI <https://pypi.org/project/aimz/>`_ and `conda-forge <https://anaconda.org/conda-forge/aimz>`_.
 
 
 Quick Install
