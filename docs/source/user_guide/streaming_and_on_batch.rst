@@ -235,9 +235,12 @@ To reconstruct the same :external:class:`xarray.DataTree` from the files alone, 
 
     # The per-call directory written under `output_dir` (the tree's `artifact_path`)
     store = ...
+    # 1 for SVI, or the number of MCMC chains (`im.inference.num_chains`)
+    num_chains = 1
 
-    # If relevant, add the leading `chain` axis and coordinates as aimz does on read
-    ds = xr.open_zarr(store, consolidated=False).expand_dims(dim="chain", axis=0)
+    # Split the stacked draws into `chain` and `draw` and add coordinates, as aimz does on read
+    ds = xr.open_zarr(store, consolidated=False)
+    ds = ds.coarsen(draw=ds.sizes["draw"] // num_chains).construct(draw=("chain", "draw"))
     ds = ds.assign_coords({dim: np.arange(ds.sizes[dim]) for dim in ds.sizes})
 
     dt = xr.DataTree(name="root")

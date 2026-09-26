@@ -116,3 +116,6 @@ ban-relative-imports = "all"
 [tool.setuptools.packages.find]
 include = ["aimz*"]
 namespaces = false
+
+[tool.setuptools.package-data]
+aimz = ["py.typed"]

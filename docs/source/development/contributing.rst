@@ -23,9 +23,8 @@ Setting up Development Environment
 #. Install development dependencies (requires Python 3.12+).
    We recommend using `uv <https://docs.astral.sh/uv/>`_ as the package and environment manager. ::
 
-    uv venv                     # create a virtual environment
+    uv sync --extra dev         # create .venv and install aimz with development dependencies
     source .venv/bin/activate   # activate it
-    uv pip install -e ."[dev]"  # install aimz and development dependencies
 
 
 Making Changes
@@ -72,13 +71,13 @@ For larger additions:
 * Use cross references for API objects, e.g. ``:meth:`~aimz.ImpactModel.predict```.
 * Build the Sphinx docs locally (requires ``[docs]`` extra)::
 
-   uv pip install -e ."[docs]"
+   uv sync --extra dev --extra docs
    make -C docs html
 
 
 Linting & Pre-commit Hooks
 --------------------------
-We use `Ruff <https://docs.astral.sh/ruff>`_ (lint + optional formatting) and `pre-commit <https://pre-commit.com/>`_ hooks to keep diffs clean and reviews focused on design, not style nits.
+We use `Ruff <https://docs.astral.sh/ruff>`_ (linting and formatting) and `pre-commit <https://pre-commit.com/>`_ hooks to keep diffs clean and reviews focused on design, not style nits.
 
 One-time setup::
 
@@ -87,10 +86,12 @@ One-time setup::
 Fast local checks (iterate frequently)::
 
     ruff check .
+    ruff format --check .
 
 Auto-fix what can be fixed::
 
     ruff check . --fix
+    ruff format .
 
 Run the full hook suite (after staging)::
 
@@ -104,5 +105,5 @@ When opening a PR, reference the relevant issue number (if any) in the title or 
 Checklist:
 
 * [ ] Tests pass locally and CI is green.
-* [ ] Linting passes (``ruff check .`` and ``pre-commit run --all-files``).
+* [ ] Linting and formatting pass (``ruff check .``, ``ruff format --check .``, and ``pre-commit run --all-files``).
 * [ ] Documentation updated or not required.

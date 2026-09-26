@@ -27,7 +27,6 @@ repos:
         args: [--pytest-test-first]
       - id: no-commit-to-branch
         args: [--branch, main]
-      - id: sort-simple-yaml
       - id: trailing-whitespace
 
   - repo: https://github.com/Yelp/detect-secrets

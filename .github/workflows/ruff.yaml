@@ -4,7 +4,7 @@ on:
     push:
       branches: [ main ]
     pull_request:
-      branches: [ main ]
+      branches: [ main, dev ]
 
 permissions:
   contents: read
@@ -21,6 +21,7 @@ jobs:
         uses: astral-sh/ruff-action@v4.1.0
         with:
           version-file: "uv.lock"
+          args: --version
 
       - name: Run ruff check
         run: ruff check
