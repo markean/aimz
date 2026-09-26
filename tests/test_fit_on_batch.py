@@ -14,9 +14,12 @@
 
 """Tests for the `.fit_on_batch()` method."""
 
+import jax.numpy as jnp
+import numpyro.distributions as dist
 import pytest
 from jax import Array, random
-from numpyro.infer import SVI, Trace_ELBO
+from numpyro import deterministic, sample
+from numpyro.infer import MCMC, NUTS, SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
 from numpyro.optim import Adam
 
@@ -40,6 +43,40 @@ def test_fit_svi(synthetic_data: tuple[Array, Array], vi: SVI) -> None:
     assert last_loss < first_loss, (
         f"Loss did not decrease after training: first={first_loss}, last={last_loss}"
     )
+
+
+def test_fit_mcmc_keeps_chains(synthetic_data: tuple[Array, Array]) -> None:
+    """Outputs keep the sampler's chains until a posterior is injected."""
+    X, y = synthetic_data
+
+    def kernel(X: Array, y: Array | None = None) -> None:
+        b = sample("b", dist.Normal(0.0, 1.0))
+        mu = deterministic("mu", X.sum(axis=-1) + b)
+        sample("y", dist.Normal(mu, 1.0), obs=y)
+
+    im = ImpactModel(
+        kernel,
+        rng_key=random.key(42),
+        inference=MCMC(NUTS(kernel), num_warmup=10, num_samples=5, num_chains=2),
+    )
+    im.fit_on_batch(X, y)
+    b = im.inference.get_samples(group_by_chain=True)["b"]
+
+    for dt in (
+        im.predict_on_batch(X),
+        im.predict(X, shard_axis="draw", progress=False),
+    ):
+        assert jnp.array_equal(dt.posterior["b"].values, b)
+        assert jnp.allclose(
+            dt.posterior_predictive["mu"].values,
+            X.sum(axis=-1) + b[..., None],
+        )
+    im.cleanup()
+
+    # Collapsed draws from both chains, in a count the chains do not divide.
+    im.set_posterior_sample({"b": b.reshape(-1)[:7]})
+    sizes = im.predict_on_batch(X).posterior_predictive.sizes
+    assert (sizes["chain"], sizes["draw"]) == (1, 7)
 
 
 def test_fit_on_batch_zero_dim_raises(synthetic_data: tuple[Array, Array]) -> None:

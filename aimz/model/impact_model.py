@@ -136,6 +136,7 @@ class ImpactModel(BaseModel):
         self._vi_state = None
         self._is_fitted = False
         self._posterior: dict[str, Array] | None = None
+        self._num_chains = 1
         self._init_runtime_attrs()
 
     def _init_runtime_attrs(self) -> None:
@@ -244,6 +245,8 @@ class ImpactModel(BaseModel):
         self.__dict__.update(state)
         # Models pickled before `_is_fitted` was initialized eagerly may lack it.
         self.__dict__.setdefault("_is_fitted", False)
+        # Models pickled before chains were kept stacked their draws as one chain.
+        self.__dict__.setdefault("_num_chains", 1)
         self._init_runtime_attrs()
 
     @property
@@ -589,9 +592,15 @@ class ImpactModel(BaseModel):
                 cast("dict[str, DaskArray]", result),
                 group=group,
                 posterior=self.posterior,
+                num_chains=self._num_chains,
             )
 
-        return _build_datatree(artifact_path, group=group, posterior=self.posterior)
+        return _build_datatree(
+            artifact_path,
+            group=group,
+            posterior=self.posterior,
+            num_chains=self._num_chains,
+        )
 
     def sample_prior_predictive_on_batch(
         self,
@@ -658,6 +667,7 @@ class ImpactModel(BaseModel):
             prior_predictive_samples,
             group="prior_predictive",
             posterior=self.posterior,
+            num_chains=self._num_chains,
         )
 
     def sample_prior_predictive(
@@ -888,7 +898,13 @@ class ImpactModel(BaseModel):
         if not return_datatree:
             return posterior_samples
 
-        return _build_datatree(posterior_samples, group="posterior")
+        return _build_datatree(
+            posterior_samples,
+            group="posterior",
+            num_chains=(
+                self.inference.num_chains if isinstance(self.inference, MCMC) else 1
+            ),
+        )
 
     def sample_posterior_predictive_on_batch(
         self,
@@ -1188,6 +1204,7 @@ class ImpactModel(BaseModel):
             )
             self.inference.run(rng_subkey, **args_bound)
             self._posterior = device_get(self.inference.get_samples())
+            self._num_chains = self.inference.num_chains
             self._num_samples = (
                 next(iter(self.posterior.values())).shape[0] if self.posterior else 0
             )
@@ -1432,6 +1449,7 @@ class ImpactModel(BaseModel):
             raise ValueError(msg)
         (self._num_samples,) = batch_shapes.pop()
         self._posterior = posterior_sample
+        self._num_chains = 1
         if self._kernel_spec is None:
             self._kernel_spec = KernelSpec(
                 traced=False,
@@ -1526,6 +1544,7 @@ class ImpactModel(BaseModel):
             samples,
             group="posterior_predictive" if in_sample else "predictions",
             posterior=self.posterior,
+            num_chains=self._num_chains,
         )
 
     def predict(
@@ -1789,7 +1808,10 @@ class ImpactModel(BaseModel):
             in_sample = args_baseline.get("in_sample", True) if args_baseline else True
             group = "posterior_predictive" if in_sample else "predictions"
             wrapper = xr.DataTree(name="root")
-            wrapper[group] = _dict_to_datatree(dt_baseline)
+            wrapper[group] = _dict_to_datatree(
+                dt_baseline,
+                num_chains=self._num_chains,
+            )
             dt_baseline = wrapper
         if isinstance(dt_intervention, dict):
             in_sample = (
@@ -1797,7 +1819,10 @@ class ImpactModel(BaseModel):
             )
             group = "posterior_predictive" if in_sample else "predictions"
             wrapper = xr.DataTree(name="root")
-            wrapper[group] = _dict_to_datatree(dt_intervention)
+            wrapper[group] = _dict_to_datatree(
+                dt_intervention,
+                num_chains=self._num_chains,
+            )
             dt_intervention = wrapper
 
         group = _validate_group(dt_baseline, dt_intervention=dt_intervention)
@@ -1805,7 +1830,10 @@ class ImpactModel(BaseModel):
         out = xr.DataTree(name="root")
         out[group] = dt_intervention[group] - dt_baseline[group]
         if self.posterior:
-            out["posterior"] = _dict_to_datatree(self.posterior)
+            out["posterior"] = _dict_to_datatree(
+                self.posterior,
+                num_chains=self._num_chains,
+            )
         # Record each scenario's artifact path when the scenario was computed by a
         # disk-backed method. In-memory (on_batch / *_on_batch / store="memory")
         # results carry no artifact attrs.

@@ -47,6 +47,7 @@ def _make_attrs() -> dict[str, str]:
 
 def _dict_to_datatree(
     data: Mapping[str, Array | npt.NDArray | DaskArray],
+    num_chains: int,
 ) -> xr.DataTree:
     """Convert a dictionary of arrays to an xarray DataTree.
 
@@ -58,7 +59,9 @@ def _dict_to_datatree(
     Args:
         data: A dictionary mapping variable names to arrays. Each array should have
             shape ``(num_samples, dim_0, dim_1, ...)`` where the first dimension
-            represents samples or draws.
+            represents samples or draws, stacked chain by chain.
+        num_chains: Number of chains the draws are stacked from. The first dimension is
+            split into ``chain`` and ``draw``.
 
     Returns:
         All variables with added ``chain`` and ``draw`` dimensions, along with
@@ -68,17 +71,21 @@ def _dict_to_datatree(
         xr.Dataset(
             {
                 site: xr.DataArray(
-                    np.expand_dims(cast("npt.NDArray", arr), axis=0),
+                    np.expand_dims(cast("npt.NDArray", arr), axis=0).reshape(
+                        num_chains,
+                        arr.shape[0] // num_chains,
+                        *arr.shape[1:],
+                    ),
                     coords={
-                        "chain": np.arange(1),
-                        "draw": np.arange(arr.shape[0]),
+                        "chain": np.arange(num_chains),
+                        "draw": np.arange(arr.shape[0] // num_chains),
                         **{
                             f"{site}_dim_{i}": np.arange(arr.shape[i + 1])
                             for i in range(arr.ndim - 1)
                         },
                     },
                     dims=(
-                        # Adding the 'chain' dimension to support MCMC-style structures.
+                        # The stacked draws are split into 'chain' and 'draw'.
                         "chain",
                         "draw",
                         # arr has shape (draw, dim_0, dim_1, ...), so arr.ndim includes
@@ -93,21 +100,29 @@ def _dict_to_datatree(
     )
 
 
-def _zarr_to_datatree(artifact_path: Path) -> xr.DataTree:
+def _zarr_to_datatree(artifact_path: Path, num_chains: int = 1) -> xr.DataTree:
     """Load a Zarr group as an xarray DataTree.
 
-    Reads the store with :external:func:`~xarray.open_zarr` and adds a ``chain``
-    dimension along with coordinates for each dimension, matching the structure
-    produced by :func:`_dict_to_datatree`.
+    Reads the store with :external:func:`~xarray.open_zarr` and splits its ``draw``
+    dimension into ``chain`` and ``draw``, along with coordinates for each dimension,
+    matching the structure produced by :func:`_dict_to_datatree`.
 
     Args:
         artifact_path: Path holding the Zarr group.
+        num_chains: Number of chains the stored draws are stacked from.
 
     Returns:
-        The loaded dataset with an added ``chain`` dimension, along with coordinates
-            for each array dimension.
+        The loaded dataset with ``chain`` and ``draw`` dimensions, along with
+            coordinates for each array dimension.
     """
-    ds = open_zarr(artifact_path, consolidated=False).expand_dims(dim="chain", axis=0)
+    ds = open_zarr(artifact_path, consolidated=False)
+    ds = (
+        ds.coarsen(draw=ds.sizes["draw"] // num_chains).construct(
+            draw=("chain", "draw"),
+        )
+        if num_chains > 1
+        else ds.expand_dims(dim="chain", axis=0)
+    )
     ds = ds.assign_coords(
         {k: np.arange(ds.sizes[k]) for k in ds.sizes},
     ).assign_attrs(_make_attrs())
@@ -119,6 +134,7 @@ def _build_datatree(
     data: Path | Mapping[str, Array | npt.NDArray | DaskArray],
     group: str,
     posterior: Mapping[str, Array | npt.NDArray] | None = None,
+    num_chains: int = 1,
 ) -> xr.DataTree:
     """Build the aimz output DataTree.
 
@@ -136,6 +152,10 @@ def _build_datatree(
             ``"prior_predictive"``).
         posterior: Optional posterior samples; when provided, added as a ``"posterior"``
             subtree before ``group``.
+        num_chains: Number of chains the posterior draws are stacked from. The
+            posterior subtree and ``group`` split their draws into ``chain`` and
+            ``draw``, except a ``"prior_predictive"`` group, whose draws do not come
+            from the posterior.
 
     Returns:
         A DataTree rooted at ``"root"`` with the site data attached under ``group``
@@ -143,12 +163,13 @@ def _build_datatree(
     """
     out = xr.DataTree(name="root")
     if posterior:
-        out["posterior"] = _dict_to_datatree(posterior)
+        out["posterior"] = _dict_to_datatree(posterior, num_chains=num_chains)
+    group_chains = 1 if group == "prior_predictive" else num_chains
     if isinstance(data, Path):
-        out[group] = _zarr_to_datatree(data)
+        out[group] = _zarr_to_datatree(data, num_chains=group_chains)
         out[group].attrs["artifact_path"] = str(data)
         out.attrs["artifact_path"] = str(data)
     else:
-        out[group] = _dict_to_datatree(data)
+        out[group] = _dict_to_datatree(data, num_chains=group_chains)
 
     return out
