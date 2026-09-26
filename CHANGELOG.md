@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A pickled {class}`~aimz.ImpactModel` with a Poisson-family likelihood can now predict and continue training after being loaded in a new process, including through {func}`~aimz.mlflow.load_model` and `mlflow.pyfunc.load_model`, instead of raising a `NotImplementedError` ([#337](https://github.com/markean/aimz/issues/337)).
 - A pickled {class}`~aimz.ImpactModel` fitted with MCMC on parallel chains can now run {meth}`~aimz.ImpactModel.sample` and {meth}`~aimz.ImpactModel.fit_on_batch` after being loaded where fewer devices than chains are available, with a warning that the chains are drawn sequentially, instead of raising a `ValueError` ([#340](https://github.com/markean/aimz/issues/340)).
 - A refit with {meth}`~aimz.ImpactModel.fit` or {meth}`~aimz.ImpactModel.fit_on_batch` that stops during optimization now keeps the previous posterior usable, instead of recording the new `num_samples` and making every predictive method fail with a shape mismatch ([#342](https://github.com/markean/aimz/issues/342)).
+- {meth}`~aimz.ImpactModel.sample_prior_predictive` under the default `shard_axis="obs"` now draws per-observation latent sites afresh in each batch and shares only the global ones, instead of reusing one draw of each per-observation latent for every observation, which made the returned samples silently correlated across observations ([#344](https://github.com/markean/aimz/issues/344)).
 
 ## [v0.15.1](https://github.com/markean/aimz/releases/tag/v0.15.1) - 2026-09-12
 
