@@ -276,6 +276,20 @@ class ImpactModel(BaseModel):
         # Models pickled before chains were kept stacked their draws as one chain
         self.__dict__.setdefault("_num_chains", 1)
         self._init_runtime_attrs()
+        # A sampler pickled with parallel chains may be loaded on fewer devices
+        inference = self._inference
+        if (
+            isinstance(inference, MCMC)
+            and inference.chain_method == "parallel"
+            and self._num_devices < inference.num_chains
+        ):
+            inference.chain_method = "sequential"
+            msg = (
+                "There are not enough devices to run parallel chains: expected "
+                f"{inference.num_chains} but got {self._num_devices}. Chains will be "
+                "drawn sequentially."
+            )
+            warn(msg, category=UserWarning, stacklevel=2)
 
     @property
     def inference(self) -> SVI | MCMC:
