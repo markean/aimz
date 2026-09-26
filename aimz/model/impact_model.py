@@ -1984,6 +1984,7 @@ class ImpactModel(BaseModel):
         _validate_shard_axis(shard_axis, X=X)
         _validate_batch_size(batch_size, X=X)
         _validate_store(store, output_dir=output_dir)
+        _group_kwargs(kwargs, forbid=(self.param_input, self.param_output))
         _validate_aligned_inputs(X, y=y, kwargs=kwargs)
         if y is None and isinstance(X, ArrayLike):
             msg = (
