@@ -75,6 +75,8 @@ pep8-naming = { ignore-names = ["*X*"] }
 per-file-ignores = { "aimz/model/_core.py" = [
     "ANN001", # missing-type-function-argument
     "ANN003", # missing-type-kwargs
+], "aimz/model/impact_model.py" = [
+    "SLF001", # private-member-access
 ], "aimz/mlflow*" = [
     "ANN202",  # missing-return-type-private-function
     "ARG001",  # unused-function-argument

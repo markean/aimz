@@ -71,6 +71,7 @@ def test_sample_with_mcmc(
     """Test the `.sample()` method of ImpactModel with MCMC."""
     X, y = synthetic_data
     num_samples = 7
+    num_samples_fit = im_lm_mcmc_fitted.inference.num_samples
     # rng_key is ignored for MCMC; sampling uses the post_warmup_state
     samples = im_lm_mcmc_fitted.sample(
         num_samples=num_samples,
@@ -79,7 +80,7 @@ def test_sample_with_mcmc(
         y=y,
     ).posterior
 
-    assert im_lm_mcmc_fitted.inference.num_samples == num_samples
+    assert im_lm_mcmc_fitted.inference.num_samples == num_samples_fit
 
     # Check shapes for all sampled sites
     for var in samples.data_vars:

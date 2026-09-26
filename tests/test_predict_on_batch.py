@@ -72,7 +72,7 @@ def test_predict_on_batch_mlm() -> None:
             loss=Trace_ELBO(),
         ),
     )
-    im.fit_on_batch(X=X, y=y)
+    im.fit_on_batch(X=X, y=y, num_steps=10, num_samples=10, progress=False)
     out = im.predict_on_batch(X=X)
 
     assert out["posterior_predictive"]["y"].sizes["y_dim_0"] == n_obs

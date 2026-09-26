@@ -36,7 +36,9 @@ def test_rng_key_consistency(synthetic_data: tuple[Array, Array], vi: SVI) -> No
     assert jnp.allclose(im.rng_key, rng_key)
     im.train_on_batch(X=X, y=y, rng_key=rng_key)
     assert jnp.allclose(im.rng_key, rng_key)
-    im.fit_on_batch(X=X, y=y, rng_key=rng_key, progress=False)
+    im.fit_on_batch(
+        X=X, y=y, rng_key=rng_key, num_steps=10, num_samples=10, progress=False
+    )
     assert jnp.allclose(im.rng_key, rng_key)
     im.fit(X=X, y=y, rng_key=rng_key, batch_size=3, progress=False)
     assert jnp.allclose(im.rng_key, rng_key)
