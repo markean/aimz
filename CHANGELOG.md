@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - The `device` argument and `pad_array` method of {class}`~aimz.utils.data.ArrayLoader`; the model methods now pad and place each batch themselves ([#312](https://github.com/markean/aimz/issues/312)).
+- Support for Python 3.11; aimz now requires Python 3.12 or later ([#346](https://github.com/markean/aimz/issues/346)).
 
 ### Fixed
 
