@@ -77,8 +77,9 @@ def _validate_group(dt_baseline: xr.DataTree, dt_intervention: xr.DataTree) -> s
     Raises:
         ValueError: If the chosen group is missing from ``dt_baseline`` or
             ``dt_intervention``.
-        UserWarning: If the chosen group's dimension sizes differ between the two
-            scenarios (the effect subtraction would then inner-join to the overlap).
+        UserWarning: If the chosen group's dimension sizes or coordinate labels
+            differ between the two scenarios (the effect subtraction would then
+            inner-join to the overlap).
     """
     group = (
         "predictions"
@@ -105,6 +106,18 @@ def _validate_group(dt_baseline: xr.DataTree, dt_intervention: xr.DataTree) -> s
             f"Baseline and intervention have different dimension sizes in group "
             f"{group!r}: {dict(dt_baseline[group].sizes)} vs "
             f"{dict(dt_intervention[group].sizes)}."
+        )
+        warn(msg, category=UserWarning, stacklevel=3)
+    elif unmatched := [
+        dim
+        for dim, index in dt_baseline[group].indexes.items()
+        if dim in dt_intervention[group].indexes
+        and not index.difference(dt_intervention[group].indexes[dim]).empty
+    ]:
+        msg = (
+            f"Baseline and intervention have different coordinate labels along "
+            f"{', '.join(map(repr, unmatched))} in group {group!r}; the effect "
+            "covers only the labels present in both."
         )
         warn(msg, category=UserWarning, stacklevel=3)
 

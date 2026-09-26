@@ -163,3 +163,20 @@ def test_estimate_effect_warns_on_size_mismatch(
             output_baseline=base,
             output_intervention=intervention,
         )
+
+
+def test_estimate_effect_warns_on_coordinate_mismatch(
+    synthetic_data: tuple[Array, Array],
+    im_lm_svi_fitted: ImpactModel,
+) -> None:
+    """A coordinate-label mismatch between equally sized scenarios warns."""
+    X, _ = synthetic_data
+
+    base = im_lm_svi_fitted.predict_on_batch(X[:50])
+    intervention = im_lm_svi_fitted.predict_on_batch(X).isel(y_dim_0=slice(50, 100))
+
+    with pytest.warns(UserWarning, match="different coordinate labels"):
+        im_lm_svi_fitted.estimate_effect(
+            output_baseline=base,
+            output_intervention=intervention,
+        )
