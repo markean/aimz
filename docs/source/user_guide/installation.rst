@@ -43,9 +43,8 @@ Quick Install
 Optional Extras
 ---------------
 
-aimz ships several optional dependency groups that you can install with the
-``pip install "aimz[<extra>]"`` syntax. Combine multiple extras with commas,
-e.g. ``pip install "aimz[mlflow,docs]"``.
+aimz ships several optional dependency groups that you can install with the ``pip install "aimz[<extra>]"`` syntax.
+Combine multiple extras with commas, e.g. ``pip install "aimz[mlflow,docs]"``.
 
 .. tab-set::
 

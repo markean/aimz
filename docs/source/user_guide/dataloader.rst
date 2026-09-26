@@ -206,7 +206,7 @@ After a manual training loop you can populate the model state so downstream call
 
 1. Set :attr:`~aimz.ImpactModel.vi_result` to a structure containing the final parameters, the internal SVI state, and the loss history.
 2. Draw posterior samples with :meth:`~aimz.ImpactModel.sample` (``return_datatree=False`` to get a raw dictionary instead of a :external:class:`~xarray.DataTree`).
-3. Register the samples  via :meth:`~aimz.ImpactModel.set_posterior_sample`.
+3. Register the samples via :meth:`~aimz.ImpactModel.set_posterior_sample`.
 
 .. code-block:: python
 

@@ -16,7 +16,7 @@ aimz provides three sets of explicit sampling methods from the :class:`~aimz.Imp
 By default, these methods return results as an :external:class:`xarray.DataTree`, with the relevant group labeled as ``prior_predictive``, ``posterior``, or ``posterior_predictive``.
 For some methods, setting ``return_datatree=False`` instead returns a :class:`dict`.
 
-The prior predictive sampling methods perform forward sampling based on the model’s prior specification in the ``kernel`` and are not part of the standard training and inference workflow (:meth:`~aimz.ImpactModel.fit`/:meth:`~aimz.ImpactModel.predict`), making them particularly useful for conducting prior predictive checks.
+The prior predictive sampling methods perform forward sampling based on the model's prior specification in the ``kernel`` and are not part of the standard training and inference workflow (:meth:`~aimz.ImpactModel.fit`/:meth:`~aimz.ImpactModel.predict`), making them particularly useful for conducting prior predictive checks.
 
 Unlike :meth:`~aimz.ImpactModel.fit` or :meth:`~aimz.ImpactModel.fit_on_batch`, :meth:`~aimz.ImpactModel.sample` does not modify the internal ``posterior`` attribute.
 It is primarily intended for drawing posterior samples from a fitted model using variational inference.
@@ -109,7 +109,7 @@ Setting ``return_datatree=False`` ensures that the results are returned as a dic
 
 \
 
-We pass posterior samples to :meth:`~aimz.ImpactModel.set_posterior_sample` to update the model’s internal ``posterior``:
+We pass posterior samples to :meth:`~aimz.ImpactModel.set_posterior_sample` to update the model's internal ``posterior``:
 
 .. jupyter-execute::
 

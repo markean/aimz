@@ -9,8 +9,10 @@ Streaming vs. On-Batch Methods
 
 This page explains and compares the two complementary execution styles provided by :class:`~aimz.ImpactModel`:
 
-* **Streaming** (default) methods iterate over the input in chunks, materialize results incrementally, and can distribute the computation across devices. Where the streamed results accumulate is a separate choice called the *result store*: a persisted Zarr_ artifact (default) or host memory; see :ref:`result-store`.
-* **On-batch** (``*_on_batch`` suffix) methods execute a single, fully in-memory pass and can optionally return a plain :class:`dict` instead of a :external:class:`xarray.DataTree`. The naming mirrors the Keras convention to signal an immediate, single-batch, memory-resident operation.
+* **Streaming** (default) methods iterate over the input in chunks, materialize results incrementally, and can distribute the computation across devices.
+  Where the streamed results accumulate is a separate choice called the *result store*: a persisted Zarr_ artifact (default) or host memory; see :ref:`result-store`.
+* **On-batch** (``*_on_batch`` suffix) methods execute a single, fully in-memory pass and can optionally return a plain :class:`dict` instead of a :external:class:`xarray.DataTree`.
+  The naming mirrors the Keras convention to signal an immediate, single-batch, memory-resident operation.
 
 
 Why Streaming by Default
@@ -20,7 +22,8 @@ The non-``*_on_batch`` methods default to a streaming (chunked) execution model 
 * Posterior predictive and prior predictive tensors can scale as ``(#samples x #dims x #posterior_samples x ...)``.
   Even moderate increases in any axis (time, spatial units, parameter samples) can exceed host or accelerator RAM.
 * Using ``batch_size`` with chunked iteration limits peak memory and prevents out-of-memory errors.
-* The persistent store creates an artifact you can reopen without rerunning inference. Coordinates and attributes are re-derived when the tree is rebuilt rather than stored on disk (see :ref:`reopening-persisted-outputs`).
+* The persistent store creates an artifact you can reopen without rerunning inference.
+  Coordinates and attributes are re-derived when the tree is rebuilt rather than stored on disk (see :ref:`reopening-persisted-outputs`).
 * The :external:class:`xarray.DataTree` + Zarr_ format integrates with scientific Python tools such as Dask_ and ArviZ_.
 * Summaries (means, HDIs, residual PPC stats) can be computed lazily, chunk by chunk, without first materializing dense arrays.
 * One API works for both small experiments and large-scale use cases.
@@ -153,16 +156,16 @@ Quick Recommendations
 
 .. note::
 
-   For MCMC inference, only :meth:`~aimz.ImpactModel.fit_on_batch` or :meth:`~aimz.ImpactModel.sample` is supported for training and posterior sampling,
-   as MCMC is incompatible with epoch-based or chunked batch processing. See :doc:`mcmc` for more details.
+   For MCMC inference, only :meth:`~aimz.ImpactModel.fit_on_batch` or :meth:`~aimz.ImpactModel.sample` is supported for training and posterior sampling, as MCMC is incompatible with epoch-based or chunked batch processing.
+   See :doc:`mcmc` for more details.
 
 
 Example: :meth:`~aimz.ImpactModel.predict` with an Automatic Rerun
 -------------------------------------------------------------------
 
 A common scenario for the rerun warning occurs when the model contains **local latent variables**, which make posterior sample shapes incompatible with data-parallel (observation-sharded) execution.
-:meth:`~aimz.ImpactModel.predict` then warns and reruns under ``shard_axis="draw"``.
-The example below illustrates this case.
+:meth:`~aimz.ImpactModel.predict` then warns and reruns under ``shard_axis="draw"`` whenever the observations are split into batches or across devices; a single device processing the whole input as one batch needs no rerun.
+The example below requests two batches to illustrate this case.
 
 .. jupyter-execute::
     :hide-output:
@@ -210,8 +213,8 @@ The example below illustrates this case.
 .. jupyter-execute::
     :stderr:
 
-    # Calling `.predict()` warns and reruns under shard_axis="draw"
-    im.predict(X)
+    # Splitting the observations into batches warns and reruns under shard_axis="draw"
+    im.predict(X, batch_size=50)
 
 
 .. _reopening-persisted-outputs:
@@ -242,9 +245,8 @@ To reconstruct the same :external:class:`xarray.DataTree` from the files alone, 
     dt["posterior_predictive"] = xr.DataTree(ds)
 
 
-The ``posterior`` subtree is likewise not stored in a predictive output: aimz attaches it from the
-in-memory model when it builds the tree. Persist the model itself (see :doc:`model_persistence`) or
-keep :meth:`~aimz.ImpactModel.sample`'s return value if you need the posterior alongside the files.
+The ``posterior`` subtree is likewise not stored in a predictive output: aimz attaches it from the in-memory model when it builds the tree.
+Persist the model itself (see :doc:`model_persistence`) or keep :meth:`~aimz.ImpactModel.sample`'s return value if you need the posterior alongside the files.
 
 
 Performance Tips

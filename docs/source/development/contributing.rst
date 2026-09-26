@@ -104,5 +104,5 @@ When opening a PR, reference the relevant issue number (if any) in the title or 
 Checklist:
 
 * [ ] Tests pass locally and CI is green.
-* [ ] Linting passes (``ruff check . `` and ``pre-commit run --all-files``).
+* [ ] Linting passes (``ruff check .`` and ``pre-commit run --all-files``).
 * [ ] Documentation updated or not required.

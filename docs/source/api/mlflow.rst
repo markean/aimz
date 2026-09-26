@@ -1,4 +1,4 @@
-.. currentmodule:: aimz.mlflow
+.. module:: aimz.mlflow
 
 MLflow Integration
 ==================

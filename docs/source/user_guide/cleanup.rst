@@ -8,7 +8,7 @@ This page focuses on managing the temporary directory created when the user does
 
 Creation Logic
 --------------
-When a persistent-store call is made with ``output_dir=None`` (the default), the model creates a process‑scoped temporary root directory (via :class:`tempfile.TemporaryDirectory`) the first time such a call occurs.
+When a persistent-store call is made with ``output_dir=None`` (the default), the model creates a process-scoped temporary root directory (via :class:`tempfile.TemporaryDirectory`) the first time such a call occurs.
 Each invocation then writes to a timestamped subdirectory under that root, ensuring that earlier results are never overwritten.
 Subdirectories follow the pattern ``<UTC-timestamp>_<caller_name>/``, where ``<caller_name>`` is the name of the method that triggered the write operation.
 This root directory is stored in the :attr:`~aimz.ImpactModel.temp_dir` attribute and reused for subsequent calls until the user invokes :meth:`~aimz.ImpactModel.cleanup`.

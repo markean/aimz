@@ -1209,7 +1209,6 @@ class ImpactModel(BaseModel):
             self._rng_key, rng_key = random.split(self._rng_key)
         rng_key, rng_subkey = random.split(rng_key)
         if isinstance(self.inference, SVI):
-            self._num_samples = num_samples
             logger.info("Performing variational inference optimization")
             vi_result = self.inference.run(
                 rng_subkey,
@@ -1229,16 +1228,17 @@ class ImpactModel(BaseModel):
             # fit first so a failed refit does not keep a stale posterior.
             self._is_fitted = False
             self._posterior = None
-            logger.info("Drawing posterior samples (num_samples=%d)", self._num_samples)
+            logger.info("Drawing posterior samples (num_samples=%d)", num_samples)
             rng_key, rng_subkey = random.split(rng_key)
             self._posterior = _sample_forward(
                 substitute(self.inference.guide, data=self.vi_result.params),
-                rng_keys=random.split(rng_subkey, num=self._num_samples),
+                rng_keys=random.split(rng_subkey, num=num_samples),
                 return_sites=None,
                 samples=None,
                 intervention=None,
                 model_kwargs=None,
             )
+            self._num_samples = num_samples
         elif isinstance(self.inference, MCMC):
             logger.info(
                 "Drawing posterior samples (num_samples=%d)",
@@ -1349,9 +1349,16 @@ class ImpactModel(BaseModel):
             stacklevel=3,
             **kwargs,
         )
+        # Validate the provided parameters against the kernel's signature; the fields
+        # of a data loader may supply the remaining ones
+        if isinstance(X, ArrayLoader):
+            signature(self.kernel).bind_partial(**kwargs)
+        else:
+            signature(self.kernel).bind(
+                **{self.param_input: X, self.param_output: y, **kwargs},
+            )
         # Commit model state only once the inputs are accepted
         self._rng_key = rng_key_model
-        self._num_samples = num_samples
 
         logger.info("Performing variational inference optimization")
         losses: list[npt.NDArray] = []
@@ -1392,22 +1399,20 @@ class ImpactModel(BaseModel):
         # fit first so a failed refit does not keep a stale posterior.
         self._is_fitted = False
         self._posterior = None
-        logger.info(
-            "Drawing posterior samples (num_samples=%d)",
-            self._num_samples,
-        )
+        logger.info("Drawing posterior samples (num_samples=%d)", num_samples)
         rng_key, rng_subkey = random.split(rng_key)
         self._posterior = _sample_forward(
             substitute(
                 self.inference.guide,
                 data=cast("SVIRunResult", self.vi_result).params,
             ),
-            rng_keys=random.split(rng_subkey, num=self._num_samples),
+            rng_keys=random.split(rng_subkey, num=num_samples),
             return_sites=None,
             samples=None,
             intervention=None,
             model_kwargs=None,
         )
+        self._num_samples = num_samples
         self._is_fitted = True
 
         return self

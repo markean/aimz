@@ -164,6 +164,8 @@ class TestArrayLoader:
 
         with pytest.raises(ValueError, match="not supported alongside a data loader"):
             im.fit(X=loader, c=y, progress=False)
+        with pytest.raises(TypeError, match="unexpected keyword argument 'c'"):
+            im.fit(X=X, y=y, c=1.0, progress=False)
 
         np.testing.assert_array_equal(random.key_data(im.rng_key), key_before)
         assert im._num_samples == num_samples
