@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - {func}`~aimz.mlflow.autolog` now records the ELBO loss steps of an SVI fit that raises after optimization, such as when diverged parameters are rejected, instead of dropping the whole curve ([#333](https://github.com/markean/aimz/issues/333)).
 - {func}`~aimz.mlflow.autolog` now records the optimizer and the ELBO loss steps for subclasses of `SVI`, instead of silently skipping them ([#333](https://github.com/markean/aimz/issues/333)).
 - {func}`~aimz.mlflow.autolog` now shows its own warnings and errors by default, such as a kernel whose source cannot be read, and `silent=True` mutes them, as documented ([#335](https://github.com/markean/aimz/issues/335)).
+- A pickled {class}`~aimz.ImpactModel` with a Poisson-family likelihood can now predict and continue training after being loaded in a new process, including through {func}`~aimz.mlflow.load_model` and `mlflow.pyfunc.load_model`, instead of raising a `NotImplementedError` ([#337](https://github.com/markean/aimz/issues/337)).
 
 ## [v0.15.1](https://github.com/markean/aimz/releases/tag/v0.15.1) - 2026-09-12
 
