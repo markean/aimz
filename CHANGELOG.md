@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Output trees from a model fitted with MCMC now keep the sampler's chains: the `posterior`, `posterior_predictive`, `predictions`, and `log_likelihood` groups have one entry per chain along `chain` and each chain's draws along `draw`, instead of a single chain holding all draws. The {attr}`~aimz.ImpactModel.posterior` samples stay combined across chains ([#331](https://github.com/markean/aimz/issues/331)).
-- {meth}`~aimz.ImpactModel.estimate_effect` now draws one sampling key and shares it between lazily generated baseline and intervention scenarios, so their draws are paired and per-unit contrasts no longer carry independent likelihood noise from both scenarios. Explicit ``rng_key`` entries in the argument dictionaries are used as before ([#315](https://github.com/markean/aimz/issues/315)).
+- {meth}`~aimz.ImpactModel.estimate_effect` now draws one sampling key and shares it between lazily generated baseline and intervention scenarios, so their draws are paired and per-unit contrasts no longer carry independent likelihood noise from both scenarios. Explicit `rng_key` entries in the argument dictionaries are used as before ([#315](https://github.com/markean/aimz/issues/315)).
 - {class}`~aimz.utils.data.ArrayLoader` now yields plain batch mappings (array name to array) instead of `(batch, n_pad)` tuples, and no longer pads or moves batches itself: padding for sharding and device placement are handled by the model methods, so iterating a loader directly yields exactly the dataset's rows ([#312](https://github.com/markean/aimz/issues/312)).
 
 ### Removed
@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - {func}`~aimz.mlflow.autolog` now shows its own warnings and errors by default, such as a kernel whose source cannot be read, and `silent=True` mutes them, as documented ([#335](https://github.com/markean/aimz/issues/335)).
 - A pickled {class}`~aimz.ImpactModel` with a Poisson-family likelihood can now predict and continue training after being loaded in a new process, including through {func}`~aimz.mlflow.load_model` and `mlflow.pyfunc.load_model`, instead of raising a `NotImplementedError` ([#337](https://github.com/markean/aimz/issues/337)).
 - A pickled {class}`~aimz.ImpactModel` fitted with MCMC on parallel chains can now run {meth}`~aimz.ImpactModel.sample` and {meth}`~aimz.ImpactModel.fit_on_batch` after being loaded where fewer devices than chains are available, with a warning that the chains are drawn sequentially, instead of raising a `ValueError` ([#340](https://github.com/markean/aimz/issues/340)).
+- A refit with {meth}`~aimz.ImpactModel.fit` or {meth}`~aimz.ImpactModel.fit_on_batch` that stops during optimization now keeps the previous posterior usable, instead of recording the new `num_samples` and making every predictive method fail with a shape mismatch ([#342](https://github.com/markean/aimz/issues/342)).
 
 ## [v0.15.1](https://github.com/markean/aimz/releases/tag/v0.15.1) - 2026-09-12
 
@@ -190,7 +191,7 @@ When ``True``, predictions are dispatched through {meth}`~aimz.ImpactModel.predi
 ### Fixed
 
 - Fixed auto-computed `batch_size` rounding down to zero on multi-device setups when `MAX_ELEMENTS // num_samples` is smaller than the number of devices ([#172](https://github.com/markean/aimz/issues/172)).
-- {meth}`~aimz.utils.data.ArrayLoader.pad_array` now pads with NumPy when given NumPy arrays, avoiding premature device transfers, and skips padding entirely when `n_pad` is zero ([#174](https://github.com/markean/aimz/issues/174)).
+- `ArrayLoader.pad_array` now pads with NumPy when given NumPy arrays, avoiding premature device transfers, and skips padding entirely when `n_pad` is zero ([#174](https://github.com/markean/aimz/issues/174)).
 
 ## [v0.9.1](https://github.com/markean/aimz/releases/tag/v0.9.1) - 2025-12-08
 
@@ -214,7 +215,7 @@ When ``True``, predictions are dispatched through {meth}`~aimz.ImpactModel.predi
 ### Changed
 
 - The minimum required versions are: Dask 2025.7, JAX 0.8, and Xarray 2025.7.
-- Replaced deprecated {mod}`jax.experimental.shard_map.shard_map` with {func}`jax.shard_map` to ensure compatibility with JAX 0.8 and newer versions ([#128](https://github.com/markean/aimz/issues/128)).
+- Replaced deprecated `jax.experimental.shard_map.shard_map` with {func}`jax.shard_map` to ensure compatibility with JAX 0.8 and newer versions ([#128](https://github.com/markean/aimz/issues/128)).
 - Logging exception messages are displayed before the writer thread is shut down, providing a more immediate response for {meth}`~aimz.ImpactModel.predict` and {meth}`~aimz.ImpactModel.log_likelihood`, especially when interrupted by the keyboard ([#130](https://github.com/markean/aimz/issues/130)).
 
 ## [v0.8.0](https://github.com/markean/aimz/releases/tag/v0.8.0) - 2025-10-14

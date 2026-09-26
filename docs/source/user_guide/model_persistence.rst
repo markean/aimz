@@ -80,7 +80,7 @@ Save a trained :class:`~aimz.ImpactModel` (and optionally its input data) to dis
     with Path("model.pkl").open("wb") as f:
         cloudpickle.dump((im, X, y), f)
 
-Pickling the :class:`~aimz.ImpactModel` alone also stores training data, because its ``inference`` object keeps the data it last ran on: all of it after :meth:`~aimz.ImpactModel.fit_on_batch`, and the first batch after :meth:`~aimz.ImpactModel.fit`.
+Pickling the :class:`~aimz.ImpactModel` alone also stores training data, because its ``inference`` object keeps the data it first ran on: all of it after :meth:`~aimz.ImpactModel.fit_on_batch`, and the first batch after :meth:`~aimz.ImpactModel.fit`.
 
 
 Deserialization

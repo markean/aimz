@@ -173,10 +173,10 @@ Simulating Data under a Known Structural Model
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 We generate synthetic data consistent with the assumed structure:
 
-- `C` is drawn from an exponential distribution.
-- `X` is a count variable from a Poisson distribution.
-- `Z` is generated as a noisy exponential function of `C` and `X`.
-- `Y` is a binary outcome influenced by both `C` and `Z` through a logistic model.
+- ``C`` is drawn from an exponential distribution.
+- ``X`` is a count variable from a Poisson distribution.
+- ``Z`` is generated as a noisy exponential function of ``C`` and ``X``.
+- ``Y`` is a binary outcome influenced by both ``C`` and ``Z`` through a logistic model.
 
 .. jupyter-execute::
 
@@ -207,10 +207,10 @@ We generate synthetic data consistent with the assumed structure:
 Fitting the Model and Estimating Effects
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 We fit the model using stochastic variational inference.
-Once trained, we perform a counterfactual analysis to isolate the effect of `Z` on `Y`.
+Once trained, we perform a counterfactual analysis to isolate the effect of ``Z`` on ``Y``.
 
-- `dt_factual` represents predictions under the factual setting (with observed `Z`).
-- `dt_counterfactual` represents predictions under a counterfactual intervention where `Z` is set to zero.
+- ``dt_factual`` represents predictions under the factual setting (with observed ``Z``).
+- ``dt_counterfactual`` represents predictions under a counterfactual intervention where ``Z`` is set to zero.
 
 .. note::
 
@@ -218,7 +218,7 @@ Once trained, we perform a counterfactual analysis to isolate the effect of `Z` 
     Prefer :meth:`~aimz.ImpactModel.predict` whenever it is compatible with the model.
     See :ref:`model compatibility <faq-model-compatibility>` for details.
 
-Comparing these two distributions allows us to estimate the effect of `Z` on `Y`, adjusted for the influence of `C`.
+Comparing these two distributions allows us to estimate the effect of ``Z`` on ``Y``, adjusted for the influence of ``C``.
 
 .. jupyter-execute::
     :hide-output:

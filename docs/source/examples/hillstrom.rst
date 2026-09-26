@@ -1,15 +1,8 @@
 Uplift Modeling with Custom Likelihood
 ======================================
 
-This example uses the `Hillstrom email marketing dataset
-<https://blog.minethatdata.com/2008/03/minethatdata-e-mail-analytics-and-data.html>`_
-to estimate the causal effect of two email campaigns on customer conversion and
-spending.
-We build two `NumPyro`_ models, one for conversion and one for spend (a logistic
-regression and a hurdle model with a custom likelihood via
-:external:func:`~numpyro.primitives.factor`, respectively), fit them through the
-:class:`~aimz.ImpactModel` interface, and use :meth:`~aimz.ImpactModel.estimate_effect`
-to compute treatment effects.
+This example uses the `Hillstrom email marketing dataset <https://blog.minethatdata.com/2008/03/minethatdata-e-mail-analytics-and-data.html>`_ to estimate the causal effect of two email campaigns on customer conversion and spending.
+We build two `NumPyro`_ models, one for conversion and one for spend (a logistic regression and a hurdle model with a custom likelihood via :external:func:`~numpyro.primitives.factor`, respectively), fit them through the :class:`~aimz.ImpactModel` interface, and use :meth:`~aimz.ImpactModel.estimate_effect` to compute treatment effects.
 
 .. jupyter-execute::
     :hide-output:
@@ -52,16 +45,13 @@ to compute treatment effects.
 The Hillstrom Dataset
 ---------------------
 
-The dataset comes from a randomized experiment at an e-commerce company, where 64,000
-customers who had made a purchase within the past twelve months were randomly assigned
-to one of three groups:
+The dataset comes from a randomized experiment at an e-commerce company, where 64,000 customers who had made a purchase within the past twelve months were randomly assigned to one of three groups:
 
 - **Men's E-Mail**: received an email promoting men's merchandise.
 - **Women's E-Mail**: received an email promoting women's merchandise.
 - **No E-Mail**: control group, received no email.
 
-Two weeks after the email was sent, three outcomes were recorded: whether the customer
-visited the website, whether they made a purchase, and how much they spent.
+Two weeks after the email was sent, three outcomes were recorded: whether the customer visited the website, whether they made a purchase, and how much they spent.
 
 .. jupyter-execute::
 
@@ -79,12 +69,9 @@ The dataset contains the following 11 columns:
 
   - ``recency``: months since last purchase (integer, 1--12).
   - ``history``: total dollar value spent in the past year (continuous).
-  - ``mens``: 1 if the customer purchased men's merchandise in the past year, 0
-    otherwise.
-  - ``womens``: 1 if the customer purchased women's merchandise in the past year, 0
-    otherwise.
-  - ``newbie``: 1 if the customer is new (first purchase within twelve months), 0
-    otherwise.
+  - ``mens``: 1 if the customer purchased men's merchandise in the past year, 0 otherwise.
+  - ``womens``: 1 if the customer purchased women's merchandise in the past year, 0 otherwise.
+  - ``newbie``: 1 if the customer is new (first purchase within twelve months), 0 otherwise.
   - ``zip_code``: residential area classification (Urban / Suburban / Rural).
   - ``channel``: purchase channel in the past year (Phone / Web / Multichannel).
 
@@ -148,13 +135,10 @@ The email groups show higher conversion rates and spend than the control group.
 
 \
 
-The left panel confirms that the spend distribution is heavily zero-inflated: the vast
-majority of customers do not purchase.
-The right panel, restricted to buyers, shows a right-skewed but roughly continuous
-distribution across all three segments.
+The left panel confirms that the spend distribution is heavily zero-inflated: the vast majority of customers do not purchase.
+The right panel, restricted to buyers, shows a right-skewed but roughly continuous distribution across all three segments.
 
-Before modeling, we check that covariates are balanced across treatment arms, as
-expected in a randomized experiment.
+Before modeling, we check that covariates are balanced across treatment arms, as expected in a randomized experiment.
 
 .. jupyter-execute::
 
@@ -176,22 +160,14 @@ expected in a randomized experiment.
 
 \
 
-The means (for numeric covariates) and within-row proportions (for categorical
-covariates) are nearly identical across segments, confirming that the randomization
-worked as intended.
+The means (for numeric covariates) and within-row proportions (for categorical covariates) are nearly identical across segments, confirming that the randomization worked as intended.
 
 .. note::
 
-   Regarding causal identification, randomization ensures that treatment assignment is
-   independent of potential outcomes, giving us **ignorability** (no confounding) and
-   **positivity** by design. **Consistency** (a customer's observed outcome equals the
-   potential outcome under the assigned treatment) and **no interference** (one
-   customer's treatment does not affect another's outcome) are not guaranteed by
-   randomization and must be argued on domain grounds.
+   Regarding causal identification, randomization ensures that treatment assignment is independent of potential outcomes, giving us **ignorability** (no confounding) and **positivity** by design.
+   **Consistency** (a customer's observed outcome equals the potential outcome under the assigned treatment) and **no interference** (one customer's treatment does not affect another's outcome) are not guaranteed by randomization and must be argued on domain grounds.
 
-We encode the treatment segment as an integer, one-hot encode the categorical
-covariates, standardize the continuous ones for better sampling, and pack everything
-into JAX arrays.
+We encode the treatment segment as an integer, one-hot encode the categorical covariates, standardize the continuous ones for better sampling, and pack everything into JAX arrays.
 
 .. jupyter-execute::
 
@@ -229,10 +205,8 @@ Model 1: Conversion
 -------------------
 
 We model conversion as a Bayesian logistic regression.
-The linear predictor includes a global intercept, covariate effects, and a
-segment-specific shift that captures the treatment effect.
-The covariate coefficients are shared across treatment arms (no treatment x covariate
-interactions), so the treatment effect is homogeneous on the logit scale.
+The linear predictor includes a global intercept, covariate effects, and a segment-specific shift that captures the treatment effect.
+The covariate coefficients are shared across treatment arms (no treatment x covariate interactions), so the treatment effect is homogeneous on the logit scale.
 
 .. jupyter-execute::
 
@@ -251,19 +225,12 @@ interactions), so the treatment effect is homogeneous on the logit scale.
 
 \
 
-The parameter ``tau[0]`` corresponds to the control group (No E-Mail), ``tau[1]``
-to the Men's E-Mail, and ``tau[2]`` to the Women's E-Mail. The global intercept
-``alpha`` and segment shifts ``tau`` are not separately identifiable, but the
-treatment-effect contrasts :math:`\tau_1 - \tau_0` and :math:`\tau_2 - \tau_0` are
-always identified.
-While those contrasts live on the logit scale, our target estimand is the **Average
-Treatment Effect (ATE)** on the outcome scale, computed by predicting potential
-outcomes under counterfactual treatment assignments and averaging over observations.
+The parameter ``tau[0]`` corresponds to the control group (No E-Mail), ``tau[1]`` to the Men's E-Mail, and ``tau[2]`` to the Women's E-Mail.
+The global intercept ``alpha`` and segment shifts ``tau`` are not separately identifiable, but the treatment-effect contrasts :math:`\tau_1 - \tau_0` and :math:`\tau_2 - \tau_0` are always identified.
+While those contrasts live on the logit scale, our target estimand is the **Average Treatment Effect (ATE)** on the outcome scale, computed by predicting potential outcomes under counterfactual treatment assignments and averaging over observations.
 
-We wrap the model in an :class:`~aimz.ImpactModel`, which provides a unified interface
-for fitting, prediction, and treatment-effect estimation.
-Calling :meth:`~aimz.ImpactModel.fit_on_batch` runs the configured inference engine
-(here MCMC with the No-U-Turn Sampler) on the entire dataset in one pass.
+We wrap the model in an :class:`~aimz.ImpactModel`, which provides a unified interface for fitting, prediction, and treatment-effect estimation.
+Calling :meth:`~aimz.ImpactModel.fit_on_batch` runs the configured inference engine (here MCMC with the No-U-Turn Sampler) on the entire dataset in one pass.
 
 .. jupyter-execute::
     :hide-output:
@@ -284,8 +251,7 @@ Calling :meth:`~aimz.ImpactModel.fit_on_batch` runs the configured inference eng
 
 \
 
-After fitting, the underlying `NumPyro`_ inference object is accessible via
-:attr:`~aimz.ImpactModel.inference`.
+After fitting, the underlying `NumPyro`_ inference object is accessible via :attr:`~aimz.ImpactModel.inference`.
 We use it here to print MCMC diagnostics.
 
 .. jupyter-execute::
@@ -294,10 +260,8 @@ We use it here to print MCMC diagnostics.
 
 \
 
-Before estimating treatment effects, we run a posterior predictive check to verify
-that the model reproduces the observed conversion rates, overall and per treatment arm.
-:meth:`~aimz.ImpactModel.predict_on_batch` generates posterior predictive samples and
-returns an :class:`~xarray.DataTree`.
+Before estimating treatment effects, we run a posterior predictive check to verify that the model reproduces the observed conversion rates, overall and per treatment arm.
+:meth:`~aimz.ImpactModel.predict_on_batch` generates posterior predictive samples and returns an :class:`~xarray.DataTree`.
 
 .. jupyter-execute::
 
@@ -354,23 +318,17 @@ returns an :class:`~xarray.DataTree`.
 
 \
 
-The observed rate (red dashed line) falls within the bulk of the posterior predictive
-distribution for each arm, indicating an adequate fit.
+The observed rate (red dashed line) falls within the bulk of the posterior predictive distribution for each arm, indicating an adequate fit.
 
 
 Estimating Treatment Effects on Conversion
 ------------------------------------------
 
 With the fitted model in hand, we now estimate treatment effects.
-:meth:`~aimz.ImpactModel.estimate_effect` takes two scenarios, each a dict of keyword
-arguments that would be passed to the underlying prediction method.
-For every posterior draw, it generates predictions under both scenarios, subtracts
-baseline from intervention, and returns per-observation differences as an
-:class:`~xarray.DataTree`.
+:meth:`~aimz.ImpactModel.estimate_effect` takes two scenarios, each a dict of keyword arguments that would be passed to the underlying prediction method.
+For every posterior draw, it generates predictions under both scenarios, subtracts baseline from intervention, and returns per-observation differences as an :class:`~xarray.DataTree`.
 
-Because ``segment`` is a function argument rather than a
-:func:`~numpyro.primitives.sample` site, each counterfactual scenario is
-specified by passing the desired treatment value directly.
+Because ``segment`` is a function argument rather than a :func:`~numpyro.primitives.sample` site, each counterfactual scenario is specified by passing the desired treatment value directly.
 
 .. jupyter-execute::
 
@@ -400,8 +358,7 @@ specified by passing the desired treatment value directly.
 
 \
 
-Averaging the per-observation differences over all customers gives the ATE posterior,
-one value per draw, fully propagating parameter uncertainty.
+Averaging the per-observation differences over all customers gives the ATE posterior, one value per draw, fully propagating parameter uncertainty.
 
 .. jupyter-execute::
 
@@ -410,8 +367,7 @@ one value per draw, fully propagating parameter uncertainty.
 
 \
 
-We plot the ATE posteriors for both campaigns alongside the posterior mean and a
-zero-effect reference.
+We plot the ATE posteriors for both campaigns alongside the posterior mean and a zero-effect reference.
 
 .. jupyter-execute::
 
@@ -450,8 +406,7 @@ zero-effect reference.
 
 \
 
-Both posterior distributions sit entirely above zero, providing strong evidence that
-both campaigns increase conversion relative to the control group.
+Both posterior distributions sit entirely above zero, providing strong evidence that both campaigns increase conversion relative to the control group.
 The Men's E-Mail effect is somewhat larger, though the posteriors overlap substantially.
 
 
@@ -459,17 +414,11 @@ Model 2: Spend
 --------------
 
 Spend is zero for most customers and right-skewed among buyers.
-We use a **hurdle model** with two components: a Bernoulli gate for whether the customer
-purchases at all, and a log-normal distribution for the spend amount conditional on
-purchasing.
+We use a **hurdle model** with two components: a Bernoulli gate for whether the customer purchases at all, and a log-normal distribution for the spend amount conditional on purchasing.
 
 This model demonstrates how :class:`~aimz.ImpactModel` handles custom likelihoods.
-Because the hurdle likelihood does not decompose into a single
-:func:`~numpyro.primitives.sample` statement, we compute the log-likelihood manually and
-register it with :func:`~numpyro.primitives.factor` during fitting.
-At prediction time, we switch to the generative form: sample ``purchase`` from
-the Bernoulli, sample ``amount`` from the log-normal distribution, and return their
-product as ``y``.
+Because the hurdle likelihood does not decompose into a single :func:`~numpyro.primitives.sample` statement, we compute the log-likelihood manually and register it with :func:`~numpyro.primitives.factor` during fitting.
+At prediction time, we switch to the generative form: sample ``purchase`` from the Bernoulli, sample ``amount`` from the log-normal distribution, and return their product as ``y``.
 
 .. jupyter-execute::
 
@@ -505,9 +454,7 @@ product as ``y``.
 
 \
 
-The intercepts are centered on domain-appropriate values for each component: a low
-baseline purchase probability for the hurdle, and a plausible log-scale spend level for
-the amount.
+The intercepts are centered on domain-appropriate values for each component: a low baseline purchase probability for the hurdle, and a plausible log-scale spend level for the amount.
 
 We fit the hurdle model using the same MCMC configuration as before.
 
@@ -538,8 +485,7 @@ MCMC diagnostics:
 
 \
 
-Following the same workflow as the conversion model, we check that the predicted spend
-matches the observed values per arm.
+Following the same workflow as the conversion model, we check that the predicted spend matches the observed values per arm.
 
 .. jupyter-execute::
 
@@ -592,8 +538,7 @@ matches the observed values per arm.
 Estimating Treatment Effects on Spend
 -------------------------------------
 
-We repeat the same counterfactual procedure as for conversion, now using the spend
-model.
+We repeat the same counterfactual procedure as for conversion, now using the spend model.
 
 .. jupyter-execute::
 
@@ -673,8 +618,7 @@ We visualize the spend ATE posteriors for both campaigns.
 Comparison
 ----------
 
-We compare treatment effects across both outcomes to check whether the campaigns that
-drive more conversions also drive more revenue.
+We compare treatment effects across both outcomes to check whether the campaigns that drive more conversions also drive more revenue.
 
 .. jupyter-execute::
 
@@ -714,15 +658,11 @@ drive more conversions also drive more revenue.
 
 \
 
-Both campaigns increase conversion and spend relative to the control, and the Men's
-campaign shows a larger effect on both outcomes.
+Both campaigns increase conversion and spend relative to the control, and the Men's campaign shows a larger effect on both outcomes.
 
 
 References
 ----------
 
-- Freedman, D. A. (2008). On regression adjustments to experimental data.
-  *Advances in Applied Mathematics*, 40(2), 180–193.
-- Hillstrom, K. (2008). The MineThatData E-Mail Analytics and Data Mining Challenge.
-  `MineThatData Blog
-  <https://blog.minethatdata.com/2008/03/minethatdata-e-mail-analytics-and-data.html>`_.
+- Freedman, D. A. (2008). On regression adjustments to experimental data. *Advances in Applied Mathematics*, 40(2), 180–193.
+- Hillstrom, K. (2008). The MineThatData E-Mail Analytics and Data Mining Challenge. `MineThatData Blog <https://blog.minethatdata.com/2008/03/minethatdata-e-mail-analytics-and-data.html>`_.

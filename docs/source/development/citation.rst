@@ -1,8 +1,7 @@
 Citation
 ========
 
-If you use aimz in your work, please cite the accompanying paper in the
-`Journal of Open Source Software <https://joss.theoj.org/papers/10.21105/joss.09738>`_:
+If you use aimz in your work, please cite the accompanying paper in the `Journal of Open Source Software <https://joss.theoj.org/papers/10.21105/joss.09738>`_:
 
 .. code-block:: bibtex
 

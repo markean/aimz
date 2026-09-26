@@ -15,19 +15,19 @@ If you use different names (e.g. ``features`` / ``target`` or ``covariates`` / `
 
 .. code-block:: python
 
-	def kernel(features, extra, target=None):
-	    ...
+    def kernel(features, extra, target=None):
+        ...
 
-	im = ImpactModel(
-	    kernel,
-            ...,
-	    param_input="features",
-	    param_output="target",
-	)
+    im = ImpactModel(
+        kernel,
+        ...,
+        param_input="features",
+        param_output="target",
+    )
 
 If you see an error like:
 
-``Kernel must accept 'X' and 'y' as argument(s). Modify the kernel signature or set `param_input` and `param_output` accordingly.``
+``Kernel must accept 'X', 'y' as argument(s). Modify the kernel signature or set `param_input` and `param_output` accordingly.``
 
 it means you neither matched the defaults nor overrode them.
 Fix it by renaming your arguments to ``X`` / ``y`` or supplying ``param_input`` / ``param_output`` as shown above.
@@ -36,7 +36,7 @@ Fix it by renaming your arguments to ``X`` / ``y`` or supplying ``param_input`` 
 Do I need to know NumPyro_ to use aimz?
 ---------------------------------------
 Yes.
-The aimz package builds on `NumPyro`_’s primitives and effect handlers.
+The aimz package builds on `NumPyro`_'s primitives and effect handlers.
 You should be comfortable writing a model function, defining a guide (for SVI) or configuring MCMC, and reading model traces.
 The library focuses on orchestration, not abstracting away core probabilistic modeling concepts.
 
@@ -129,7 +129,7 @@ See :doc:`user_guide/dataloader` for the batch contract and examples.
 Can I use aimz for general-purpose Bayesian inference?
 ------------------------------------------------------
 Yes.
-aimz is a flexible, object-oriented interface to `NumPyro`_ and supports a wide range of Bayesian modeling tasks (regression, classification, uncertainty quantification, and predictive simulation), even if your application doesn’t involve interventions or causal analysis.
+aimz is a flexible, object-oriented interface to `NumPyro`_ and supports a wide range of Bayesian modeling tasks (regression, classification, uncertainty quantification, and predictive simulation), even if your application doesn't involve interventions or causal analysis.
 
 
 Can I use posterior samples generated elsewhere?
@@ -143,7 +143,7 @@ For :meth:`~aimz.ImpactModel.log_likelihood`, the samples must cover every laten
 
 When should I use the ``*_on_batch`` variants?
 ----------------------------------------------
-Use the batch-specific variants only when you need explicit, single-batch control (e.g., custom training loops, micro‑benchmarking, or integrating with external schedulers).
+Use the batch-specific variants only when you need explicit, single-batch control (e.g., custom training loops, micro-benchmarking, or integrating with external schedulers).
 The higher-level methods handle internal batching, iteration, shuffling, streaming, and aggregation automatically and are preferred for typical workflows.
 See :doc:`user_guide/streaming_and_on_batch` for a detailed comparison of both approaches and guidance on when to use each.
 
@@ -159,7 +159,7 @@ How to ensure reproducible results?
 :class:`~aimz.ImpactModel` requires an explicit JAX pseudo-random number generator key for initialization.
 Using the same initial key ensures that all subsequent stochastic operations are reproducible.
 Stochastic methods accept an optional ``rng_key`` for per-call determinism.
-If provided, it affects only that call and does not modify the model’s internal key.
+If provided, it affects only that call and does not modify the model's internal key.
 If omitted, a new subkey is derived internally, so repeated calls may produce different results.
 To fully reproduce results, log the initial seed along with other artifacts.
 

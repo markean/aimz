@@ -89,7 +89,7 @@ For example:
 
     mcmc = MCMC(NUTS(model), num_warmup=1000, num_samples=1000)
     rng_key, rng_subkey = random.split(rng_key)
-    mcmc.run(rng_key, X, y)
+    mcmc.run(rng_subkey, X, y)
 
     im.set_posterior_sample(mcmc.get_samples())
     im.predict_on_batch(X)
