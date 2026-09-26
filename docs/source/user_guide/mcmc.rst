@@ -62,7 +62,8 @@ Calling :meth:`~aimz.ImpactModel.fit_on_batch` initiates the sampling process.
 Internally, aimz executes the sampler via the :external:meth:`~numpyro.infer.mcmc.MCMC.run` method and stores the posterior samples using :external:meth:`~numpyro.infer.mcmc.MCMC.get_samples`.
 
 Note that calling :meth:`~aimz.ImpactModel.fit` with :external:class:`~numpyro.infer.mcmc.MCMC` as the inference method will raise a :exc:`TypeError`, as this method is intended for mini-batch training or subsampling.
-Regardless of the number of chains (``num_chains``) used, the posterior samples are combined across chains to ensure compatibility with the rest of the aimz interface.
+The :attr:`~aimz.ImpactModel.posterior` property holds the samples combined across chains (``num_chains``).
+The returned output trees keep the chains along their ``chain`` dimension, so chain-aware diagnostics such as R-hat work on them directly.
 Posterior predictive sampling can be performed using the :meth:`~aimz.ImpactModel.predict` or :meth:`~aimz.ImpactModel.predict_on_batch` methods.
 
 .. jupyter-execute::
