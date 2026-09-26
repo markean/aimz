@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - {meth}`~aimz.ImpactModel.fit` with an {class}`~aimz.utils.data.ArrayLoader` no longer silently drops array keyword arguments: they now raise a `ValueError` asking for them to be included as dataset fields, matching the streaming entry points ([#312](https://github.com/markean/aimz/issues/312)).
 - An empty data loader passed to a streaming entry point now raises a `ValueError` instead of returning an empty tree ([#312](https://github.com/markean/aimz/issues/312)).
 - {meth}`~aimz.ImpactModel.fit` no longer advances the model's internal PRNG key or updates its posterior draw count when it rejects its inputs ([#312](https://github.com/markean/aimz/issues/312)).
+- {func}`~aimz.mlflow.autolog` now records the `batch_size` and `shuffle` of an {class}`~aimz.utils.data.ArrayLoader` passed to {meth}`~aimz.ImpactModel.fit`, instead of the `fit` arguments it ignores ([#333](https://github.com/markean/aimz/issues/333)).
+- {func}`~aimz.mlflow.autolog` now records `num_chains` and `num_warmup` for MCMC inference instead of the ignored `num_steps` ([#333](https://github.com/markean/aimz/issues/333)).
+- {func}`~aimz.mlflow.autolog` now records the ELBO loss steps of an SVI fit that raises after optimization, such as when diverged parameters are rejected, instead of dropping the whole curve ([#333](https://github.com/markean/aimz/issues/333)).
+- {func}`~aimz.mlflow.autolog` now records the optimizer and the ELBO loss steps for subclasses of `SVI`, instead of silently skipping them ([#333](https://github.com/markean/aimz/issues/333)).
 
 ## [v0.15.1](https://github.com/markean/aimz/releases/tag/v0.15.1) - 2026-09-12
 

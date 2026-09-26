@@ -46,10 +46,12 @@ When :func:`~aimz.mlflow.autolog` is active and you call :meth:`~aimz.ImpactMode
 Parameters
 ~~~~~~~~~~
 * Selected non-array-like arguments of :meth:`~aimz.ImpactModel.fit` or :meth:`~aimz.ImpactModel.fit_on_batch`, including default values of arguments not passed (array-like inputs are excluded to avoid large parameter payloads)
+* ``batch_size`` and ``shuffle`` of the :class:`~aimz.utils.data.ArrayLoader`, when one is passed to :meth:`~aimz.ImpactModel.fit` in place of arrays
 * ``param_input`` and ``param_output``
 * ``inference_method`` (the class name of the ``inference`` attribute)
 * ``optimizer`` (SVI only; the class name of the optimizer stored in the ``optim`` attribute of ``inference``)
-* ``num_samples`` (recorded post-fit)
+* ``num_chains`` and ``num_warmup`` (MCMC only; the settings of ``inference``)
+* ``num_samples`` (recorded post-fit; for MCMC, the total across chains)
 
 Parameters are recorded on the run and attached to the logged model entity (if a model artifact is logged).
 
