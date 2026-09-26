@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import copyreg
 import logging
 import pickle
@@ -232,8 +231,11 @@ class ImpactModel(BaseModel):
 
     def __del__(self) -> None:
         """Clean up the temporary directory when the instance is garbage-collected."""
-        with contextlib.suppress(AttributeError):
+        # Module globals may already be torn down at interpreter shutdown
+        try:
             self.cleanup()
+        except AttributeError:
+            return
         # Call the parent's __del__ method only if it exists and is callable
         super_del = getattr(super(), "__del__", None)
         if callable(super_del):
