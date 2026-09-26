@@ -14,17 +14,40 @@
 
 """Tests for saving and loading functionality of models."""
 
+from concurrent.futures import ProcessPoolExecutor
+from multiprocessing import get_context
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import cloudpickle
+import jax.numpy as jnp
 import numpy as np
+import numpyro
+import numpyro.distributions as dist
 from jax import Array, random
 
 from aimz import ImpactModel
+from tests.conftest import _make_svi
 
 if TYPE_CHECKING:
     import xarray as xr
+
+
+def poisson(X: Array, y: Array | None = None) -> None:
+    """Poisson regression model."""
+    b = numpyro.sample("b", dist.Normal())
+    with numpyro.plate("obs", X.shape[0]):
+        numpyro.sample("y", dist.Poisson(jnp.exp(X[:, 0] + b)), obs=y)
+
+
+def _load_predict(path: Path, X: Array, y: Array) -> np.ndarray:
+    with path.open("rb") as f:
+        im = cloudpickle.load(f)
+    # Continuing training first uses the keys nested in the inference state
+    im.train_on_batch(X, y)
+    out = cast("xr.DataTree", im.predict_on_batch(X))
+
+    return np.asarray(out["posterior_predictive"]["y"])
 
 
 def test_save_load(
@@ -60,5 +83,31 @@ def test_save_load(
     actual = cast("xr.DataTree", im.predict_on_batch(X, rng_key=random.key(0)))
     np.testing.assert_array_equal(
         np.asarray(actual["posterior_predictive"]["y"]),
+        np.asarray(expected["posterior_predictive"]["y"]),
+    )
+
+
+def test_load_poisson_new_process(
+    synthetic_data: tuple[Array, Array],
+    tmp_path: Path,
+) -> None:
+    """A pickled model with a Poisson likelihood trains and predicts in a new process.
+
+    After a training step, the loaded model predicts with its internal PRNG key
+    draw-for-draw identically to the original, instead of rejecting the unpickled keys.
+    """
+    X, _ = synthetic_data
+    y = random.poisson(random.key(1), 1.0, (len(X),))
+    im = ImpactModel(poisson, rng_key=random.key(42), inference=_make_svi(poisson))
+    im.fit_on_batch(X, y, num_steps=10, progress=False)
+    p = tmp_path / "model.pkl"
+    with p.open("wb") as f:
+        cloudpickle.dump(im, f)
+    with ProcessPoolExecutor(1, mp_context=get_context("spawn")) as executor:
+        actual = executor.submit(_load_predict, p, X, y).result()
+
+    expected = cast("xr.DataTree", im.predict_on_batch(X))
+    np.testing.assert_array_equal(
+        actual,
         np.asarray(expected["posterior_predictive"]["y"]),
     )

@@ -17,8 +17,11 @@
 from __future__ import annotations
 
 import contextlib
+import copyreg
 import logging
+import pickle
 from datetime import UTC, datetime
+from functools import partial
 from inspect import signature, stack
 from pathlib import Path
 from shutil import rmtree
@@ -85,6 +88,26 @@ if TYPE_CHECKING:
     from dask.array import Array as DaskArray
 
 logger = logging.getLogger(__name__)
+
+
+def _reduce_key(key: Array) -> str | tuple[Any, ...]:
+    """Reduce a typed PRNG key for pickling.
+
+    A typed key pickles a copy of its PRNG implementation, which some samplers reject
+    in a new process, so a key of a registered implementation is rebuilt from its raw
+    data and the implementation's name instead.
+
+    Args:
+        key: The typed PRNG key to pickle.
+
+    Returns:
+        The callable and arguments that rebuild the key.
+    """
+    impl = random.key_impl(key)
+    if isinstance(impl, str):
+        return partial(random.wrap_key_data, impl=impl), (random.key_data(key),)
+
+    return key.__reduce_ex__(pickle.DEFAULT_PROTOCOL)
 
 
 class ImpactModel(BaseModel):
@@ -222,6 +245,9 @@ class ImpactModel(BaseModel):
         Returns:
             The state of the object, excluding runtime attributes.
         """
+        # Typed keys anywhere in the state, including those nested in the inference
+        # state, are pickled through `_reduce_key`.
+        copyreg.pickle(type(random.key(0)), _reduce_key)
         return {
             k: v
             for k, v in self.__dict__.items()
@@ -243,9 +269,9 @@ class ImpactModel(BaseModel):
             state: The state to restore, excluding the runtime attributes.
         """
         self.__dict__.update(state)
-        # Models pickled before `_is_fitted` was initialized eagerly may lack it.
+        # Models pickled before `_is_fitted` was initialized eagerly may lack it
         self.__dict__.setdefault("_is_fitted", False)
-        # Models pickled before chains were kept stacked their draws as one chain.
+        # Models pickled before chains were kept stacked their draws as one chain
         self.__dict__.setdefault("_num_chains", 1)
         self._init_runtime_attrs()
 
