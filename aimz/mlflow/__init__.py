@@ -87,6 +87,7 @@ from mlflow.utils.model_utils import (
     _validate_and_prepare_target_save_path,
 )
 from mlflow.utils.requirements_utils import _get_pinned_requirement
+from numpyro.infer import MCMC, SVI
 
 from aimz.utils._validation import _is_arraylike
 
@@ -98,7 +99,7 @@ if TYPE_CHECKING:
     from mlflow.models import ModelInputExample, ModelSignature
     from mlflow.models.model import ModelInfo
     from mlflow.tracking.fluent import ActiveRun
-    from numpyro.infer.svi import SVI, SVIRunResult
+    from numpyro.infer.svi import SVIRunResult
 
     from aimz.model.impact_model import ImpactModel
 
@@ -579,194 +580,6 @@ class _AimzModelWrapper:
         return self.aimz_model.predict(cast("Any", data), **kwargs)
 
 
-@autologging_integration(FLAVOR_NAME)
-def autolog(
-    *,
-    log_input_examples: bool = False,
-    log_model_signatures: bool = True,
-    log_models: bool = True,
-    log_datasets: bool = True,
-    disable: bool = False,
-    exclusive: bool = False,
-    disable_for_unsupported_versions: bool = False,
-    silent: bool = False,
-    registered_model_name: str | None = None,
-    extra_tags: dict[str, str] | None = None,
-) -> None:
-    """Enable (or disable) and configure autologging from aimz to MLflow.
-
-    Logs the following:
-
-        - parameters specified in :meth:`~aimz.ImpactModel.fit` and
-          :meth:`~aimz.ImpactModel.fit_on_batch`, together with ``param_input``,
-          ``param_output``, ``inference_method``, and, for ``SVI`` inference,
-          ``optimizer``.
-        - the evidence lower bound (ELBO) loss on each optimization step
-          (``SVI`` inference only).
-        - the source code of the kernel function used by the model.
-        - the training dataset as a run input, if applicable.
-        - trained model, including:
-            - an example of valid input.
-            - inferred signature of the inputs and outputs of the model.
-
-    Autologging is performed when you call :meth:`~aimz.ImpactModel.fit` or
-    :meth:`~aimz.ImpactModel.fit_on_batch`.
-
-    Args:
-        log_input_examples: If ``True``, input examples from training datasets are
-            collected and logged along with aimz model artifacts during training. If
-            ``False``, input examples are not logged.
-            Note: Input examples are MLflow model attributes
-            and are only collected if ``log_models`` is also ``True``.
-        log_model_signatures: If ``True``,
-            :py:class:`ModelSignatures <mlflow.models.ModelSignature>`
-            describing model inputs and outputs are collected and logged along
-            with aimz model artifacts during training. If ``False``,
-            signatures are not logged.
-            Note: Model signatures are MLflow model attributes
-            and are only collected if ``log_models`` is also ``True``.
-        log_models: If ``True``, trained models are logged as MLflow model artifacts.
-            If ``False``, trained models are not logged.
-            Input examples and model signatures, which are attributes of MLflow models,
-            are also omitted when ``log_models`` is ``False``.
-        log_datasets: If ``True``, train dataset information is logged to MLflow
-            Tracking if applicable. If ``False``, dataset information is not logged.
-        disable: If ``True``, disables the aimz autologging integration. If ``False``,
-            enables the aimz autologging integration.
-        exclusive: If ``True``, autologged content is not logged to user-created fluent
-            runs. If ``False``, autologged content is logged to the active fluent run,
-            which may be user-created.
-        disable_for_unsupported_versions: Accepted for parity with MLflow's built-in
-            autologging integrations. MLflow's version-compatibility gate only
-            applies to flavors shipped with MLflow, so this flag currently has no
-            effect for aimz.
-        silent: If ``True``, suppress all event logs and warnings from MLflow during
-            aimz autologging. If ``False``, show all events and warnings during aimz
-            autologging.
-        registered_model_name: If given, each time a model is trained, it is registered
-            as a new model version of the registered model with this name.
-            The registered model is created if it does not already exist.
-        extra_tags: A dictionary of extra tags to set on each managed run created by
-            autologging.
-    """
-    from aimz.model.impact_model import ImpactModel
-
-    def patch_fit(
-        original: Callable,
-        self: ImpactModel,
-        *args: object,
-        **kwargs: object,
-    ) -> ImpactModel:
-        """Patch for the fitting method to log information.
-
-        Args:
-            original: The original method.
-            self: The instance being fitted.
-            *args: Positional arguments for the method.
-            **kwargs: Keyword arguments for the method.
-
-        Returns:
-            The fitted model returned by the original fitting method.
-        """
-        autologging_client = MlflowAutologgingQueueingClient()
-        run_id = cast("ActiveRun", mlflow.active_run()).info.run_id
-
-        # Log the source code of the kernel function as an artifact
-        _log_kernel_source(self)
-
-        params = _run_params(self, original, args, kwargs)
-        autologging_client.log_params(run_id=run_id, params=params)
-
-        param_logging_operations = autologging_client.flush(synchronous=False)
-
-        # Obtain a copy of a model input example from the training dataset prior to
-        # model training for subsequent use during model logging, ensuring that the
-        # input example and inferred model signature to not include any mutations from
-        # model training.
-        input_example = None
-        input_example_exc = None
-        try:
-            input_example = _get_input_example(self, args, kwargs)
-        except Exception as e:
-            input_example_exc = e
-
-        model_id = None
-        if log_models:
-            model_id = _initialize_logged_model(
-                "model",
-                params={k: str(v) for k, v in params.items()},
-                flavor=FLAVOR_NAME,
-            ).model_id
-
-        # Whether to automatically log the training dataset as a dataset artifact.
-        if log_datasets:
-            try:
-                context_tags = context_registry.resolve_tags()
-                source = CodeDatasetSource(tags=context_tags)
-                _log_aimz_dataset(self, args, kwargs, source, "train", model_id)
-            except Exception as e:
-                _logger.warning(
-                    "Failed to log dataset information to MLflow. Reason: %s",
-                    e,
-                )
-
-        with batch_metrics_logger(run_id, model_id=model_id) as metrics_logger:
-            # training model
-            model = original(self, *args, **kwargs)
-
-            # aimz does not expose training callbacks, so the per-step ELBO losses are
-            # recorded from the fit result once training completes.
-            if params["inference_method"] == "SVI":
-                losses = np.asarray(cast("SVIRunResult", self.vi_result).losses)
-                for step, loss in enumerate(losses):
-                    metrics_logger.record_metrics({"elbo_loss": float(loss)}, step)
-
-        # `num_samples` is only known after training completes.
-        autologging_client.log_params(
-            run_id=run_id,
-            params={"num_samples": self._num_samples},
-        )
-        post_training_logging_operations = autologging_client.flush(synchronous=False)
-        if model_id is not None:
-            mlflow.MlflowClient().log_model_params(
-                model_id,
-                {"num_samples": str(self._num_samples)},
-            )
-
-        # Whether to automatically log the trained model based on boolean flag.
-        if log_models:
-            _log_model_with_signature(
-                model,
-                model_id,
-                input_example,
-                input_example_exc,
-                log_input_examples=log_input_examples,
-                log_model_signatures=log_model_signatures,
-            )
-
-        param_logging_operations.await_completion()
-        post_training_logging_operations.await_completion()
-
-        return model
-
-    safe_patch(
-        FLAVOR_NAME,
-        ImpactModel,
-        "fit_on_batch",
-        patch_fit,
-        manage_run=True,
-        extra_tags=extra_tags,
-    )
-    safe_patch(
-        FLAVOR_NAME,
-        ImpactModel,
-        "fit",
-        patch_fit,
-        manage_run=True,
-        extra_tags=extra_tags,
-    )
-
-
 def _log_kernel_source(model: ImpactModel) -> None:
     """Log the source code of the model's kernel function as an artifact.
 
@@ -779,6 +592,26 @@ def _log_kernel_source(model: ImpactModel) -> None:
         _logger.exception(
             "Failed to log the kernel source code. aimz autologging will ignore the "
             "failure and continue."
+        )
+
+
+def _log_elbo_losses(model: ImpactModel, run_id: str, model_id: str | None) -> None:
+    """Log the ELBO losses of the latest optimization as step-aware metrics.
+
+    Args:
+        model: The model instance being fitted.
+        run_id: The ID of the run to log the losses to.
+        model_id: The ID of the logged model to link the losses to, if any.
+    """
+    try:
+        with batch_metrics_logger(run_id, model_id=model_id) as metrics_logger:
+            losses = np.asarray(cast("SVIRunResult", model.vi_result).losses)
+            for step, loss in enumerate(losses):
+                metrics_logger.record_metrics({"elbo_loss": float(loss)}, step)
+    except Exception:
+        _logger.exception(
+            "Failed to log the ELBO losses. aimz autologging will ignore the failure "
+            "and continue."
         )
 
 
@@ -800,21 +633,31 @@ def _run_params(
         The model attributes and explicitly passed fitting-method arguments to log as
         parameters.
     """
+    from aimz.utils.data import ArrayLoader
+
     params = {
         "param_input": model.param_input,
         "param_output": model.param_output,
         "inference_method": type(model.inference).__name__,
     }
-    if params["inference_method"] == "SVI":
-        params["optimizer"] = type(cast("SVI", model.inference).optim).__name__
-
     unlogged_params = ["X", "y", "rng_key", "num_samples", "progress", "kwargs"]
+    if isinstance(model.inference, SVI):
+        params["optimizer"] = type(model.inference.optim).__name__
+    elif isinstance(model.inference, MCMC):
+        params["num_chains"] = model.inference.num_chains
+        params["num_warmup"] = model.inference.num_warmup
+        # `fit_on_batch` ignores `num_steps` for MCMC.
+        unlogged_params.append("num_steps")
+
     params_to_log_for_fn = get_mlflow_run_params_for_fn_args(
         original,
         args,
         {k: v for k, v in kwargs.items() if not _is_arraylike(v)},
         unlogged_params,
     )
+    X = kwargs["X"] if "X" in kwargs else args[0]
+    if isinstance(X, ArrayLoader):
+        params_to_log_for_fn |= {"batch_size": X.batch_size, "shuffle": X.shuffle}
     return {**params, **params_to_log_for_fn}
 
 
@@ -987,3 +830,192 @@ def _log_aimz_dataset(
 
     model = LoggedModelInput(model_id=model_id) if model_id else None
     mlflow.log_input(dataset, context, model=model)
+
+
+@autologging_integration(FLAVOR_NAME)
+def autolog(
+    *,
+    log_input_examples: bool = False,
+    log_model_signatures: bool = True,
+    log_models: bool = True,
+    log_datasets: bool = True,
+    disable: bool = False,
+    exclusive: bool = False,
+    disable_for_unsupported_versions: bool = False,
+    silent: bool = False,
+    registered_model_name: str | None = None,
+    extra_tags: dict[str, str] | None = None,
+) -> None:
+    """Enable (or disable) and configure autologging from aimz to MLflow.
+
+    Logs the following:
+
+        - parameters specified in :meth:`~aimz.ImpactModel.fit` and
+          :meth:`~aimz.ImpactModel.fit_on_batch`, together with ``param_input``,
+          ``param_output``, ``inference_method``, and, for ``SVI`` inference,
+          ``optimizer`` or, for ``MCMC`` inference, ``num_chains`` and
+          ``num_warmup``.
+        - the evidence lower bound (ELBO) loss on each optimization step
+          (``SVI`` inference only).
+        - the source code of the kernel function used by the model.
+        - the training dataset as a run input, if applicable.
+        - trained model, including:
+            - an example of valid input.
+            - inferred signature of the inputs and outputs of the model.
+
+    Autologging is performed when you call :meth:`~aimz.ImpactModel.fit` or
+    :meth:`~aimz.ImpactModel.fit_on_batch`.
+
+    Args:
+        log_input_examples: If ``True``, input examples from training datasets are
+            collected and logged along with aimz model artifacts during training. If
+            ``False``, input examples are not logged.
+            Note: Input examples are MLflow model attributes
+            and are only collected if ``log_models`` is also ``True``.
+        log_model_signatures: If ``True``,
+            :py:class:`ModelSignatures <mlflow.models.ModelSignature>`
+            describing model inputs and outputs are collected and logged along
+            with aimz model artifacts during training. If ``False``,
+            signatures are not logged.
+            Note: Model signatures are MLflow model attributes
+            and are only collected if ``log_models`` is also ``True``.
+        log_models: If ``True``, trained models are logged as MLflow model artifacts.
+            If ``False``, trained models are not logged.
+            Input examples and model signatures, which are attributes of MLflow models,
+            are also omitted when ``log_models`` is ``False``.
+        log_datasets: If ``True``, train dataset information is logged to MLflow
+            Tracking if applicable. If ``False``, dataset information is not logged.
+        disable: If ``True``, disables the aimz autologging integration. If ``False``,
+            enables the aimz autologging integration.
+        exclusive: If ``True``, autologged content is not logged to user-created fluent
+            runs. If ``False``, autologged content is logged to the active fluent run,
+            which may be user-created.
+        disable_for_unsupported_versions: Accepted for parity with MLflow's built-in
+            autologging integrations. MLflow's version-compatibility gate only
+            applies to flavors shipped with MLflow, so this flag currently has no
+            effect for aimz.
+        silent: If ``True``, suppress all event logs and warnings from MLflow during
+            aimz autologging. If ``False``, show all events and warnings during aimz
+            autologging.
+        registered_model_name: If given, each time a model is trained, it is registered
+            as a new model version of the registered model with this name.
+            The registered model is created if it does not already exist.
+        extra_tags: A dictionary of extra tags to set on each managed run created by
+            autologging.
+    """
+    from aimz.model.impact_model import ImpactModel
+
+    def patch_fit(
+        original: Callable,
+        self: ImpactModel,
+        *args: object,
+        **kwargs: object,
+    ) -> ImpactModel:
+        """Patch for the fitting method to log information.
+
+        Args:
+            original: The original method.
+            self: The instance being fitted.
+            *args: Positional arguments for the method.
+            **kwargs: Keyword arguments for the method.
+
+        Returns:
+            The fitted model returned by the original fitting method.
+        """
+        autologging_client = MlflowAutologgingQueueingClient()
+        run_id = cast("ActiveRun", mlflow.active_run()).info.run_id
+
+        # Log the source code of the kernel function as an artifact
+        _log_kernel_source(self)
+
+        params = _run_params(self, original, args, kwargs)
+        autologging_client.log_params(run_id=run_id, params=params)
+
+        param_logging_operations = autologging_client.flush(synchronous=False)
+
+        # Obtain a copy of a model input example from the training dataset prior to
+        # model training for subsequent use during model logging, ensuring that the
+        # input example and inferred model signature to not include any mutations from
+        # model training.
+        input_example = None
+        input_example_exc = None
+        try:
+            input_example = _get_input_example(self, args, kwargs)
+        except Exception as e:
+            input_example_exc = e
+
+        model_id = None
+        if log_models:
+            model_id = _initialize_logged_model(
+                "model",
+                params={k: str(v) for k, v in params.items()},
+                flavor=FLAVOR_NAME,
+            ).model_id
+
+        # Whether to automatically log the training dataset as a dataset artifact.
+        if log_datasets:
+            try:
+                context_tags = context_registry.resolve_tags()
+                source = CodeDatasetSource(tags=context_tags)
+                _log_aimz_dataset(self, args, kwargs, source, "train", model_id)
+            except Exception as e:
+                _logger.warning(
+                    "Failed to log dataset information to MLflow. Reason: %s",
+                    e,
+                )
+
+        # aimz does not expose training callbacks, so the per-step ELBO losses are
+        # recorded from the fit result once training ends. A fit can raise after the
+        # optimization, e.g. on diverged parameters, so they are recorded either way.
+        vi_result = self.vi_result
+        try:
+            # training model
+            model = original(self, *args, **kwargs)
+        finally:
+            if self.vi_result is not vi_result:
+                _log_elbo_losses(self, run_id, model_id)
+
+        # `num_samples` is only known after training completes.
+        autologging_client.log_params(
+            run_id=run_id,
+            params={"num_samples": self._num_samples},
+        )
+        post_training_logging_operations = autologging_client.flush(synchronous=False)
+        if model_id is not None:
+            mlflow.MlflowClient().log_model_params(
+                model_id,
+                {"num_samples": str(self._num_samples)},
+            )
+
+        # Whether to automatically log the trained model based on boolean flag.
+        if log_models:
+            _log_model_with_signature(
+                model,
+                model_id,
+                input_example,
+                input_example_exc,
+                log_input_examples=log_input_examples,
+                log_model_signatures=log_model_signatures,
+            )
+
+        param_logging_operations.await_completion()
+        post_training_logging_operations.await_completion()
+
+        return model
+
+    safe_patch(
+        FLAVOR_NAME,
+        ImpactModel,
+        "fit_on_batch",
+        patch_fit,
+        manage_run=True,
+        extra_tags=extra_tags,
+    )
+    safe_patch(
+        FLAVOR_NAME,
+        ImpactModel,
+        "fit",
+        patch_fit,
+        manage_run=True,
+        extra_tags=extra_tags,
+    )
