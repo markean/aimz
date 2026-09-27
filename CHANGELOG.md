@@ -55,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - {meth}`~aimz.ImpactModel.log_likelihood` under the default `shard_axis="obs"` now raises the documented `NotImplementedError` on every store and device count for an observed site without an observation axis, such as one observed with `.to_event(1)` or reshaped, instead of a raw `IndexError` or `shard_map` error or, with `store="memory"`, silently misaligned values ([#368](https://github.com/markean/aimz/issues/368)).
 - {func}`~aimz.mlflow.autolog` now records the targets of an {class}`~aimz.utils.data.ArrayLoader` passed to {meth}`~aimz.ImpactModel.fit` from the field named after {attr}`~aimz.ImpactModel.param_output`, instead of a field named `y`, and no longer drops a feature field named `y` from the dataset and the input example ([#370](https://github.com/markean/aimz/issues/370)).
 - The automatic rerun of {meth}`~aimz.ImpactModel.predict` and {meth}`~aimz.ImpactModel.log_likelihood` under `shard_axis="draw"` now chooses its own draw chunk size within the memory budget, instead of reusing a `batch_size` given for `shard_axis="obs"` ([#373](https://github.com/markean/aimz/issues/373)).
+- Predictions through the pyfunc flavor, including the forward pass that infers a signature from `input_example`, no longer show progress bars by default; pass `progress=True` through `params` to show them when the signature records it ([#378](https://github.com/markean/aimz/issues/378)).
 
 ## [v0.15.1](https://github.com/markean/aimz/releases/tag/v0.15.1) - 2026-09-12
 

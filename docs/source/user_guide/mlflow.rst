@@ -196,7 +196,7 @@ Dict input works only for models saved with a dict input example or without a si
 A model saved with an array input example accepts array input only.
 For a model saved with a signature, dict keys that are not inputs of the signature are dropped with a warning, and prediction arguments pass through ``params`` only when the signature records them, such as ``progress``.
 Inputs must also have the dtypes recorded in the signature, so cast new data accordingly, such as ``X_new.astype(np.float32)`` for a model saved with a ``float32`` example.
-Under the hood the pyfunc wrapper delegates to :meth:`~aimz.ImpactModel.predict`, keeping results in memory (``store="memory"``) instead of writing them to disk as :meth:`~aimz.ImpactModel.predict` does by default.
+Under the hood the pyfunc wrapper delegates to :meth:`~aimz.ImpactModel.predict`, keeping results in memory (``store="memory"``) without progress bars (``progress=False``) instead of writing them to disk with progress bars as :meth:`~aimz.ImpactModel.predict` does by default.
 
 .. note::
    Predictions are returned as an :class:`xarray.DataTree`, which MLflow cannot serialize, so neither serving with ``mlflow models serve`` nor batch scoring with :func:`mlflow.models.predict` is supported.
