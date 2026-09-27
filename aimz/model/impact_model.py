@@ -1355,11 +1355,8 @@ class ImpactModel(BaseModel):
         dataloader, kwargs_extra = _setup_inputs(
             X=X,
             y=y,
-            # The loader feeds `train_on_batch(**batch)`, whose parameters are `X`/`y`
-            # (it maps them to the kernel's param_input/param_output itself), so the
-            # dataset is keyed by those literal names, not the kernel's parameter names.
-            param_input="X",
-            param_output="y",
+            param_input=self.param_input,
+            param_output=self.param_output,
             rng_key=rng_subkey,
             batch_size=batch_size if batch_size is not None else len(cast("Sized", X)),
             num_samples=num_samples,
@@ -1371,6 +1368,10 @@ class ImpactModel(BaseModel):
         # Validate the provided parameters against the kernel's signature; the fields
         # of a data loader may supply the remaining ones
         if isinstance(X, ArrayLoader):
+            for name in (self.param_input, self.param_output):
+                if name not in X.dataset.arrays:
+                    msg = f"The data loader has no field named {name!r}."
+                    raise ValueError(msg)
             signature(self.kernel).bind_partial(**kwargs)
         else:
             signature(self.kernel).bind(
@@ -1392,8 +1393,11 @@ class ImpactModel(BaseModel):
                 dynamic_ncols=True,
             )
             for batch in pbar:
+                fields = dict(batch)
                 _, loss = self.train_on_batch(
-                    **batch,
+                    fields.pop(self.param_input),
+                    fields.pop(self.param_output),
+                    **fields,
                     **kwargs_extra,
                     rng_key=rng_subkey,
                 )
