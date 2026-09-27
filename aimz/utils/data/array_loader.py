@@ -77,6 +77,8 @@ class ArrayLoader:
         self.indices = np.arange(len(self.dataset))
         if isinstance(rng_key, Array) and rng_key.dtype == jnp.uint32:
             msg = "Legacy `uint32` PRNGKey detected; converting to a typed key array."
+            # A fixed stacklevel: skipping aimz frames would attribute this to MLflow's
+            # autolog wrapper when it runs inside fit, and MLflow then hides it.
             warn(msg, category=UserWarning, stacklevel=2)
             rng_key = random.wrap_key_data(rng_key)
         self.rng_key = rng_key

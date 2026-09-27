@@ -25,7 +25,7 @@ from pathlib import Path
 from queue import Queue
 from shutil import rmtree
 from threading import Event, Thread
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast, override
 
 import psutil
 from dask import delayed
@@ -533,6 +533,7 @@ class _SliceWriteStrategy(_WriteStrategy):
                 self._seen.add(site)
                 self._site_offsets[site] = 0
 
+    @override
     def enqueue(
         self,
         queue: Queue,
@@ -597,6 +598,7 @@ class _MemoryWriteStrategy(_WriteStrategy):
         for site in site_arrays:
             self._batches.setdefault(site, [])
 
+    @override
     def result(self) -> dict[str, DaskArray]:
         """Assemble each site's retained batches into a lazy Dask array.
 
@@ -712,8 +714,9 @@ def _writer(
 
     If opening the group or a write fails, the error is logged, its details are put into
     ``error_queue``, and the shared ``stop`` event is set so every worker switches to
-    drain mode: subsequent items are discarded (still consumed, so the bounded producer
-    cannot block) rather than written into a store that is being torn down.
+    drain mode: subsequent items are discarded (still marked done, so the bounded
+    producer cannot block and ``queue.join()`` can finish) rather than written into a
+    store that is being torn down.
 
     Args:
         queue: The shared queue of ``(site, payload)`` items (and ``None`` sentinels).
@@ -814,7 +817,7 @@ def _shutdown_writer_threads(
 
     One ``None`` sentinel is enqueued per worker; each worker consumes exactly one and
     exits, so any residual items (already ahead of the sentinels in the FIFO queue) are
-    consumed first, or discarded when ``discard`` is set. An interrupt while waiting
+    written first, or discarded when ``discard`` is set. An interrupt while waiting
     (e.g. ``KeyboardInterrupt``) also discards them and is re-raised once every worker
     has exited, so none writes after the caller discards the partial output. Safe to
     call when no pool was started (``queue is None``).
@@ -828,13 +831,17 @@ def _shutdown_writer_threads(
     """
     if queue is None or stop is None:
         return
-    if discard:
-        stop.set()
     sent = 0
     try:
+        if discard:
+            stop.set()
         for _ in threads:
             queue.put(None)
             sent += 1
+        # Wait on the queue before the threads: on Python 3.12 an interrupted
+        # `Thread.join()` marks a running thread as stopped, so the recovery joins
+        # below would return while writes are still pending.
+        queue.join()
         for thread in threads:
             thread.join()
     except BaseException:

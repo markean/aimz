@@ -27,6 +27,7 @@ import numpy as np
 from jax import Array, device_put
 from jax.typing import ArrayLike
 
+from aimz._exceptions import _SKIP_FILE_PREFIXES
 from aimz.utils._kwargs import _group_kwargs
 from aimz.utils._output import _WRITER_COUNT_MAX
 from aimz.utils.data import ArrayDataset, ArrayLoader
@@ -189,7 +190,6 @@ def _setup_inputs(
     num_samples: int,
     shuffle: bool = False,
     device: Sharding | None = None,
-    stacklevel: int = 2,
     **kwargs: object,
 ) -> tuple[Iterable[Mapping[str, Array | np.ndarray]], dict]:
     """Prepare a data loader and grouped keyword arguments.
@@ -207,9 +207,6 @@ def _setup_inputs(
         num_samples: Number of samples to draw, which affects the size of batches.
         shuffle: Whether to shuffle the dataset before batching.
         device: Sharding used to resolve an array input's batch size.
-        stacklevel: Frames between this function and the user's call site, so the
-            batch-size divisibility warning is attributed to the user's own line;
-            each caller passes the depth of its chain.
         **kwargs: Additional arguments passed to the model.
 
     Returns:
@@ -248,7 +245,7 @@ def _setup_inputs(
                 f"devices ({num_devices}). Use a multiple of {num_devices} "
                 "for optimal performance."
             )
-            warn(msg, category=UserWarning, stacklevel=stacklevel)
+            warn(msg, category=UserWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
         # Key the dataset by the kernel's input/output parameter names (alongside the
         # array kwargs) so each batch is keyed as the downstream lookup expects.
         kwargs_array[param_input] = X
@@ -268,7 +265,7 @@ def _setup_inputs(
                 "The data loader shuffles, so results will not follow the data order. "
                 "Create the ArrayLoader with `shuffle=False` to preserve it."
             )
-            warn(msg, category=UserWarning, stacklevel=stacklevel)
+            warn(msg, category=UserWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
         loader = X
     else:
         msg = f"`X` must be an array-like or a data loader, got {type(X).__name__!r}."

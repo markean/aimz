@@ -49,7 +49,7 @@ from numpyro.infer import MCMC, SVI
 from numpyro.infer.svi import SVIRunResult, SVIState
 from tqdm.auto import tqdm
 
-from aimz._exceptions import NotFittedError
+from aimz._exceptions import _SKIP_FILE_PREFIXES, NotFittedError
 from aimz.model._core import BaseModel
 from aimz.model._streaming import (
     _OutputStreamer,
@@ -148,7 +148,7 @@ class ImpactModel(BaseModel):
         self._kernel_spec: KernelSpec | None = None
         if isinstance(rng_key, Array) and rng_key.dtype == jnp.uint32:
             msg = "Legacy `uint32` PRNGKey detected; converting to a typed key array."
-            warn(msg, category=UserWarning, stacklevel=2)
+            warn(msg, category=UserWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
             rng_key = random.wrap_key_data(rng_key)
         self._rng_key = rng_key
         if not isinstance(inference, (SVI, MCMC)):
@@ -289,7 +289,7 @@ class ImpactModel(BaseModel):
                 f"{inference.num_chains} but got {self._num_devices}. Chains will be "
                 "drawn sequentially."
             )
-            warn(msg, category=UserWarning, stacklevel=2)
+            warn(msg, category=UserWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
 
     @property
     def inference(self) -> SVI | MCMC:
@@ -364,6 +364,8 @@ class ImpactModel(BaseModel):
         """
         if not np.all(np.isfinite(vi_result.losses)):
             msg = "Loss contains NaN or Inf, indicating numerical instability."
+            # A fixed stacklevel: skipping aimz frames would attribute this to MLflow's
+            # autolog wrapper when it runs inside fit, and MLflow then hides it.
             warn(msg, category=RuntimeWarning, stacklevel=2)
         self._vi_result = vi_result
 
@@ -497,7 +499,7 @@ class ImpactModel(BaseModel):
                     "will be missing from the output unless the kernel defines them "
                     "at sampling time."
                 )
-                warn(msg, category=UserWarning, stacklevel=3)
+                warn(msg, category=UserWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
 
         return requested
 
@@ -816,7 +818,6 @@ class ImpactModel(BaseModel):
                     kwargs=kwargs,
                 ),
                 y=None,
-                stacklevel=4,
             )
             batch = dict(stream[2])
             batch.pop(self.param_output, None)
@@ -1385,7 +1386,6 @@ class ImpactModel(BaseModel):
             num_samples=num_samples,
             shuffle=shuffle,
             device=None,
-            stacklevel=3,
             **kwargs,
         )
         # Validate the provided parameters against the kernel's signature; the fields
@@ -1518,7 +1518,7 @@ class ImpactModel(BaseModel):
                 k: v for k, v in posterior_sample.items() if k != self.param_output
             }
             msg = f"The output site {self.param_output!r} is removed."
-            warn(msg, category=UserWarning, stacklevel=2)
+            warn(msg, category=UserWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
         batch_ndims = 1
         posterior_sample = {
             name: sample
@@ -1756,7 +1756,7 @@ class ImpactModel(BaseModel):
                     "`shard_axis='draw'`. Pass `shard_axis='draw'` to silence this "
                     "warning."
                 )
-                warn(msg, category=UserWarning, stacklevel=2)
+                warn(msg, category=UserWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
                 return self.predict(
                     X,
                     intervention=intervention,
@@ -2052,7 +2052,7 @@ class ImpactModel(BaseModel):
                 "`.log_likelihood()` under `shard_axis='obs'`; rerunning with "
                 "`shard_axis='draw'`. Pass `shard_axis='draw'` to silence this warning."
             )
-            warn(msg, category=UserWarning, stacklevel=2)
+            warn(msg, category=UserWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
             return self.log_likelihood(
                 X,
                 y,

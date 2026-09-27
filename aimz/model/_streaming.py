@@ -215,8 +215,6 @@ class _OutputStreamer:
         self,
         req: _WriteRequest,
         y: ArrayLike | None,
-        *,
-        stacklevel: int = 7,
     ) -> tuple[
         Iterable[Mapping[str, Array | np.ndarray]],
         Iterator,
@@ -227,7 +225,6 @@ class _OutputStreamer:
         Args:
             req: The streamed write job.
             y: Observed outputs supplied alongside an array input.
-            stacklevel: Warning attribution depth passed to input setup.
 
         Returns:
             The loader, its iterator including the first batch, and that batch.
@@ -247,7 +244,6 @@ class _OutputStreamer:
             num_samples=req.num_samples,
             shuffle=False,
             device=self._ctx.partitioned_sharding,
-            stacklevel=stacklevel,
             **req.kwargs,
         )
         batches = iter(loader)
