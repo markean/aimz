@@ -402,11 +402,7 @@ class _OutputStreamer:
             )
 
         phase = "Prior" if group == "prior_predictive" else "Posterior"
-        pbar = tqdm(
-            desc=f"{phase} predictive sampling [{', '.join(req.return_sites)}]",
-            disable=not req.progress,
-            dynamic_ncols=True,
-        )
+        desc = f"{phase} predictive sampling [{', '.join(req.return_sites)}]"
         # Draw-parallel opened no observation stream
         if stream is None:
             chunk_posterior = (
@@ -420,7 +416,7 @@ class _OutputStreamer:
                 y=None,
                 posterior=chunk_posterior,
                 rng_key=rng_key,
-                pbar=pbar,
+                desc=desc,
             )
 
         if group == "prior_predictive":
@@ -466,7 +462,7 @@ class _OutputStreamer:
             samples=samples,
             kwargs_key=kwargs_key,
             rng_key=rng_key,
-            pbar=pbar,
+            desc=desc,
         )
 
     def write_log_likelihood(
@@ -535,11 +531,7 @@ class _OutputStreamer:
                 ),
             }
 
-        pbar = tqdm(
-            desc=f"Computing log-likelihood [{site}]",
-            disable=not req.progress,
-            dynamic_ncols=True,
-        )
+        desc = f"Computing log-likelihood [{site}]"
         # Draw-parallel opened no observation stream
         if stream is None:
             return self._write_draws(
@@ -548,7 +540,7 @@ class _OutputStreamer:
                 y=cast("ArrayLike", y),
                 posterior=cast("dict[str, Array]", posterior),
                 rng_key=None,
-                pbar=pbar,
+                desc=desc,
             )
 
         return self._write_data(
@@ -561,7 +553,7 @@ class _OutputStreamer:
             ),
             kwargs_key=kwargs_key,
             rng_key=None,
-            pbar=pbar,
+            desc=desc,
         )
 
     def _write_data(
@@ -576,7 +568,7 @@ class _OutputStreamer:
         samples: dict[str, Array],
         kwargs_key: tuple[str, ...],
         rng_key: Array | None,
-        pbar: tqdm,
+        desc: str,
     ) -> dict[str, DaskArray] | None:
         """Stream over data-parallel batches into the request's destination.
 
@@ -596,7 +588,7 @@ class _OutputStreamer:
             kwargs_key: The per-observation keyword names, whose batch arrays form each
                 step's ``tail`` in this order.
             rng_key: Per-batch key source, or ``None`` for log-likelihood.
-            pbar: Progress bar to drive over the batches.
+            desc: Description of the progress bar over the batches.
 
         Returns:
             The strategy's site arrays for in-memory accumulation, or ``None`` for a
@@ -607,7 +599,6 @@ class _OutputStreamer:
         # External lengths may be estimates or raise; execution never queries them.
         known_size = type(dataloader) is ArrayLoader
         n_batches = len(dataloader) if known_size else None
-        pbar.reset(total=n_batches)
 
         def dispatch(item: object) -> tuple[dict[str, Array], int]:
             nonlocal rng_key
@@ -660,7 +651,12 @@ class _OutputStreamer:
             strategy=strategy,
             dispatch=dispatch,
             finalize=finalize,
-            pbar=pbar,
+            pbar=tqdm(
+                desc=desc,
+                total=n_batches,
+                disable=not req.progress,
+                dynamic_ncols=True,
+            ),
         )
 
         return strategy.result()
@@ -672,7 +668,7 @@ class _OutputStreamer:
         y: ArrayLike | None,
         posterior: dict[str, Array],
         rng_key: Array | None,
-        pbar: tqdm,
+        desc: str,
     ) -> dict[str, DaskArray] | None:
         """Stream over draw chunks into the request's destination.
 
@@ -693,7 +689,7 @@ class _OutputStreamer:
             posterior: The posterior to slice per draw chunk; empty for prior predictive
                 (each chunk draws fresh).
             rng_key: Per-draw key source, or ``None`` for log-likelihood.
-            pbar: Progress bar to drive over the draw chunks.
+            desc: Description of the progress bar over the draw chunks.
 
         Returns:
             The strategy's site arrays for in-memory accumulation, or ``None`` for a
@@ -707,7 +703,7 @@ class _OutputStreamer:
         )
         if req.batch_size is None:
             logger.debug("Resolved batch_size=%d automatically.", batch_size)
-        pbar.reset(total=-(-req.num_samples // batch_size))
+        n_chunks = -(-req.num_samples // batch_size)
         # The public draw-parallel entry points reject data loaders, so `req.X` is
         # always an array here.
         x_dev = _replicate(
@@ -762,11 +758,16 @@ class _OutputStreamer:
         )
         _write_loop(
             items=range(0, req.num_samples, batch_size),
-            n_items=-(-req.num_samples // batch_size),
+            n_items=n_chunks,
             strategy=strategy,
             dispatch=dispatch,
             finalize=finalize,
-            pbar=pbar,
+            pbar=tqdm(
+                desc=desc,
+                total=n_chunks,
+                disable=not req.progress,
+                dynamic_ncols=True,
+            ),
         )
 
         return strategy.result()

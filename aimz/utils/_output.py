@@ -943,14 +943,15 @@ def _write_loop(
                 break
             pbar.update()
         if worker_err is None:
-            pbar.set_description(
-                "Writing in progress..."
+            pbar.set_postfix_str(
+                "writing in progress..."
                 if isinstance(strategy.sink, Path)
-                else "Collecting results...",
+                else "collecting results...",
             )
         completed = True
     finally:
         _shutdown_writer_threads(threads, queue=queue, stop=stop, discard=not completed)
+        pbar.set_postfix_str("")
         # Drop the in-flight pipeline results and the current batch explicitly.
         producer.close()
         with suppress(NameError):
