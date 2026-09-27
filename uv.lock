@@ -29,7 +29,7 @@ wheels = [
 
 [[package]]
 name = "aimz"
-version = "0.16.0.dev0"
+version = "0.16.0"
 source = { editable = "." }
 dependencies = [
     { name = "dask" },
@@ -70,9 +70,9 @@ mlflow = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arviz-base", marker = "python_full_version >= '3.12' and extra == 'docs'", specifier = ">=1" },
-    { name = "arviz-plots", marker = "python_full_version >= '3.12' and extra == 'docs'", specifier = ">=1" },
-    { name = "arviz-stats", marker = "python_full_version >= '3.12' and extra == 'docs'", specifier = ">=1" },
+    { name = "arviz-base", marker = "extra == 'docs'", specifier = ">=1" },
+    { name = "arviz-plots", marker = "extra == 'docs'", specifier = ">=1" },
+    { name = "arviz-stats", marker = "extra == 'docs'", specifier = ">=1" },
     { name = "dask", specifier = ">=2026.1" },
     { name = "flax", marker = "extra == 'docs'", specifier = ">=0.12" },
     { name = "jax", specifier = ">=0.10" },
