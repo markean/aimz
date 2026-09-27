@@ -14,13 +14,16 @@
 
 """Tests for the `.predict()` method."""
 
+import warnings
 from collections.abc import Iterator
-from tempfile import TemporaryDirectory
+from pathlib import Path
 
 import numpy as np
+import numpyro.distributions as dist
 import pytest
 from jax import Array, random
-from numpyro.infer import SVI
+from numpyro import sample
+from numpyro.infer import MCMC, NUTS, SVI
 
 from aimz import ImpactModel
 from aimz.model._streaming import _OutputStreamer, _RuntimeContext
@@ -88,7 +91,11 @@ def test_predict_warns_on_unknown_return_site(
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
-def test_predict_after_cleanup(synthetic_data: tuple[Array, Array], vi: SVI) -> None:
+def test_predict_after_cleanup(
+    synthetic_data: tuple[Array, Array],
+    vi: SVI,
+    tmp_path: Path,
+) -> None:
     """Test `.predict()` recreates tempdir after `.cleanup()`."""
     X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
@@ -111,12 +118,12 @@ def test_predict_after_cleanup(synthetic_data: tuple[Array, Array], vi: SVI) -> 
     im.cleanup()
 
     # `.sample_posterior_predictive()` is an alias for `.predict()`.
-    with pytest.warns(UserWarning, match=msg), TemporaryDirectory() as tmp_dir:
+    with pytest.warns(UserWarning, match=msg):
         im.sample_posterior_predictive(
             X=X,
             return_sites=["y"],
             batch_size=len(X) // 2,
-            output_dir=tmp_dir,
+            output_dir=tmp_path,
             progress=False,
         )
 
@@ -145,6 +152,52 @@ def test_predict_per_observation_intervention() -> None:
         streamed["posterior_predictive"]["mu"].values,
         whole["posterior_predictive"]["mu"].values,
     )
+
+
+def test_predict_intervention_reuses_compiled_program(
+    synthetic_data: tuple[Array, Array],
+    im_lm_svi_fitted: ImpactModel,
+) -> None:
+    """Repeated calls with an equal intervention reuse the compiled program."""
+    X, _ = synthetic_data
+    im = im_lm_svi_fitted
+    im.predict(X, intervention={"b": 1.0}, store="memory", progress=False)
+    fn = im._streamer._fn_cache["predict", "obs", 0, 0]
+    cache_size = fn._cache_size()
+    im.predict(X, intervention={"b": 1.0}, store="memory", progress=False)
+
+    assert fn._cache_size() == cache_size
+
+
+def test_predict_mcmc_keeps_chains(synthetic_data: tuple[Array, Array]) -> None:
+    """Both predictive groups keep the sampler's chains under `shard_axis='obs'`."""
+    X, y = synthetic_data
+
+    def kernel(X: Array, y: Array | None = None) -> None:
+        b = sample("b", dist.Normal(0.0, 1.0))
+        sample("y", dist.Normal(X.sum(axis=-1) + b, 1.0), obs=y)
+
+    im = ImpactModel(
+        kernel,
+        rng_key=random.key(42),
+        inference=MCMC(NUTS(kernel), num_warmup=10, num_samples=5, num_chains=2),
+    )
+    im.fit_on_batch(X, y)
+    b = im.inference.get_samples(group_by_chain=True)["b"]
+    try:
+        for in_sample, group in (
+            (True, "posterior_predictive"),
+            (False, "predictions"),
+        ):
+            # A rerun under `shard_axis='draw'` would warn and bypass the obs path.
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", UserWarning)
+                dt = im.predict(X, in_sample=in_sample, progress=False)
+            np.testing.assert_array_equal(dt.posterior["b"].values, b)
+            sizes = dt[group].sizes
+            assert (sizes["chain"], sizes["draw"]) == (2, 5)
+    finally:
+        im.cleanup()
 
 
 def test_predict_generator_matches_array(

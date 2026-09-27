@@ -193,20 +193,21 @@ def test_predict_draw_num_samples_less_than_devices(
         im.cleanup()
 
 
-def test_predict_data_vs_draw_means_close(
+def test_predict_data_vs_draw_same_draws(
     synthetic_data: tuple[Array, Array],
     im_lm_svi_fitted: ImpactModel,
 ) -> None:
     """For a global model both strategies use the same posterior draws.
 
-    The per-observation predictive mean is therefore the same up to the per-draw
-    likelihood noise, which averages out over the draws.
+    Fixing the noise scale near zero removes the per-draw likelihood noise, so the
+    predictions agree draw by draw.
     """
     X, _ = synthetic_data
     # A batch size divisible by the 3 host devices avoids the divisibility warning.
     data = np.asarray(
         im_lm_svi_fitted.predict(
             X,
+            intervention={"sigma": 1e-6},
             batch_size=99,
             progress=False,
             shard_axis="obs",
@@ -215,17 +216,14 @@ def test_predict_data_vs_draw_means_close(
     draw = np.asarray(
         im_lm_svi_fitted.predict(
             X,
+            intervention={"sigma": 1e-6},
             batch_size=len(X),
             progress=False,
             shard_axis="draw",
         )["posterior_predictive"]["y"],
     )
     assert data.shape == draw.shape
-    np.testing.assert_allclose(
-        data.mean(axis=(0, 1)),
-        draw.mean(axis=(0, 1)),
-        atol=0.5,
-    )
+    np.testing.assert_allclose(data, draw, atol=1e-4)
 
 
 def test_log_likelihood_draw_local_latent(
@@ -470,6 +468,8 @@ def test_predict_obs_shards_draw_independent_noise(
     """`shard_axis='obs'` draws independent noise on every device shard."""
     X, _ = synthetic_data
     n_devices = local_device_count()
+    if n_devices == 1:
+        pytest.skip("Needs more than one device to compare shards.")
     # A constant input holds the `lm` mean identical across observations, so whatever
     # variation is left in the draws is the likelihood noise.
     dt = im_lm_svi_fitted.predict(

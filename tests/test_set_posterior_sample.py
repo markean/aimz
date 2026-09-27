@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
@@ -29,6 +28,8 @@ from aimz import ImpactModel
 from tests.conftest import lm
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from numpyro.infer import SVI
 
 
@@ -42,7 +43,11 @@ def test_empty_posterior_sample(vi: SVI) -> None:
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
-def test_set_posterior_sample(synthetic_data: tuple[Array, Array], vi: SVI) -> None:
+def test_set_posterior_sample(
+    synthetic_data: tuple[Array, Array],
+    vi: SVI,
+    tmp_path: Path,
+) -> None:
     """Test the `.set_posterior_sample()` method of ImpactModel."""
     X, y = synthetic_data
 
@@ -75,8 +80,7 @@ def test_set_posterior_sample(synthetic_data: tuple[Array, Array], vi: SVI) -> N
 
     # Check that prediction works after setting the posterior sample
     im.predict_on_batch(X)
-    with TemporaryDirectory() as temp_dir:
-        im.predict(X, batch_size=33, output_dir=temp_dir, progress=False)
+    im.predict(X, batch_size=33, output_dir=tmp_path, progress=False)
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)

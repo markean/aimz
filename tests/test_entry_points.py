@@ -88,6 +88,7 @@ def test_kernel_argument_binding(
         "predict_on_batch",
         "sample_prior_predictive",
         "sample_prior_predictive_on_batch",
+        "estimate_effect",
     ],
 )
 @pytest.mark.parametrize(
@@ -110,11 +111,15 @@ def test_intervention_on_non_sample_site(
 
     im = ImpactModel(kernel, rng_key=random.key(42), inference=_make_svi(kernel))
     # The prior methods stay unfitted, so their check must follow their own trace.
-    if method.startswith("predict"):
+    if not method.startswith("sample_prior"):
         im.fit_on_batch(X, y, num_steps=1, num_samples=10, progress=False)
     rng_key = im.rng_key
+    kwargs = {"X": X, "intervention": {site: 0.0}}
+    if method == "estimate_effect":
+        # Lazily generated scenarios are checked before either is sampled
+        kwargs = {"args_baseline": {"X": X}, "args_intervention": kwargs}
     with pytest.raises(ValueError, match="not among the kernel's sample sites"):
-        getattr(im, method)(X, intervention={site: 0.0})
+        getattr(im, method)(**kwargs)
     assert jnp.allclose(im.rng_key, rng_key)
 
 

@@ -61,7 +61,6 @@ def _make_im(model: Callable) -> ImpactModel:
     )
 
 
-@pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
 class TestModelKernel:
     """Test class for kernel validation."""
 

@@ -44,8 +44,8 @@ from aimz.utils._output import (
 def fake_psutil(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     """Install a fake `psutil` with a controllable `virtual_memory().available`.
 
-    Decouples the tests from whether the real `psutil` is installed, so the memory-aware
-    branch runs deterministically in any environment.
+    Decouples the tests from the host's available memory, so the memory-aware branch
+    runs deterministically in any environment.
     """
     fake = MagicMock()
     fake.virtual_memory.return_value.available = 10**12  # 1 TiB default

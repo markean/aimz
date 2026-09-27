@@ -16,13 +16,15 @@
 
 import jax.numpy as jnp
 import numpy as np
+import numpyro.distributions as dist
 import pytest
-from jax import Array
+from jax import Array, random
+from numpyro import sample
+from numpyro.infer import MCMC, NUTS
 
 from aimz import ImpactModel
 
 
-@pytest.mark.filterwarnings("ignore::UserWarning")
 def test_empty_posterior(
     synthetic_data: tuple[Array, Array],
     im_lm_svi_fitted: ImpactModel,
@@ -122,3 +124,29 @@ def test_explicit_batch_size_not_divisible_by_devices(
     )
     with pytest.warns(UserWarning, match=msg):
         im_lm_svi_fitted.log_likelihood(X=X, y=y, batch_size=2, progress=False)
+
+
+def test_log_likelihood_mcmc_keeps_chains(synthetic_data: tuple[Array, Array]) -> None:
+    """The log-likelihood keeps the sampler's chains under both sharding paths."""
+    X, y = synthetic_data
+
+    def kernel(X: Array, y: Array | None = None) -> None:
+        b = sample("b", dist.Normal(0.0, 1.0))
+        sample("y", dist.Normal(X.sum(axis=-1) + b, 1.0), obs=y)
+
+    im = ImpactModel(
+        kernel,
+        rng_key=random.key(42),
+        inference=MCMC(NUTS(kernel), num_warmup=10, num_samples=5, num_chains=2),
+    )
+    im.fit_on_batch(X, y)
+    b = im.inference.get_samples(group_by_chain=True)["b"]
+    try:
+        for shard_axis in ("obs", "draw"):
+            out = im.log_likelihood(X, y, shard_axis=shard_axis, progress=False)
+            np.testing.assert_allclose(
+                out.log_likelihood["y"].transpose("chain", "draw", ...).values,
+                dist.Normal(X.sum(axis=-1) + b[..., None], 1.0).log_prob(y),
+            )
+    finally:
+        im.cleanup()
