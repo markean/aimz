@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - {class}`~aimz.utils.data.ArrayLoader` now yields plain batch mappings (array name to array) instead of `(batch, n_pad)` tuples, and no longer pads or moves batches itself: padding for sharding and device placement are handled by the model methods, so iterating a loader directly yields exactly the dataset's rows ([#312](https://github.com/markean/aimz/issues/312)).
 - Non-array keyword arguments of the streaming methods and {meth}`~aimz.ImpactModel.fit`, such as integers, booleans, strings, Python floats, and dictionaries of them, are now passed to the kernel as static Python values, so they can set shapes or drive control flow. Each new value compiles the kernel again, so pass a value that changes between calls as a JAX or NumPy array to keep it traced ([#353](https://github.com/markean/aimz/issues/353)).
 - `rng_key` is now keyword-only in {meth}`~aimz.ImpactModel.train_on_batch` ([#355](https://github.com/markean/aimz/issues/355)).
+- {meth}`~aimz.ImpactModel.fit` with `progress=False` no longer prints the average loss of each epoch, matching the other methods; the per-step losses remain available in {attr}`~aimz.ImpactModel.vi_result` ([#365](https://github.com/markean/aimz/issues/365)).
 
 ### Removed
 

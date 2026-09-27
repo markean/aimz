@@ -1297,7 +1297,8 @@ class ImpactModel(BaseModel):
             num_samples: The number of posterior samples to draw.
             rng_key: A pseudo-random number generator key. By default, an internal key
                 is used and split as needed.
-            progress: Whether to display a progress bar.
+            progress: Whether to display a progress bar and the average loss of each
+                epoch.
             batch_size: The number of data points processed at each step of variational
                 inference. If ``None``, the entire dataset is used as a single batch in
                 each epoch. Ignored if ``X`` is a data loader, in which case the data
@@ -1366,10 +1367,10 @@ class ImpactModel(BaseModel):
         # Validate the provided parameters against the kernel's signature; the fields
         # of a data loader may supply the remaining ones
         if isinstance(X, ArrayLoader):
-            for name in (self.param_input, self.param_output):
-                if name not in X.dataset.arrays:
-                    msg = f"The data loader has no field named {name!r}."
-                    raise ValueError(msg)
+            missing = {self.param_input, self.param_output} - X.dataset.arrays.keys()
+            if missing:
+                msg = f"The data loader has no field named {min(missing)!r}."
+                raise ValueError(msg)
             signature(self.kernel).bind_partial(**kwargs)
         else:
             signature(self.kernel).bind(
@@ -1406,10 +1407,11 @@ class ImpactModel(BaseModel):
             # stacking or accumulating them as device arrays would only add
             # host-to-device round trips and retain one device scalar per step.
             losses.extend(losses_epoch)
-            tqdm.write(
-                f"Epoch {epoch + 1}/{epochs} - "
-                f"Average loss: {float(np.mean(losses_epoch)):.4f}",
-            )
+            if progress:
+                tqdm.write(
+                    f"Epoch {epoch + 1}/{epochs} - "
+                    f"Average loss: {float(np.mean(losses_epoch)):.4f}",
+                )
         self.vi_result = SVIRunResult(
             params=self.inference.get_params(self._vi_state),
             state=self._vi_state,
