@@ -134,6 +134,11 @@ class ImpactModel(BaseModel):
                 data.
             param_output: Name of the parameter in the ``kernel`` for the output data.
 
+        Raises:
+            KernelValidationError: If the kernel signature does not meet the required
+                constraints.
+            TypeError: If ``inference`` is neither SVI nor MCMC.
+
         Warning:
             The ``rng_key`` parameter should be provided as a **typed key array**
             created with :external:func:`jax.random.key`, rather than a legacy
@@ -667,8 +672,8 @@ class ImpactModel(BaseModel):
             Prior predictive samples. Posterior samples are included if available.
 
         Raises:
-            TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
-                argument.
+            TypeError: If :attr:`~aimz.ImpactModel.param_input` or
+                :attr:`~aimz.ImpactModel.param_output` is passed as an argument.
             ValueError: If ``intervention`` names a site that is not a sample site of
                 the kernel.
 
@@ -738,7 +743,8 @@ class ImpactModel(BaseModel):
                 :attr:`~aimz.ImpactModel.param_output` and deterministic sites.
             shard_axis: Multi-device sharding strategy. ``"obs"`` (default) shards the
                 input across devices and replicates the drawn samples. ``"draw"`` shards
-                the drawn samples across devices and replicates the input.
+                the drawn samples across devices and replicates the input, which must be
+                an array, not a data loader.
             batch_size: Size of each batch, taken from the input under
                 ``shard_axis="obs"`` and from the draws under ``shard_axis="draw"``.
                 Also used as the chunk size when storing results. If ``None``, it is
@@ -767,12 +773,13 @@ class ImpactModel(BaseModel):
             Prior predictive samples. Posterior samples are included if available.
 
         Raises:
-            TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
-                argument.
+            TypeError: If :attr:`~aimz.ImpactModel.param_input` or
+                :attr:`~aimz.ImpactModel.param_output` is passed as an argument, or
+                ``shard_axis="draw"`` is used with a data loader ``X``.
             ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``, ``store`` is
                 not ``"persistent"`` or ``"memory"``, ``output_dir`` is passed with
-                ``store="memory"``, or ``intervention`` names a site that is not a
-                sample site of the kernel.
+                ``store="memory"``, ``X`` is 0-D or empty, or ``intervention`` names
+                a site that is not a sample site of the kernel.
             NotImplementedError: If a return site's axis-1 size does not match the
                 input batch size (``shard_axis="obs"`` only).
 
@@ -994,8 +1001,9 @@ class ImpactModel(BaseModel):
             when a :external:class:`~xarray.DataTree` is returned.
 
         Raises:
-            TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
-                argument.
+            NotFittedError: If the model is not fitted.
+            TypeError: If :attr:`~aimz.ImpactModel.param_input` or
+                :attr:`~aimz.ImpactModel.param_output` is passed as an argument.
             ValueError: If ``intervention`` names a site that is not a sample site of
                 the kernel.
 
@@ -1076,12 +1084,16 @@ class ImpactModel(BaseModel):
             Posterior predictive samples. Posterior samples are included if available.
 
         Raises:
-            TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
-                argument, or ``shard_axis="draw"`` is used with a data loader ``X``.
+            NotFittedError: If the model is not fitted.
+            TypeError: If :attr:`~aimz.ImpactModel.param_input` or
+                :attr:`~aimz.ImpactModel.param_output` is passed as an argument, or
+                ``shard_axis="draw"`` is used with a data loader ``X``.
             ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``, ``store`` is
                 not ``"persistent"`` or ``"memory"``, ``output_dir`` is passed with
-                ``store="memory"``, or ``intervention`` names a site that is not a
-                sample site of the kernel.
+                ``store="memory"``, ``X`` is 0-D or empty, or ``intervention`` names
+                a site that is not a sample site of the kernel.
+            NotImplementedError: If a return site's axis-1 size does not match the
+                input batch size (``shard_axis="obs"`` only).
 
         See Also:
             :meth:`~aimz.ImpactModel.predict()`.
@@ -1122,6 +1134,10 @@ class ImpactModel(BaseModel):
             - Updated SVI state after the training step.
 
             - Loss value as a scalar array.
+
+        Raises:
+            TypeError: If :attr:`~aimz.ImpactModel.param_input` or
+                :attr:`~aimz.ImpactModel.param_output` is passed as an argument.
 
         Note:
             This method updates the internal SVI state on every call, so it is not
@@ -1199,6 +1215,11 @@ class ImpactModel(BaseModel):
 
         Returns:
             The fitted model instance, enabling method chaining.
+
+        Raises:
+            TypeError: If :attr:`~aimz.ImpactModel.param_input` or
+                :attr:`~aimz.ImpactModel.param_output` is passed as an argument.
+            ValueError: If ``y`` does not share ``X``'s leading-axis size.
 
         Note:
             This method continues training from the existing SVI state if available. To
@@ -1314,8 +1335,11 @@ class ImpactModel(BaseModel):
             The fitted model instance, enabling method chaining.
 
         Raises:
-            TypeError: If the inference method is MCMC or ``X`` is another data loader
-                rather than arrays or an :class:`~aimz.utils.data.ArrayLoader`.
+            TypeError: If :attr:`~aimz.ImpactModel.param_input` or
+                :attr:`~aimz.ImpactModel.param_output` is passed as an argument, the
+                inference method is MCMC, ``X`` is another data loader rather than
+                arrays or an :class:`~aimz.utils.data.ArrayLoader`, or ``y`` is passed
+                with a data loader ``X``.
             ValueError: If ``y`` is missing when ``X`` is array-like, or ``y`` does
                 not share ``X``'s leading-axis size.
 
@@ -1444,7 +1468,7 @@ class ImpactModel(BaseModel):
         """Check fitted status.
 
         Returns:
-            `True` if the model is fitted, `False` otherwise.
+            ``True`` if the model is fitted, ``False`` otherwise.
 
         """
         return self._is_fitted
@@ -1581,8 +1605,8 @@ class ImpactModel(BaseModel):
 
         Raises:
             NotFittedError: If the model is not fitted.
-            TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
-                argument.
+            TypeError: If :attr:`~aimz.ImpactModel.param_input` or
+                :attr:`~aimz.ImpactModel.param_output` is passed as an argument.
             ValueError: If ``intervention`` names a site that is not a sample site of
                 the kernel.
         """
@@ -1693,8 +1717,9 @@ class ImpactModel(BaseModel):
 
         Raises:
             NotFittedError: If the model is not fitted.
-            TypeError: If :attr:`~aimz.ImpactModel.param_output` is passed as an
-                argument, or ``shard_axis="draw"`` is used with a data loader ``X``.
+            TypeError: If :attr:`~aimz.ImpactModel.param_input` or
+                :attr:`~aimz.ImpactModel.param_output` is passed as an argument, or
+                ``shard_axis="draw"`` is used with a data loader ``X``.
             ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``, ``store`` is
                 not ``"persistent"`` or ``"memory"``, ``output_dir`` is passed with
                 ``store="memory"``, ``X`` is 0-D or empty, or ``intervention`` names
@@ -1820,9 +1845,10 @@ class ImpactModel(BaseModel):
             NotFittedError: If the model is not fitted.
             ValueError: If neither ``output_baseline`` nor ``args_baseline`` is
                 provided, if neither ``output_intervention`` nor
-                ``args_intervention`` is provided, or if an ``intervention`` passed
+                ``args_intervention`` is provided, if an ``intervention`` passed
                 through ``args_baseline`` or ``args_intervention`` names a site that
-                is not a sample site of the kernel.
+                is not a sample site of the kernel, or if the scenarios do not share a
+                predictive group.
 
         See Also:
             :meth:`~aimz.ImpactModel.cleanup` to remove the temporary directory if
@@ -1982,7 +2008,10 @@ class ImpactModel(BaseModel):
 
         Raises:
             NotFittedError: If the model is not fitted.
-            TypeError: If ``shard_axis="draw"`` is used with a data loader ``X``.
+            TypeError: If :attr:`~aimz.ImpactModel.param_input` or
+                :attr:`~aimz.ImpactModel.param_output` is passed as an argument,
+                ``shard_axis="draw"`` is used with a data loader ``X``, or ``y`` is
+                passed with a data loader ``X``.
             ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``, ``store`` is
                 not ``"persistent"`` or ``"memory"``, ``output_dir`` is passed with
                 ``store="memory"``, ``y`` is missing when ``X`` is array-like, or

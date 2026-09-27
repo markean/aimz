@@ -80,7 +80,7 @@ def _iter_pipelined(
     order.
 
     Args:
-        items: Items to iterate (batches paired with keys, or draw-chunk starts).
+        items: Items to iterate (batch mappings, or draw-chunk starts).
         dispatch: Launches one item's computation and returns its in-flight handle.
         finalize: Blocks on an in-flight handle and returns its mapping of site name
             to array.
@@ -438,11 +438,10 @@ class _SliceWriteStrategy(_WriteStrategy):
     """Write each batch into a fixed slice of a preallocated Zarr array along an axis.
 
     Requires the streamed-axis size up front. Every batch must emit a streamed-axis
-    size equal to the batch size, so contiguous slices tile the full axis; a site that
-    does not (e.g. a global site with no observation axis under ``axis=1``) raises
-    :exc:`NotImplementedError` on the first batch. With ``axis=0`` it streams the draw
-    axis (draw-parallel), where every site matches by construction; with ``axis=1`` the
-    observation axis (data-parallel).
+    size equal to the batch size, so contiguous slices tile the full axis; any other
+    size raises :exc:`NotImplementedError` on the first batch. With ``axis=0`` it
+    streams the draw axis (draw-parallel), where every site matches by construction;
+    with ``axis=1`` the observation axis (data-parallel).
     """
 
     def __init__(
@@ -713,9 +712,8 @@ def _writer(
 
     If opening the group or a write fails, the error is logged, its details are put into
     ``error_queue``, and the shared ``stop`` event is set so every worker switches to
-    drain mode: subsequent items are discarded (still marked done, so the bounded
-    producer cannot block and ``queue.join()`` can finish) rather than written into a
-    store that is being torn down.
+    drain mode: subsequent items are discarded (still consumed, so the bounded producer
+    cannot block) rather than written into a store that is being torn down.
 
     Args:
         queue: The shared queue of ``(site, payload)`` items (and ``None`` sentinels).
@@ -888,7 +886,7 @@ def _write_loop(
     overrides the automatic count.
 
     Args:
-        items: Items to iterate (batches paired with keys, or draw-chunk starts).
+        items: Items to iterate (batch mappings, or draw-chunk starts).
         n_items: Number of items, or ``None`` (used to size the queue and pool).
         strategy: Write strategy that creates and enqueues each item's site arrays
             and owns the destination (:attr:`~_WriteStrategy.sink`).
@@ -901,9 +899,10 @@ def _write_loop(
             item count; overriding is intended for tests.
 
     Raises:
-        Exception: Any exception raised during production or writing is logged, the
-            partial output at the strategy's sink is discarded (on-disk artifacts
-            removed, in-memory batches released), and the exception is re-raised.
+        Exception: Any exception raised during production or writing is re-raised
+            after the queued items and the partial output at the strategy's sink are
+            discarded (on-disk artifacts removed, in-memory batches released). Writer
+            errors are also logged.
     """
     threads: list[Thread] = []
     queue: Queue | None = None

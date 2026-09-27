@@ -49,12 +49,11 @@ def test_predict_rejects_unsupported_size(
 ) -> None:
     """`.predict()` rejects return sites whose axis-1 size doesn't match the batch.
 
-    The slice write strategy requires every return site to emit an axis-1 size equal to
-    the input batch size; ``sigma`` in ``lm`` does not satisfy this.
+    Streaming requires every return site to emit an axis-1 size equal to the input
+    batch size; ``sigma`` in ``lm`` does not satisfy this.
     """
     X, _ = synthetic_data
-    # Force the single-device (unsharded) path so the slice write strategy's axis-1
-    # check fires for `sigma`, by swapping in a mesh-less streamer.
+    # Force the single-device (unsharded) path by swapping in a mesh-less streamer.
     monkeypatch.setattr(
         im_lm_svi_fitted,
         "_streamer",

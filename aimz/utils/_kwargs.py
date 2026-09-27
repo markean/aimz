@@ -42,7 +42,8 @@ def _is_per_observation(value: object, n_obs: int | None) -> bool:
     Args:
         value: The value to check.
         n_obs: The number of observations in an array input, or ``None`` when the input
-            is a data loader, whose batches carry the per-observation arrays.
+            is a data loader, whose batches carry the per-observation arrays, or under
+            ``shard_axis="draw"``.
 
     Returns:
         ``True`` if the value is an at least 1-D array-like with ``n_obs`` entries on
@@ -165,7 +166,7 @@ def _split_intervention(
         intervention: A dictionary mapping sample site names to replacement values, or
             ``None``.
         n_obs: The number of observations in an array input, or ``None`` when the input
-            is a data loader.
+            is a data loader or under ``shard_axis="draw"``.
 
     Returns:
         A tuple containing two dictionaries:
