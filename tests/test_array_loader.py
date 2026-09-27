@@ -187,64 +187,69 @@ class TestArrayLoader:
         rng_key, rng_subkey = random.split(rng_key)
         rng_key, _ = random.split(rng_subkey)
         im_without_dataloader = ImpactModel(lm, rng_key=random.key(0), inference=vi)
-        im_without_dataloader.fit(
-            X=X,
-            y=y,
-            rng_key=rng_subkey,
-            batch_size=3,
-            progress=False,
-            shuffle=True,
-        )
-        rng_key, rng_subkey = random.split(rng_key)
-        losses_without_dataloader = im_without_dataloader.vi_result.losses
-        mean_pred_without_dataloader = (
-            im_without_dataloader.predict(X=X, rng_key=rng_subkey, batch_size=3)
-            .posterior_predictive["y"]
-            .mean(["chain", "draw"])
-            .values
-        )
-
-        # Prepare loader and new ImpactModel
-        rng_key = random.key(42)
-        rng_key, rng_subkey = random.split(rng_key)
-        rng_key, rng_loader_key = random.split(rng_subkey)
-        im_with_dataloader = ImpactModel(lm, rng_key=random.key(0), inference=vi)
-        im_with_dataloader.fit(
-            X=ArrayLoader(
-                ArrayDataset(X=X, y=y),
-                rng_key=rng_loader_key,
+        try:
+            im_without_dataloader.fit(
+                X=X,
+                y=y,
+                rng_key=rng_subkey,
                 batch_size=3,
+                progress=False,
                 shuffle=True,
-            ),
-            rng_key=rng_subkey,
-            progress=False,
-        )
-        rng_key, rng_subkey = random.split(rng_key)
+            )
+            rng_key, rng_subkey = random.split(rng_key)
+            losses_without_dataloader = im_without_dataloader.vi_result.losses
+            mean_pred_without_dataloader = (
+                im_without_dataloader.predict(X=X, rng_key=rng_subkey, batch_size=3)
+                .posterior_predictive["y"]
+                .mean(["chain", "draw"])
+                .values
+            )
 
-        losses_with_dataloader = im_with_dataloader.vi_result.losses
-        mean_pred_with_dataloader = (
-            im_with_dataloader.predict(
+            # Prepare loader and new ImpactModel
+            rng_key = random.key(42)
+            rng_key, rng_subkey = random.split(rng_key)
+            rng_key, rng_loader_key = random.split(rng_subkey)
+            im_with_dataloader = ImpactModel(lm, rng_key=random.key(0), inference=vi)
+            im_with_dataloader.fit(
                 X=ArrayLoader(
-                    ArrayDataset(X=X),
+                    ArrayDataset(X=X, y=y),
                     rng_key=rng_loader_key,
                     batch_size=3,
+                    shuffle=True,
                 ),
                 rng_key=rng_subkey,
+                progress=False,
             )
-            .posterior_predictive["y"]
-            .mean(["chain", "draw"])
-            .values
-        )
+            rng_key, rng_subkey = random.split(rng_key)
 
-        assert np.allclose(losses_without_dataloader, losses_with_dataloader), (
-            "Losses from fitting with raw arrays vs. fitting with a data loader "
-            "can match, if the rng_key is properly set."
-        )
-        assert np.allclose(mean_pred_without_dataloader, mean_pred_with_dataloader), (
-            "Posterior predictive samples from fitting with raw arrays vs. "
-            "fitting with a data loader can match, if the rng_key is properly set."
-        )
-        ImpactModel.cleanup_models()
+            losses_with_dataloader = im_with_dataloader.vi_result.losses
+            mean_pred_with_dataloader = (
+                im_with_dataloader.predict(
+                    X=ArrayLoader(
+                        ArrayDataset(X=X),
+                        rng_key=rng_loader_key,
+                        batch_size=3,
+                    ),
+                    rng_key=rng_subkey,
+                )
+                .posterior_predictive["y"]
+                .mean(["chain", "draw"])
+                .values
+            )
+
+            assert np.allclose(losses_without_dataloader, losses_with_dataloader), (
+                "Losses from fitting with raw arrays vs. fitting with a data loader "
+                "can match, if the rng_key is properly set."
+            )
+            assert np.allclose(
+                mean_pred_without_dataloader,
+                mean_pred_with_dataloader,
+            ), (
+                "Posterior predictive samples from fitting with raw arrays vs. "
+                "fitting with a data loader can match, if the rng_key is properly set."
+            )
+        finally:
+            ImpactModel.cleanup_models()
 
     def test_predict_with_loader_extra_array_binds_by_name(
         self,

@@ -22,7 +22,6 @@ from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import pytest
-import yaml
 from jax import Array, random
 from numpyro.infer import MCMC, NUTS, SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
@@ -39,6 +38,7 @@ pytest.importorskip("mlflow")
 
 import mlflow.models
 import mlflow.pyfunc
+import yaml
 from mlflow.entities import LoggedModelStatus
 from mlflow.exceptions import MlflowException
 
@@ -63,12 +63,9 @@ def _isolate_mlflow_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     """
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("MLFLOW_AUTOLOGGING_TESTING", "true")
-    mlflow.set_tracking_uri(f"sqlite:///{tmp_path}/mlflow.db")
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path}/mlflow.db")
 
 
-# A served model auto-batches (no fixed batch size in its signature), emitting a
-# device-divisibility performance hint irrelevant to this round-trip.
-@pytest.mark.filterwarnings("ignore::UserWarning")
 def test_pyfunc_round_trip_predicts(
     im_lm_svi_fitted: ImpactModel,
     synthetic_data: tuple[Array, Array],
@@ -152,14 +149,15 @@ def test_save_model_with_extra_files(
     im_lm_svi_fitted: ImpactModel,
     tmp_path: Path,
 ) -> None:
-    """``extra_files`` are forwarded and recorded in the flavor configuration."""
+    """``extra_files`` are copied into the model and recorded in the flavor config."""
     extra = tmp_path / "notes.txt"
     extra.write_text("hello")
 
     save_model(im_lm_svi_fitted, tmp_path / "model", extra_files=[str(extra)])
 
     model = mlflow.models.Model.load(str(tmp_path / "model"))
-    assert "extra_files" in model.flavors["aimz"]
+    (entry,) = model.flavors["aimz"]["extra_files"]
+    assert (tmp_path / "model" / entry["path"]).read_text() == "hello"
 
 
 def test_save_model_with_pip_requirements_and_constraints(
@@ -521,3 +519,26 @@ def test_autolog_reports_unreadable_kernel_source(
     )
     assert len(logged) == 1
     assert logged[0].status == LoggedModelStatus.READY
+
+
+@pytest.mark.parametrize("silent", [False, True])
+def test_autolog_silent_mutes_own_messages(
+    synthetic_data: tuple[Array, Array],
+    capsys: pytest.CaptureFixture[str],
+    *,
+    silent: bool,
+) -> None:
+    """Autologging's own messages are shown by default and muted by ``silent=True``."""
+    X, y = synthetic_data
+    # The source of a partial cannot be retrieved
+    kernel = partial(lm)
+    autolog(log_models=False, silent=silent)
+    try:
+        im = ImpactModel(kernel, rng_key=random.key(0), inference=_make_svi(kernel))
+        with mlflow.start_run():
+            im.fit_on_batch(X=X, y=y, num_steps=10)
+    finally:
+        autolog(disable=True)
+
+    shown = "Failed to log the kernel source code" in capsys.readouterr().err
+    assert shown is not silent

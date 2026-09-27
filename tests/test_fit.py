@@ -25,6 +25,7 @@ from numpyro.optim import Adam
 
 from aimz import ImpactModel
 from aimz._exceptions import KernelValidationError
+from aimz.utils.data import ArrayDataset, ArrayLoader
 from tests.conftest import lm
 
 
@@ -208,3 +209,38 @@ def test_fit_nan_warning(synthetic_data: tuple[Array, Array]) -> None:
         pytest.raises(ValueError, match="invalid loc parameter"),
     ):
         im.fit_on_batch(X, y)
+
+
+def test_fit_loader_with_custom_param_names(
+    synthetic_data: tuple[Array, Array],
+) -> None:
+    """Fit, predict, and log-likelihood accept a loader keyed by custom names."""
+    X, y = synthetic_data
+
+    def kernel(x: Array, obs: Array | None = None) -> None:
+        b = sample("b", dist.Normal(0.0, 1.0))
+        sample("obs", dist.Normal(b + x.sum(axis=-1), 1.0), obs=obs)
+
+    im = ImpactModel(
+        kernel,
+        rng_key=random.key(42),
+        inference=SVI(
+            kernel,
+            guide=AutoNormal(kernel),
+            optim=Adam(step_size=1e-3),
+            loss=Trace_ELBO(),
+        ),
+        param_input="x",
+        param_output="obs",
+    )
+    loader = ArrayLoader(
+        ArrayDataset(x=X, obs=y), rng_key=random.key(0), batch_size=len(X)
+    )
+    im.fit(loader, num_samples=10, progress=False)
+    dt_pred = im.predict(loader, store="memory", progress=False)
+    dt_ll = im.log_likelihood(loader, store="memory", progress=False)
+
+    assert dt_pred.posterior_predictive["obs"].shape == (1, 10, len(X))
+    assert dt_ll.log_likelihood["obs"].shape == (1, 10, len(X))
+    with pytest.raises(ValueError, match="no field named 'obs'"):
+        im.fit(ArrayLoader(ArrayDataset(x=X), rng_key=random.key(0)), progress=False)

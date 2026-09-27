@@ -120,6 +120,35 @@ def test_estimate_effect_on_batch_dict(
     assert expected_group in effect.children
 
 
+def test_estimate_effect_lazy_args_share_rng_key(
+    synthetic_data: tuple[Array, Array],
+    im_lm_svi_fitted: ImpactModel,
+) -> None:
+    """Lazily generated scenarios share one sampling key unless keys are given."""
+    X, _ = synthetic_data
+    im = im_lm_svi_fitted
+
+    # Identical scenarios drawn with the shared key cancel draw by draw.
+    effect = im.estimate_effect(
+        args_baseline={"X": X},
+        args_intervention={"X": X},
+        on_batch=True,
+    )
+    assert (effect.posterior_predictive["y"] == 0).all()
+
+    # Explicit keys are used as given.
+    effect = im.estimate_effect(
+        args_baseline={"X": X, "rng_key": random.key(0)},
+        args_intervention={"X": X, "rng_key": random.key(1)},
+        on_batch=True,
+    )
+    expected = (
+        im.predict_on_batch(X, rng_key=random.key(1)).posterior_predictive["y"]
+        - im.predict_on_batch(X, rng_key=random.key(0)).posterior_predictive["y"]
+    )
+    assert effect.posterior_predictive["y"].equals(expected)
+
+
 def test_estimate_effect_group_mismatch_raises(
     synthetic_data: tuple[Array, Array],
     im_lm_svi_fitted: ImpactModel,

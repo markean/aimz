@@ -29,7 +29,7 @@ from tests.conftest import lm
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
 def test_fit_svi(synthetic_data: tuple[Array, Array], vi: SVI) -> None:
-    """Test the `.fit()` method of ImpactModel using SVI."""
+    """Test the `.fit_on_batch()` method of ImpactModel using SVI."""
     X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
     im.fit_on_batch(X=X, y=y)

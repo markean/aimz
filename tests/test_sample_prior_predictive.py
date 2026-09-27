@@ -14,7 +14,6 @@
 
 """Tests for the `.sample_prior_predictive()` method."""
 
-from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -25,6 +24,8 @@ from aimz import ImpactModel
 from tests.conftest import _make_svi, latent_intervention_model, lm
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from numpyro.infer import SVI
 
 
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
 def test_sample_prior_predictive_lm(
     synthetic_data: tuple[Array, Array],
     vi: "SVI",
+    tmp_path: "Path",
 ) -> None:
     """Test the `.sample_prior_predictive()` method of ImpactModel."""
     X, y = synthetic_data
@@ -50,13 +52,13 @@ def test_sample_prior_predictive_lm(
     assert samples.prior_predictive["y"].values.shape == (1, 99, len(X))
 
     # Test with `return_sites`
-    with pytest.warns(UserWarning, match=msg), TemporaryDirectory() as tmp_dir:
+    with pytest.warns(UserWarning, match=msg):
         assert im.sample_prior_predictive(
             X=X,
             num_samples=99,
             batch_size=len(X) // 2,
             return_sites="y",
-            output_dir=tmp_dir,
+            output_dir=tmp_path,
         ).prior_predictive["y"].values.shape == (1, 99, len(X))
 
     im.cleanup()

@@ -14,6 +14,7 @@
 
 """Tests for the `.predict_on_batch()` method."""
 
+import numpy as np
 import pytest
 from jax import Array, random
 from numpyro.infer import SVI, Trace_ELBO
@@ -30,15 +31,25 @@ def test_predict_on_batch_lm_with_kwargs_array(
 ) -> None:
     """Test the `.predict_on_batch()` method of ImpactModel."""
     X, y = synthetic_data
-    im_lm_with_kwargs_svi_fitted.predict_on_batch(X=X, c=y, return_sites="y")
-
-    # `.sample_posterior_predictive_on_batch()` is an alias for `.predict_on_batch()`.
-    im_lm_with_kwargs_svi_fitted.sample_posterior_predictive_on_batch(
+    rng_key = random.key(0)
+    dt = im_lm_with_kwargs_svi_fitted.predict_on_batch(
         X=X,
         c=y,
+        rng_key=rng_key,
+        return_sites="y",
+    )
+    assert set(dt.posterior_predictive.data_vars) == {"y"}
+    assert dt.posterior_predictive["y"].sizes["y_dim_0"] == X.shape[0]
+
+    # `.sample_posterior_predictive_on_batch()` is an alias for `.predict_on_batch()`.
+    samples = im_lm_with_kwargs_svi_fitted.sample_posterior_predictive_on_batch(
+        X=X,
+        c=y,
+        rng_key=rng_key,
         return_sites=["y"],
         return_datatree=False,
     )
+    np.testing.assert_array_equal(samples["y"], dt.posterior_predictive["y"][0])
 
 
 def test_predict_on_batch_x_zero_dim_raises(

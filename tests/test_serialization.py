@@ -24,7 +24,9 @@ import jax.numpy as jnp
 import numpy as np
 import numpyro
 import numpyro.distributions as dist
+import pytest
 from jax import Array, random
+from numpyro.infer import MCMC, NUTS
 
 from aimz import ImpactModel
 from tests.conftest import _make_svi
@@ -111,3 +113,18 @@ def test_load_poisson_new_process(
         actual,
         np.asarray(expected["posterior_predictive"]["y"]),
     )
+
+
+def test_load_parallel_chains_on_fewer_devices(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Parallel chains loaded on fewer devices than chains fall back to sequential."""
+    mcmc = MCMC(NUTS(poisson), num_warmup=10, num_samples=10, num_chains=2)
+    im = ImpactModel(poisson, rng_key=random.key(42), inference=mcmc)
+    data = cloudpickle.dumps(im)
+    monkeypatch.setattr("aimz.model.impact_model.local_device_count", lambda: 1)
+    with pytest.warns(
+        UserWarning,
+        match=r"not enough devices to run parallel chains: expected 2 but got 1\.",
+    ):
+        im = cloudpickle.loads(data)
+
+    assert im.inference.chain_method == "sequential"
