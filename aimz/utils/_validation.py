@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from inspect import Parameter, getfullargspec, signature
+from inspect import Parameter, signature
 from typing import TYPE_CHECKING
 from warnings import warn
 
@@ -283,16 +283,15 @@ def _validate_kernel_signature(
         KernelValidationError: If the kernel signature does not meet the required
             constraints.
     """
-    argspec = getfullargspec(kernel)
-    if argspec.varargs is not None or argspec.varkw is not None:
+    params = signature(kernel).parameters
+    if any(
+        p.kind in (Parameter.VAR_POSITIONAL, Parameter.VAR_KEYWORD)
+        for p in params.values()
+    ):
         msg = "Kernel must not accept variable arguments (*args or **kwargs)."
         raise KernelValidationError(msg)
 
-    param_main = [
-        arg
-        for arg in (param_input, param_output)
-        if arg not in (argspec.args + argspec.kwonlyargs)
-    ]
+    param_main = [arg for arg in (param_input, param_output) if arg not in params]
     if param_main:
         sub = ", ".join(map(repr, param_main))
         msg = (
@@ -301,12 +300,11 @@ def _validate_kernel_signature(
         )
         raise KernelValidationError(msg)
 
-    sig = signature(kernel)
-    if sig.parameters[param_input].default is not Parameter.empty:
+    if params[param_input].default is not Parameter.empty:
         sub = param_input
         msg = f"{sub!r} must not have a default value."
         raise KernelValidationError(msg)
-    if sig.parameters[param_output].default is not None:
+    if params[param_output].default is not None:
         sub = param_output
         msg = f"{sub!r} must have a default value of `None`."
         raise KernelValidationError(msg)
@@ -367,7 +365,7 @@ def _validate_kernel_body(
         raise KernelValidationError(msg)
 
     # Collect parameter names from the kernel signature, excluding the output parameter
-    params = getfullargspec(kernel).args + getfullargspec(kernel).kwonlyargs
+    params = list(signature(kernel).parameters)
     params.remove(param_output)
     # Check for name conflicts between parameter names and model site names
     conflicts = set(params) & set(model_trace.keys())

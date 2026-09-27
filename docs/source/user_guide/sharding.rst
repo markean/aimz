@@ -39,7 +39,7 @@ Choosing a Strategy
 ``shard_axis="obs"`` (the default) suits models with global latents and inputs that are large or supplied through a data loader.
 Prefer ``shard_axis="draw"`` when the model has local latents, when the kernel computes across observations (see :ref:`faq-cross-observation`), or when the input is small relative to the number of draws so replicating it on every device stays cheap.
 
-Choosing a ``batch_size`` that is a multiple of :external:func:`jax.local_device_count` keeps the shards even and avoids padding the final batch; the same applies to the batch sizes a data loader yields.
+Choosing a ``batch_size`` that is a multiple of :external:func:`jax.local_device_count` keeps the shards even, so only a shorter final batch needs padding; the same applies to the batch sizes a data loader yields.
 
 
 Automatic Rerun for Incompatible Posteriors
@@ -47,7 +47,7 @@ Automatic Rerun for Incompatible Posteriors
 
 When the posterior sample shape is observation-aligned (the hallmark of a **local latent variable**), it cannot be replicated under ``shard_axis="obs"``.
 Rather than failing, :meth:`~aimz.ImpactModel.predict` and :meth:`~aimz.ImpactModel.log_likelihood` detect this, emit a warning, and rerun under ``shard_axis="draw"``, keeping results streamed to disk and memory-bounded.
-Passing ``shard_axis="draw"`` explicitly avoids the discarded first attempt.
+Passing ``shard_axis="draw"`` explicitly skips the warning.
 See :ref:`faq-model-compatibility` for the model patterns that trigger a rerun and those that stay unsupported.
 The kernels below contrast a compatible model with one that triggers the rerun; a runnable version is in :doc:`streaming_and_on_batch`.
 

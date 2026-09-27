@@ -1857,8 +1857,8 @@ class ImpactModel(BaseModel):
             and output_intervention is None
             and args_baseline is not None
             and args_intervention is not None
-            and "rng_key" not in args_baseline
-            and "rng_key" not in args_intervention
+            and args_baseline.get("rng_key") is None
+            and args_intervention.get("rng_key") is None
         ):
             self._rng_key, rng_key = random.split(self._rng_key)
             args_baseline = {**args_baseline, "rng_key": rng_key}
