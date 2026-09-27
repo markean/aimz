@@ -51,7 +51,7 @@ class TestKernelSignatureValidation:
                     loss=Trace_ELBO(),
                 ),
             )
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="unexpected keyword argument 'extra'"):
             im.fit(X=jnp.ones((3, 1)), y=jnp.ones((3,)), batch_size=3, extra=True)
 
     def test_missing_parameters(self) -> None:
@@ -70,7 +70,7 @@ class TestKernelSignatureValidation:
                 loss=Trace_ELBO(),
             ),
         )
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match="missing a required argument: 'arg'"):
             im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)), batch_size=3)
 
 
@@ -180,7 +180,7 @@ class TestKernelBodyValidation:
 def test_fit_raises_for_mcmc_inference(mcmc: MCMC) -> None:
     """Calling `.fit()` with MCMC inference raises a TypeError."""
     im = ImpactModel(lm, rng_key=random.key(42), inference=mcmc)
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="not supported for MCMC"):
         im.fit(X=jnp.zeros((3, 2)), y=jnp.zeros((3, 1)), batch_size=3)
 
 
@@ -198,13 +198,13 @@ def test_fit_nan_warning(synthetic_data: tuple[Array, Array]) -> None:
         ),
     )
     with (
-        pytest.warns(RuntimeWarning),
+        pytest.warns(RuntimeWarning, match="Loss contains NaN or Inf"),
         pytest.raises(ValueError, match="invalid loc parameter"),
     ):
         im.fit(X, y, batch_size=len(X), epochs=3)
 
     with (
-        pytest.warns(RuntimeWarning),
+        pytest.warns(RuntimeWarning, match="Loss contains NaN or Inf"),
         pytest.raises(ValueError, match="invalid loc parameter"),
     ):
         im.fit_on_batch(X, y)

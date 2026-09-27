@@ -26,7 +26,7 @@ def test_missing_param_output(
 ) -> None:
     """Missing `param_output` argument raises TypeError."""
     X, _ = synthetic_data
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match="must be provided"):
         im_lm_mcmc_fitted.sample(rng_key=random.key(42), X=X)
 
 

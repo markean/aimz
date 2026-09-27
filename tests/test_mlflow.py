@@ -473,7 +473,7 @@ def test_autolog_logs_elbo_when_fit_raises(
         )
         # The diverged parameters are rejected by the posterior draw after optimization
         with (
-            pytest.warns(RuntimeWarning),
+            pytest.warns(RuntimeWarning, match="Loss contains NaN or Inf"),
             pytest.raises(ValueError, match="invalid loc parameter"),
             mlflow.start_run() as run,
         ):

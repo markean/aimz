@@ -105,6 +105,10 @@ class TestPlanWriters:
         assert plan.queue_size <= _QUEUE_SIZE_MAX
 
 
+class _FinalizeError(RuntimeError):
+    """Test error for a failure while collecting a result."""
+
+
 class TestWriteLoop:
     """Test class for the pipelined :func:`_write_loop`."""
 
@@ -120,9 +124,6 @@ class TestWriteLoop:
     ) -> None:
         """Drive `_write_loop` over draw-style items with recording fakes."""
 
-        class FinalizeError(RuntimeError):
-            """Test exception for a failure while collecting a result."""
-
         def dispatch(item: object) -> object:
             log.append(("dispatch", cast("int", item)))
             return item
@@ -130,7 +131,7 @@ class TestWriteLoop:
         def finalize(pending: object) -> dict[str, np.ndarray]:
             log.append(("finalize", cast("int", pending)))
             if pending == finalize_error_at:
-                raise FinalizeError
+                raise _FinalizeError
             return {
                 "y": np.full(
                     (self.CHUNK, self.N_COLS),
@@ -174,7 +175,7 @@ class TestWriteLoop:
         """An error while collecting a result propagates and removes the output."""
         artifact_path = tmp_path / "out"
 
-        with pytest.raises(RuntimeError):
+        with pytest.raises(_FinalizeError):
             self._run(artifact_path, log=[], finalize_error_at=1)
 
         assert not artifact_path.exists()
