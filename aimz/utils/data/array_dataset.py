@@ -40,7 +40,7 @@ class ArrayDataset:
         self,
         *,
         to_jax: bool = False,
-        **arrays: Array | npt.NDArray | None,
+        **arrays: npt.ArrayLike | None,
     ) -> None:
         """Initialize an ArrayDataset instance.
 
@@ -55,23 +55,21 @@ class ArrayDataset:
             ValueError: If no non-``None`` arrays are provided or if the arrays do not
                 have the same length.
         """
-        arrays = {
+        self.arrays = {
             k: v if isinstance(v, (Array, np.ndarray)) else np.asarray(v)
             for k, v in arrays.items()
             if v is not None
         }
-        if not arrays:
+        if not self.arrays:
             msg = "At least one array must be provided."
             raise ValueError(msg)
-        lengths = {len(cast("Sized", arr)) for arr in arrays.values()}
+        lengths = {len(cast("Sized", arr)) for arr in self.arrays.values()}
         if len(lengths) != 1:
             msg = "All arrays must have the same leading-axis size."
             raise ValueError(msg)
         (self.length,) = lengths
         if to_jax:
-            self.arrays = {k: jnp.asarray(v) for k, v in arrays.items()}
-        else:
-            self.arrays = arrays
+            self.arrays = {k: jnp.asarray(v) for k, v in self.arrays.items()}
 
     def __len__(self) -> int:
         """Get the number of samples in the dataset.
@@ -81,7 +79,7 @@ class ArrayDataset:
         """
         return self.length
 
-    def __getitem__(self, idx: int) -> dict[str, Array]:
+    def __getitem__(self, idx: int) -> dict[str, Array | npt.NDArray | np.generic]:
         """Retrieve the elements at the specified index.
 
         Args:
@@ -90,4 +88,4 @@ class ArrayDataset:
         Returns:
             A dictionary mapping array names to their elements at the specified index.
         """
-        return {k: v[idx] for k, v in self.arrays.items() if v is not None}
+        return {k: v[idx] for k, v in self.arrays.items()}

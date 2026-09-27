@@ -695,7 +695,7 @@ def _get_input_example(
         input_example = {
             k: np.array(v[:INPUT_EXAMPLE_SAMPLE_ROWS])
             for k, v in X.dataset.arrays.items()
-            if k not in ("y", model.param_output) and v is not None
+            if k not in ("y", model.param_output)
         }
         if len(input_example) == 1:
             return next(iter(input_example.values()))
@@ -814,7 +814,7 @@ def _log_aimz_dataset(
         features = {
             k: np.asarray(v)
             for k, v in X.dataset.arrays.items()
-            if k not in ("y", aimz_model.param_output) and v is not None
+            if k not in ("y", aimz_model.param_output)
         }
         if len(features) == 1:
             features = next(iter(features.values()))

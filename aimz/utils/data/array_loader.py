@@ -51,9 +51,18 @@ class ArrayLoader:
 
         Args:
             dataset: The dataset to load.
-            rng_key: A pseudo-random number generator key.
+            rng_key: A pseudo-random number generator key. Ignored if ``shuffle`` is
+                ``False``.
             batch_size: The number of samples per batch.
             shuffle: Whether to shuffle the dataset before batching.
+
+        Raises:
+            ValueError: If ``batch_size`` is not a positive integer.
+
+        Warning:
+            The ``rng_key`` parameter should be provided as a **typed key array**
+            created with :external:func:`jax.random.key`, rather than a legacy
+            ``uint32`` key created with :external:func:`jax.random.PRNGKey`.
         """
         self.dataset = dataset
         if (
@@ -86,11 +95,7 @@ class ArrayLoader:
         for start in range(0, len(self.dataset), self.batch_size):
             end = start + self.batch_size
             batch_idx = indices[start:end]
-            yield {
-                k: arr[batch_idx]
-                for k, arr in self.dataset.arrays.items()
-                if arr is not None
-            }
+            yield {k: arr[batch_idx] for k, arr in self.dataset.arrays.items()}
 
     def __len__(self) -> int:
         """Return the number of batches.

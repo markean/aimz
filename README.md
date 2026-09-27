@@ -76,10 +76,9 @@ im.fit(X, y, batch_size=32, epochs=10)
 # Generate posterior predictive samples
 dt = im.predict(X)
 
-# Estimate intervention effects
-dt_baseline = im.predict(X)
+# Estimate the effect of fixing the sample site "treatment" to 1.0
 dt_intervention = im.predict(X, intervention={"treatment": 1.0})
-effect = im.estimate_effect(dt_baseline, dt_intervention)
+effect = im.estimate_effect(dt, dt_intervention)
 ```
 
 ## Contributing

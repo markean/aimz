@@ -56,8 +56,8 @@ def _check_is_fitted(model: ImpactModel) -> None:
     """
     if not model.is_fitted():
         msg = (
-            f"This {type(model).__name__} instance is not fitted yet. Call "
-            "``.fit()`` with appropriate arguments before using the model."
+            f"This {type(model).__name__} instance is not fitted yet. Call `.fit()` "
+            "or `.fit_on_batch()` with appropriate arguments before using the model."
         )
         raise NotFittedError(msg)
 
@@ -394,6 +394,10 @@ def _validate_X_y_to_jax(
     Returns:
         Validated JAX arrays, returning ``X`` if only X is provided, or a tuple
         ``(X, y)`` otherwise.
+
+    Raises:
+        ValueError: If ``X`` or ``y`` is 0-D, or ``y`` does not share ``X``'s
+            leading-axis size.
     """
     device_x = X.device if isinstance(X, Array) and X.committed else None
     X = jnp.asarray(X, device=device_x)
