@@ -165,6 +165,9 @@ For fine-grained control (e.g., custom scheduling, gradient accumulation, or ear
 
         # (Optional) validation, logging, early stop checks
 
+:meth:`~aimz.ImpactModel.train_on_batch` takes the input and output as ``X`` and ``y``, so ``im.train_on_batch(**batch)`` works with the default parameter names.
+With custom :attr:`~aimz.ImpactModel.param_input` and :attr:`~aimz.ImpactModel.param_output`, pass those fields positionally, for example ``im.train_on_batch(batch.pop("x"), batch.pop("obs"), **batch)``.
+
 
 .. _external-loaders:
 
