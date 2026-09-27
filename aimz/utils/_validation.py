@@ -26,7 +26,7 @@ import numpy as np
 from jax import Array
 from jax.typing import ArrayLike
 
-from aimz._exceptions import KernelValidationError, NotFittedError
+from aimz._exceptions import _SKIP_FILE_PREFIXES, KernelValidationError, NotFittedError
 
 if TYPE_CHECKING:
     from collections import OrderedDict
@@ -108,7 +108,7 @@ def _validate_group(dt_baseline: xr.DataTree, dt_intervention: xr.DataTree) -> s
             f"{group!r}: {dict(dt_baseline[group].sizes)} vs "
             f"{dict(dt_intervention[group].sizes)}."
         )
-        warn(msg, category=UserWarning, stacklevel=3)
+        warn(msg, category=UserWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
     elif unmatched := [
         dim
         for dim, index in dt_baseline[group].indexes.items()
@@ -120,7 +120,7 @@ def _validate_group(dt_baseline: xr.DataTree, dt_intervention: xr.DataTree) -> s
             f"{', '.join(map(repr, unmatched))} in group {group!r}; the effect "
             "covers only the labels present in both."
         )
-        warn(msg, category=UserWarning, stacklevel=3)
+        warn(msg, category=UserWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
 
     return group
 

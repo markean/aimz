@@ -14,7 +14,13 @@
 
 """Custom warnings and errors."""
 
+from os import sep
+from pathlib import Path
+
 __all__ = ["KernelValidationError", "NotFittedError"]
+
+# Warnings skip the frames in this package to point at the caller's own line
+_SKIP_FILE_PREFIXES = (f"{Path(__file__).parent}{sep}",)
 
 
 class NotFittedError(ValueError, AttributeError):
