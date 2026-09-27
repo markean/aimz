@@ -1764,7 +1764,7 @@ class ImpactModel(BaseModel):
                     in_sample=in_sample,
                     return_sites=return_sites,
                     shard_axis="draw",
-                    batch_size=batch_size,
+                    batch_size=None,
                     store=store,
                     output_dir=output_dir,
                     progress=progress,
@@ -2056,7 +2056,7 @@ class ImpactModel(BaseModel):
             return self.log_likelihood(
                 X,
                 y,
-                batch_size=batch_size,
+                batch_size=None,
                 shard_axis="draw",
                 store=store,
                 output_dir=output_dir,

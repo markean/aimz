@@ -47,6 +47,7 @@ Automatic Rerun for Incompatible Posteriors
 
 When the posterior sample shape is observation-aligned (the hallmark of a **local latent variable**), it cannot be replicated under ``shard_axis="obs"``.
 Rather than failing, :meth:`~aimz.ImpactModel.predict` and :meth:`~aimz.ImpactModel.log_likelihood` detect this, emit a warning, and rerun under ``shard_axis="draw"``, keeping results streamed to disk and memory-bounded.
+The rerun chooses its own draw chunk size, since a ``batch_size`` given for ``shard_axis="obs"`` counts observations, not draws.
 Passing ``shard_axis="draw"`` explicitly skips the warning.
 See :ref:`faq-model-compatibility` for the model patterns that trigger a rerun and those that stay unsupported.
 The kernels below contrast a compatible model with one that triggers the rerun; a runnable version is in :doc:`streaming_and_on_batch`.
