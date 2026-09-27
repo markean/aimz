@@ -575,16 +575,17 @@ class _AimzModelWrapper:
         Returns:
             Model predictions.
         """
-        # Results default to the in-memory store
+        # Results default to the in-memory store, without progress bars
         kwargs: dict[str, Any]
         if isinstance(data, dict):
             kwargs = {
                 "store": "memory",
+                "progress": False,
                 **cast("dict[str, Any]", data),
                 **(params or {}),
             }
             return self.aimz_model.predict(**kwargs)
-        kwargs = {"store": "memory", **(params or {})}
+        kwargs = {"store": "memory", "progress": False, **(params or {})}
 
         return self.aimz_model.predict(cast("Any", data), **kwargs)
 
