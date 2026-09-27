@@ -13,3 +13,4 @@ API Reference
    api/array_dataset
    api/array_loader
    api/mlflow
+   api/exceptions

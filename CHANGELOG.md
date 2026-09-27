@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - {meth}`~aimz.ImpactModel.sample_prior_predictive` and {meth}`~aimz.ImpactModel.sample_prior_predictive_on_batch` now accept `intervention` mappings on sample sites during prior predictive sampling ([#317](https://github.com/markean/aimz/issues/317)).
 - The streaming methods accept any data loader as `X`: a finite iterable yielding batch mappings keyed by kernel parameter names with NumPy or JAX array values, such as a generator or a list of dictionaries, not only an {class}`~aimz.utils.data.ArrayLoader` ([#312](https://github.com/markean/aimz/issues/312)).
 - The streaming methods ({meth}`~aimz.ImpactModel.predict`, {meth}`~aimz.ImpactModel.sample_posterior_predictive`, {meth}`~aimz.ImpactModel.sample_prior_predictive`, and {meth}`~aimz.ImpactModel.log_likelihood`) and {meth}`~aimz.ImpactModel.fit` now accept array keyword arguments whose leading axis differs from `X`, such as a vector of prior scales, as well as 0-D arrays and arrays passed alongside a data loader: they are passed whole to every batch instead of raising a `ValueError`. A keyword argument that repeats a data loader field raises a `ValueError` ([#353](https://github.com/markean/aimz/issues/353)).
+- {class}`~aimz.NotFittedError` and {class}`~aimz.KernelValidationError` are now importable from `aimz` and documented in the API reference, instead of only from the private `aimz._exceptions` module ([#376](https://github.com/markean/aimz/issues/376)).
 
 ### Changed
 

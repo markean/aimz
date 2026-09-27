@@ -203,7 +203,7 @@ For training, iterate the loader yourself and call :meth:`~aimz.ImpactModel.trai
     for epoch in range(num_epochs):
         for X_batch, y_batch in loader:
             batch = {"X": jnp.asarray(X_batch), "y": jnp.asarray(y_batch)}
-            _, loss = im.train_on_batch(**batch)
+            state, loss = im.train_on_batch(**batch)
             losses.append(jax.device_get(loss))
 
 
@@ -218,11 +218,7 @@ After a manual training loop you can populate the model state so downstream call
     from numpyro.infer.svi import SVIRunResult
 
     # Store final VI parameters, the internal SVI state, and the collected loss trace
-    im.vi_result = SVIRunResult(
-        im.inference.get_params(im._vi_state),
-        im._vi_state,
-        losses,
-    )
+    im.vi_result = SVIRunResult(im.inference.get_params(state), state, losses)
 
     # Obtain posterior samples
     posterior_sample = im.sample(return_datatree=False)
