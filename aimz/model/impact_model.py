@@ -620,24 +620,22 @@ class ImpactModel(BaseModel):
         )
         try:
             result = write(artifact_path)
-        except BaseException:
-            if artifact_path is not None:
-                rmtree(artifact_path, ignore_errors=True)
-            raise
-        if artifact_path is None:
-            return _build_datatree(
-                cast("dict[str, DaskArray]", result),
+            dt = _build_datatree(
+                (
+                    artifact_path
+                    if artifact_path is not None
+                    else cast("dict[str, DaskArray]", result)
+                ),
                 group=group,
                 posterior=self.posterior,
                 num_chains=self._num_chains,
             )
+        except BaseException:
+            if artifact_path is not None:
+                rmtree(artifact_path, ignore_errors=True)
+            raise
 
-        return _build_datatree(
-            artifact_path,
-            group=group,
-            posterior=self.posterior,
-            num_chains=self._num_chains,
-        )
+        return dt
 
     def sample_prior_predictive_on_batch(
         self,

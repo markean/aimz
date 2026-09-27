@@ -46,6 +46,7 @@ if TYPE_CHECKING:
 
     import numpy as np
     from dask.array import Array as DaskArray
+    from jax import Array as JaxArray
     from tqdm.auto import tqdm
     from zarr import Array, Group
 
@@ -213,7 +214,7 @@ def _site_dtype(arr: np.ndarray) -> np.dtype | str:
 
 
 def _validate_streamed_axis_size(
-    arr: np.ndarray,
+    arr: np.ndarray | JaxArray,
     *,
     site: str,
     axis: int,
@@ -225,16 +226,16 @@ def _validate_streamed_axis_size(
     (e.g. a global site with no observation axis under ``axis=1``) cannot be streamed.
 
     Args:
-        arr: The site's first (post-slice) batch array.
+        arr: The site's batch array, possibly traced.
         site: The sample site name.
         axis: The streamed axis.
         chunk_size: Expected batch length along the streamed axis.
 
     Raises:
-        NotImplementedError: If the site's streamed-axis size does not match
-            ``chunk_size``.
+        NotImplementedError: If the site has no streamed axis, or its size does not
+            match ``chunk_size``.
     """
-    if arr.shape[axis] != chunk_size:
+    if arr.ndim <= axis or arr.shape[axis] != chunk_size:
         requirement = "the input batch size" if axis == 1 else "the draw chunk size"
         msg = (
             f"Streaming requires each site's axis-{axis} size to match "

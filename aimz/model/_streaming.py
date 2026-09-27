@@ -42,7 +42,6 @@ from aimz.utils._kwargs import (
 from aimz.utils._output import (
     _create_slice_strategy,
     _select_write_strategy,
-    _validate_streamed_axis_size,
     _write_loop,
 )
 from aimz.utils.data import ArrayLoader
@@ -614,7 +613,7 @@ class _OutputStreamer:
         n_batches = len(dataloader) if known_size else None
         pbar.reset(total=n_batches)
 
-        def dispatch(item: object) -> tuple[dict[str, Array], int, int]:
+        def dispatch(item: object) -> tuple[dict[str, Array], int]:
             nonlocal rng_key
             batch, n_valid = _prepare_batch(
                 item,
@@ -645,20 +644,13 @@ class _OutputStreamer:
             out = compute(step)
             tree.map(lambda arr: arr.copy_to_host_async(), out)
 
-            return out, n_valid, batch[self._ctx.param_input].shape[0]
+            return out, n_valid
 
         def finalize(pending: object) -> dict[str, np.ndarray]:
-            out, n_valid, n_padded = cast("tuple[dict[str, Array], int, int]", pending)
+            out, n_valid = cast("tuple[dict[str, Array], int]", pending)
             result = {}
             for site, value in device_get(out).items():
-                arr = value[:, None] if value.ndim == 1 else value
-                _validate_streamed_axis_size(
-                    arr,
-                    site=site,
-                    axis=1,
-                    chunk_size=n_padded,
-                )
-                result[site] = arr[:, :n_valid]
+                result[site] = value[:, :n_valid]
             return result
 
         strategy = _select_write_strategy(

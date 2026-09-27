@@ -26,6 +26,7 @@ from jax.sharding import PartitionSpec
 from aimz.sampling._forward import _sample_forward
 from aimz.utils._kwargs import _combine, _split_intervention_fields
 from aimz.utils._log_likelihood import _log_likelihood
+from aimz.utils._output import _validate_streamed_axis_size
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -114,7 +115,7 @@ def _create_sharded_sampler(
             },
         )
 
-        return _sample_forward(
+        out = _sample_forward(
             kernel,
             rng_keys=rng_keys,
             return_sites=return_sites,
@@ -122,6 +123,18 @@ def _create_sharded_sampler(
             intervention={**intervention, **fields},
             model_kwargs=model_kwargs,
         )
+        # Checked at trace time, so every device count raises the same error for a site
+        # without an observation axis.
+        if not draws:
+            for site, value in out.items():
+                _validate_streamed_axis_size(
+                    value,
+                    site=site,
+                    axis=1,
+                    chunk_size=X.shape[0],
+                )
+
+        return out
 
     if mesh is None:
         return partial(

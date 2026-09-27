@@ -116,11 +116,12 @@ def _zarr_to_datatree(artifact_path: Path, num_chains: int = 1) -> xr.DataTree:
             coordinates for each array dimension.
     """
     ds = open_zarr(artifact_path, consolidated=False)
+    # An empty result (no return sites) has no draw axis to split into chains
     ds = (
         ds.coarsen(draw=ds.sizes["draw"] // num_chains).construct(
             draw=("chain", "draw"),
         )
-        if num_chains > 1
+        if num_chains > 1 and "draw" in ds.sizes
         else ds.expand_dims(dim="chain", axis=0)
     )
     ds = ds.assign_coords(
