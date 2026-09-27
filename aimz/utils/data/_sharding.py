@@ -247,7 +247,7 @@ def _create_sharded_log_likelihood(
         *args: object,
     ) -> Array:
         n = len(kwargs_key)
-        return _log_likelihood(
+        out = _log_likelihood(
             kernel,
             samples=samples,
             model_kwargs={
@@ -257,6 +257,15 @@ def _create_sharded_log_likelihood(
                 **_combine(args[n:], kwargs_static),
             },
         )[param_output]
+        if not draws:
+            _validate_streamed_axis_size(
+                out,
+                site=param_output,
+                axis=1,
+                chunk_size=X.shape[0],
+            )
+
+        return out
 
     if mesh is None:
         return partial(
