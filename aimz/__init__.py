@@ -16,8 +16,9 @@
 
 import logging
 
+from aimz._exceptions import KernelValidationError, NotFittedError
 from aimz.model.impact_model import ImpactModel
 
-__all__ = ["ImpactModel"]
+__all__ = ["ImpactModel", "KernelValidationError", "NotFittedError"]
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())
