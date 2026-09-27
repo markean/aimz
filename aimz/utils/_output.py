@@ -808,22 +808,44 @@ def _start_writer_threads(
 def _shutdown_writer_threads(
     threads: list[Thread],
     queue: Queue | None,
+    stop: Event | None,
+    *,
+    discard: bool,
 ) -> None:
     """Signal the writer pool to stop and wait for its completion.
 
     One ``None`` sentinel is enqueued per worker; each worker consumes exactly one and
     exits, so any residual items (already ahead of the sentinels in the FIFO queue) are
-    consumed first. Safe to call when no pool was started (``queue is None``).
+    consumed first, or discarded when ``discard`` is set. An interrupt while waiting
+    (e.g. ``KeyboardInterrupt``) also discards them and is re-raised once every worker
+    has exited, so none writes after the caller discards the partial output. Safe to
+    call when no pool was started (``queue is None``).
 
     Args:
         threads: The worker threads to join.
         queue: The shared work queue, or ``None`` if no pool was started.
+        stop: The shared stop event, or ``None`` if no pool was started.
+        discard: Whether to discard the residual items (the stream failed) instead of
+            writing them.
     """
-    if queue is not None:
+    if queue is None or stop is None:
+        return
+    if discard:
+        stop.set()
+    sent = 0
+    try:
         for _ in threads:
             queue.put(None)
-    for thread in threads:
-        thread.join()
+            sent += 1
+        for thread in threads:
+            thread.join()
+    except BaseException:
+        stop.set()
+        for _ in range(len(threads) - sent):
+            queue.put(None)
+        for thread in threads:
+            thread.join()
+        raise
 
 
 def _discard_partial_output(sink: Path | MutableMapping[str, list[np.ndarray]]) -> None:
@@ -922,7 +944,7 @@ def _write_loop(
             )
         completed = True
     finally:
-        _shutdown_writer_threads(threads, queue=queue)
+        _shutdown_writer_threads(threads, queue=queue, stop=stop, discard=not completed)
         # Drop the in-flight pipeline results and the current batch explicitly.
         producer.close()
         with suppress(NameError):
