@@ -141,6 +141,36 @@ Use it when the complete result comfortably fits in host memory.
 Unlike the on-batch methods, ``store="memory"`` still batches (and, on multiple devices, shards) the computation, so it handles inputs that a single unbatched pass cannot.
 
 
+.. _streaming-keyword-arguments:
+
+Passing Keyword Arguments
+-------------------------
+Keyword arguments reach the kernel as they would in an uncompiled call.
+The streaming methods and :meth:`~aimz.ImpactModel.fit` give each one of two roles:
+
+* **Per-observation:** an array whose leading axis matches ``X`` is split into batches and sharded together with ``X``.
+  With a data loader, the loader's fields play this role.
+* **Constant:** every other value is passed whole to every batch.
+  Arrays, including 0-D arrays, are traced, so their values can change between calls without recompiling.
+  Other values, such as integers, booleans, strings, and Python floats, are passed as static Python values, so they can set shapes or drive control flow in the kernel.
+  Containers such as dictionaries are handled leaf by leaf in the same way.
+
+.. code-block:: python
+
+    im.predict(
+        X,
+        treatment=treatment,  # one value per observation: batched with X
+        prior_scales=prior_scales,  # one value per feature: passed whole
+        n_groups=5,  # static: can set a shape
+        link="logit",  # static: can drive control flow
+        temperature=jnp.asarray(0.5),  # traced: new values do not recompile
+    )
+
+Each new static value compiles the kernel again, so pass a number that changes from call to call, such as a swept hyperparameter, as a JAX or NumPy array.
+An array whose leading axis happens to equal the number of observations is treated as per-observation.
+To pass such an array whole, give the input as a data loader, alongside which every keyword argument is a constant.
+
+
 Quick Recommendations
 ---------------------
 * Moderate or large data: use the streaming methods (e.g., :meth:`~aimz.ImpactModel.fit`, :meth:`~aimz.ImpactModel.predict`).

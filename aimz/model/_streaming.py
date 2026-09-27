@@ -35,7 +35,7 @@ from tqdm.auto import tqdm
 
 from aimz.sampling._forward import _sample_forward
 from aimz.utils._kwargs import (
-    _group_kwargs,
+    _partition,
     _split_intervention,
     _split_intervention_fields,
 )
@@ -118,7 +118,7 @@ class _Step(NamedTuple):
     y: Array | np.ndarray | None
     """Output data (log-likelihood only)."""
     tail: tuple
-    """Array-kwargs and extra-kwargs values forwarded after ``x``."""
+    """Per-observation keyword argument values forwarded after ``x``."""
 
 
 class _OutputStreamer:
@@ -148,11 +148,11 @@ class _OutputStreamer:
         shard_axis: Literal["obs", "draw"],
         factory: Callable,
         n_kwargs_array: int,
-        n_kwargs_extra: int,
+        n_kwargs_const: int,
     ) -> Callable:
         """Build a sharded callable once and cache it.
 
-        Keyed by ``(kind, shard_axis, n_kwargs_array, n_kwargs_extra)``: the kwarg
+        Keyed by ``(kind, shard_axis, n_kwargs_array, n_kwargs_const)``: the argument
         counts are baked into the ``shard_map`` ``in_specs``, so a call with a different
         arity needs its own callable rather than reusing a stale one. The callable is
         built with ``factory`` (which selects the partition specs) on first use.
@@ -162,19 +162,19 @@ class _OutputStreamer:
                 ``"prior_predictive"``, ``"log_likelihood"``).
             shard_axis: Multi-device sharding strategy the callable is built for.
             factory: Builder that creates the sharded callable from the mesh and arity.
-            n_kwargs_array: Number of array-like keyword arguments.
-            n_kwargs_extra: Number of non-array (replicated) keyword arguments.
+            n_kwargs_array: Number of per-observation keyword arguments.
+            n_kwargs_const: Number of array leaves in the call constants.
 
         Returns:
             The sharded callable for the given key, built on first use and cached.
         """
-        key = (kind, shard_axis, n_kwargs_array, n_kwargs_extra)
+        key = (kind, shard_axis, n_kwargs_array, n_kwargs_const)
         fn = self._fn_cache.get(key)
         if fn is None:
             fn = factory(
                 self._ctx.mesh,
                 n_kwargs_array=n_kwargs_array,
-                n_kwargs_extra=n_kwargs_extra,
+                n_kwargs_const=n_kwargs_const,
                 shard_axis=shard_axis,
             )
             self._fn_cache[key] = fn
@@ -185,34 +185,32 @@ class _OutputStreamer:
         self,
         req: _WriteRequest,
         batch: Mapping[str, Array | np.ndarray] | None = None,
-    ) -> tuple[tuple[str, ...], int, dict]:
-        """Resolve the ordered kwarg names, array count, and extras for a stream.
+    ) -> tuple[tuple[str, ...], dict]:
+        """Resolve the per-observation keyword names and the call constants.
 
         The names drive both the ``shard_map`` in-spec arity and the by-name binding
-        in ``dispatch``, so they come from a single source and cannot drift. Array
-        arguments come from the retained first observation batch, or from the call
-        kwargs for draw streaming. Non-array extras come from the call kwargs.
+        in ``dispatch``, so they come from a single source and cannot drift. The
+        per-observation arguments are the fields of the retained first observation
+        batch; every other call kwarg is a constant of the call, passed whole to every
+        batch. Draw streaming holds the whole input, so all its kwargs are constants.
 
         Args:
             req: The streamed write job.
             batch: The first observation batch, or ``None`` for draw streaming.
 
         Returns:
-            - The ordered ``kwargs_key`` (array names then extra names).
-            - The number of array arguments.
-            - The extras dict (the non-array call kwargs).
+            - The ordered ``kwargs_key`` (the per-observation keyword names).
+            - The call constants by name.
         """
-        kwargs_array, kwargs_extra = _group_kwargs(req.kwargs)
-        if batch is not None:
-            array_names = tuple(
-                name
-                for name in batch
-                if name not in (self._ctx.param_input, self._ctx.param_output)
-            )
-        else:
-            array_names = tuple(kwargs_array)
+        if batch is None:
+            return (), dict(req.kwargs)
+        kwargs_key = tuple(
+            name
+            for name in batch
+            if name not in (self._ctx.param_input, self._ctx.param_output)
+        )
 
-        return (*array_names, *kwargs_extra), len(array_names), kwargs_extra
+        return kwargs_key, {k: v for k, v in req.kwargs.items() if k not in batch}
 
     def setup_stream(
         self,
@@ -266,6 +264,16 @@ class _OutputStreamer:
             )
             raise TypeError(msg)
         first, _ = _prepare_batch(first, param_input=self._ctx.param_input)
+        # A data loader's fields are its per-observation arguments, so a keyword
+        # argument with a field's name would be silently ignored.
+        if not isinstance(req.X, ArrayLike) and (
+            duplicates := sorted(first.keys() & req.kwargs.keys())
+        ):
+            msg = (
+                f"Keyword argument(s) {duplicates} are also fields of the data loader; "
+                "pass each argument either way, not both."
+            )
+            raise ValueError(msg)
 
         return loader, chain((first,), batches), first
 
@@ -365,17 +373,21 @@ class _OutputStreamer:
             req = replace(req, kwargs={**req.kwargs, **fields})
         if req.shard_axis == "obs" and stream is None:
             stream = self.setup_stream(req, y=None)
-        kwargs_key, n_kwargs_array, kwargs_extra = self._resolve_kwarg_key(
+        kwargs_key, kwargs_extra = self._resolve_kwarg_key(
             req,
             batch=stream[2] if stream is not None else None,
         )
+        kwargs_const, kwargs_static = _partition(kwargs_extra)
+        kwargs_const = [
+            _replicate(v, sharding=self._ctx.replicated_sharding) for v in kwargs_const
+        ]
         kind = "prior_predictive" if group == "prior_predictive" else "predict"
         fn = self._cached_fn(
             kind,
             shard_axis=req.shard_axis,
             factory=_create_sharded_sampler,
-            n_kwargs_array=n_kwargs_array,
-            n_kwargs_extra=len(kwargs_extra),
+            n_kwargs_array=len(kwargs_key),
+            n_kwargs_const=len(kwargs_const),
         )
 
         def compute(step: _Step) -> dict[str, Array]:
@@ -388,8 +400,10 @@ class _OutputStreamer:
                 intervention,
                 self._ctx.param_input,
                 kwargs_key,
+                kwargs_static,
                 step.x,
                 *step.tail,
+                *kwargs_const,
             )
 
         phase = "Prior" if group == "prior_predictive" else "Posterior"
@@ -494,16 +508,20 @@ class _OutputStreamer:
                 "in each batch."
             )
             raise ValueError(msg)
-        kwargs_key, n_kwargs_array, kwargs_extra = self._resolve_kwarg_key(
+        kwargs_key, kwargs_extra = self._resolve_kwarg_key(
             req,
             batch=stream[2] if stream is not None else None,
         )
+        kwargs_const, kwargs_static = _partition(kwargs_extra)
+        kwargs_const = [
+            _replicate(v, sharding=self._ctx.replicated_sharding) for v in kwargs_const
+        ]
         fn = self._cached_fn(
             "log_likelihood",
             shard_axis=req.shard_axis,
             factory=_create_sharded_log_likelihood,
-            n_kwargs_array=n_kwargs_array,
-            n_kwargs_extra=len(kwargs_extra),
+            n_kwargs_array=len(kwargs_key),
+            n_kwargs_const=len(kwargs_const),
         )
 
         def compute(step: _Step) -> dict[str, Array]:
@@ -514,9 +532,11 @@ class _OutputStreamer:
                     self._ctx.param_input,
                     site,
                     kwargs_key,
+                    kwargs_static,
                     step.x,
                     step.y,
                     *step.tail,
+                    *kwargs_const,
                 ),
             }
 
@@ -578,8 +598,8 @@ class _OutputStreamer:
                 :class:`_Step`.
             stream: The loader, opened iterator, and retained first batch.
             samples: The whole (replicated) posterior to condition every batch on.
-            kwargs_key: Ordered kwarg names (array names then extra names) used to bind
-                each batch's ``tail`` by name.
+            kwargs_key: The per-observation keyword names, whose batch arrays form each
+                step's ``tail`` in this order.
             rng_key: Per-batch key source, or ``None`` for log-likelihood.
             pbar: Progress bar to drive over the batches.
 
@@ -587,7 +607,6 @@ class _OutputStreamer:
             The strategy's site arrays for in-memory accumulation, or ``None`` for a
             Zarr-backed write.
         """
-        _, kwargs_extra = _group_kwargs(req.kwargs)
         dataloader, batches, first = stream
         # Only the built-in loader guarantees exact length and aligned chunks.
         # External lengths may be estimates or raise; execution never queries them.
@@ -612,12 +631,9 @@ class _OutputStreamer:
                 # One fresh key per batch; the sampler splits it into per-draw keys.
                 rng_key, subkey = random.split(rng_key)
                 subkey = device_put(subkey, self._ctx.replicated_sharding)
-            # Bind by name (array kwargs from the batch, extras from the call) in
-            # `kwargs_key` order, so positions match the sharded callable's in-specs.
-            tail = tuple(
-                batch[name] if name in batch else kwargs_extra[name]
-                for name in kwargs_key
-            )
+            # Bind by name in `kwargs_key` order, so positions match the sharded
+            # callable's in-specs.
+            tail = tuple(batch[name] for name in kwargs_key)
             step = _Step(
                 num=req.num_samples,
                 keys=subkey,
@@ -673,8 +689,9 @@ class _OutputStreamer:
         """Stream over draw chunks into the request's destination.
 
         Shards the draw axis across devices and holds the whole input resident:
-        replicates the input/output/array-kwargs once, splits the per-draw keys once,
-        and for each chunk slices a posterior chunk (``_prepare_draw_chunk``), assembles
+        replicates the input and output once (keyword arguments arrive as replicated
+        call constants), splits the per-draw keys once, and for each chunk slices a
+        posterior chunk (``_prepare_draw_chunk``), assembles
         a :class:`_Step`, and dispatches ``compute`` (asynchronous); collection blocks
         on the result and trims to the chunk's true draw count (axis 0).
         ``_write_loop`` keeps consecutive chunks in flight, so the next chunk computes
@@ -703,7 +720,6 @@ class _OutputStreamer:
         if req.batch_size is None:
             logger.debug("Resolved batch_size=%d automatically.", batch_size)
         pbar.reset(total=-(-req.num_samples // batch_size))
-        kwargs_array, kwargs_extra = _group_kwargs(req.kwargs)
         # The public draw-parallel entry points reject data loaders, so `req.X` is
         # always an array here.
         x_dev = _replicate(
@@ -714,13 +730,6 @@ class _OutputStreamer:
             _replicate(y, sharding=self._ctx.replicated_sharding)
             if y is not None
             else None
-        )
-        tail = (
-            *(
-                _replicate(v, sharding=self._ctx.replicated_sharding)
-                for v in kwargs_array.values()
-            ),
-            *kwargs_extra.values(),
         )
         draw_keys = (
             random.split(rng_key, num=req.num_samples) if rng_key is not None else None
@@ -743,7 +752,7 @@ class _OutputStreamer:
                 samples=chunk_samples,
                 x=x_dev,
                 y=y_dev,
-                tail=tail,
+                tail=(),
             )
             out = compute(step)
             # Start the device-to-host copy as soon as each result is ready, so

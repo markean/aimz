@@ -90,6 +90,7 @@ from mlflow.utils.model_utils import (
 from mlflow.utils.requirements_utils import _get_pinned_requirement
 from numpyro.infer import MCMC, SVI
 
+from aimz.utils._kwargs import _is_per_observation
 from aimz.utils._validation import _is_arraylike
 
 if TYPE_CHECKING:
@@ -699,10 +700,17 @@ def _get_input_example(
         if len(input_example) == 1:
             return next(iter(input_example.values()))
         return input_example
+    n_obs = len(np.asarray(X))
     input_example = {
         "X": np.array(np.asarray(X)[:INPUT_EXAMPLE_SAMPLE_ROWS]),
+        # Arrays aligned with `X` are sliced with it; other arrays are call constants
+        # and stay whole.
         **{
-            k: np.array(np.asarray(v)[:INPUT_EXAMPLE_SAMPLE_ROWS])
+            k: np.array(
+                np.asarray(v)[:INPUT_EXAMPLE_SAMPLE_ROWS]
+                if _is_per_observation(v, n_obs)
+                else np.asarray(v),
+            )
             for k, v in kwargs.items()
             if k not in ("y", "rng_key") and _is_arraylike(v)
         },
@@ -817,7 +825,7 @@ def _log_aimz_dataset(
             **{
                 k: np.asarray(v)
                 for k, v in kwargs.items()
-                if k not in ("y", "rng_key") and _is_arraylike(v)
+                if k not in ("y", "rng_key") and _is_per_observation(v, len(X))
             },
         }
         if len(features) == 1:

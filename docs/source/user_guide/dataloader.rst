@@ -12,8 +12,8 @@ Each batch must satisfy the following:
 
 * It contains the input field, named after :attr:`~aimz.ImpactModel.param_input` (``"X"`` by default).
 * For :meth:`~aimz.ImpactModel.log_likelihood`, it also contains the output field, named after :attr:`~aimz.ImpactModel.param_output` (``"y"`` by default).
-* Any additional array argument of the kernel is supplied as a field named after that parameter, not as a keyword argument alongside the loader.
-  Non-array keyword arguments are passed to the method as usual.
+* Any additional per-observation array argument of the kernel is supplied as a field named after that parameter.
+  Keyword arguments passed alongside the loader are constants of the call, passed whole to every batch (see :ref:`streaming-keyword-arguments`), and must not repeat a field's name.
 * Every field has the batch's observations on its leading axis, and all fields share that axis size.
 * Field names and the shapes beyond the leading axis stay the same from batch to batch.
 
