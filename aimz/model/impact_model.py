@@ -235,10 +235,6 @@ class ImpactModel(BaseModel):
             self.cleanup()
         except AttributeError:
             return
-        # Call the parent's __del__ method only if it exists and is callable
-        super_del = getattr(super(), "__del__", None)
-        if callable(super_del):
-            super_del()
 
     def __getstate__(self) -> dict:
         """Return the state of the object excluding runtime attributes.
@@ -1046,7 +1042,7 @@ class ImpactModel(BaseModel):
                 is used and split as needed.
             return_sites: Names of variables (sites) to return. If ``None``, samples
                 :attr:`~aimz.ImpactModel.param_output` and deterministic sites.
-            shard_axis: Multi-device sharding strategy; no effect on a single device.
+            shard_axis: Multi-device sharding strategy.
                 ``"obs"`` (default) shards the input across devices and replicates the
                 posterior. ``"draw"`` shards the posterior across devices and replicates
                 the input, which must be an array, not a data loader. If the model has
@@ -1110,6 +1106,7 @@ class ImpactModel(BaseModel):
         self,
         X: ArrayLike,
         y: ArrayLike,
+        *,
         rng_key: Array | None = None,
         **kwargs: object,
     ) -> tuple[SVIState, Array]:
@@ -1655,7 +1652,7 @@ class ImpactModel(BaseModel):
                 out-of-sample data.
             return_sites: Names of variables (sites) to return. If ``None``, samples
                 :attr:`~aimz.ImpactModel.param_output` and deterministic sites.
-            shard_axis: Multi-device sharding strategy; no effect on a single device.
+            shard_axis: Multi-device sharding strategy.
                 ``"obs"`` (default) shards the input across devices and replicates the
                 posterior. ``"draw"`` shards the posterior across devices and replicates
                 the input, which must be an array, not a data loader. If the model has
@@ -1944,7 +1941,7 @@ class ImpactModel(BaseModel):
                 observed output.
             y: Output array with observations on the leading axis. Must be ``None``
                 if ``X`` is a data loader.
-            shard_axis: Multi-device sharding strategy; no effect on a single device.
+            shard_axis: Multi-device sharding strategy.
                 ``"obs"`` (default) shards the input across devices and replicates the
                 posterior. ``"draw"`` shards the posterior across devices and replicates
                 the input, which must be an array, not a data loader. If the model has

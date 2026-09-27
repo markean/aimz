@@ -54,14 +54,19 @@ def test_not_fitted(method: str, args: tuple) -> None:
     ],
 )
 @pytest.mark.parametrize(
-    "kwargs",
-    [{"arg": True, "y": None}, {"arg": True, "extra": True}, {}],
+    ("kwargs", "match"),
+    [
+        ({"arg": True, "y": None}, "reserved kernel parameter"),
+        ({"arg": True, "extra": True}, "unexpected keyword argument 'extra'"),
+        ({}, "missing a required argument: 'arg'"),
+    ],
     ids=["reserved", "extra", "missing"],
 )
 def test_kernel_argument_binding(
     synthetic_data: tuple[Array, Array],
     method: str,
     kwargs: dict,
+    match: str,
 ) -> None:
     """A reserved, unknown, or missing kernel argument raises on every entry point."""
     X, y = synthetic_data
@@ -72,7 +77,7 @@ def test_kernel_argument_binding(
 
     im = ImpactModel(kernel, rng_key=random.key(42), inference=_make_svi(kernel))
     im.fit_on_batch(X, y, arg=True, num_steps=1, num_samples=10, progress=False)
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError, match=match):
         getattr(im, method)(X, **kwargs)
 
 

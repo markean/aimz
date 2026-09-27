@@ -28,7 +28,7 @@ class KernelSpec:
         traced:
             ``True`` once at least one successful trace has been performed.
         sample_sites:
-            Names of latent (stochastic) sample sites encountered during tracing.
+            Names of the sample sites, latent and observed, encountered during tracing.
         return_sites:
             Names of default return sites. Always includes the output first, followed by
             any deterministic sites. Latent sample sites are excluded.

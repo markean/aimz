@@ -93,8 +93,9 @@ Batches follow the dataset order, or a fresh permutation per epoch with ``shuffl
 
 Storage and Device Transfer
 ---------------------------
-When raw arrays are passed to high-level methods like :meth:`~aimz.ImpactModel.fit` or :meth:`~aimz.ImpactModel.predict`, aimz stores them as NumPy arrays on host memory and transfers one batch at a time to the device during iteration.
-JAX arrays passed in are converted to NumPy at this stage; their original device placement is not preserved.
+When raw arrays are passed to high-level methods like :meth:`~aimz.ImpactModel.fit` or :meth:`~aimz.ImpactModel.predict`, aimz stores ``X`` and ``y`` as NumPy arrays on host memory and transfers one batch at a time to the device during iteration.
+JAX arrays passed as ``X`` or ``y`` are converted to NumPy at this stage; their original device placement is not preserved.
+Per-observation keyword arrays keep the backend they were given, so a JAX array stays on its device, and lists become NumPy arrays.
 This allows datasets larger than device memory to be processed without modification.
 The batches a data loader yields are treated the same way: NumPy batches stay on the host until their turn, and each batch is padded for sharding if needed and placed on the model's device or sharding.
 You can keep arrays on device by constructing a loader explicitly with ``to_jax=True``:
@@ -113,7 +114,8 @@ Integration with High-Level Methods
 -----------------------------------
 The streaming methods accept raw arrays (``X``, ``y``, etc.), an :class:`~aimz.utils.data.ArrayLoader`, or any data loader satisfying the contract above, while :meth:`~aimz.ImpactModel.fit` accepts raw arrays or an :class:`~aimz.utils.data.ArrayLoader`.
 Passing a loader gives finer control over batch size, ordering, shuffling, and storage backend (see above).
-If the user passes raw arrays instead, :meth:`~aimz.ImpactModel.fit` may internally construct a temporary loader with heuristic batching.
+If the user passes raw arrays instead, aimz builds a temporary loader internally.
+With ``batch_size=None``, :meth:`~aimz.ImpactModel.fit` uses the whole dataset as a single batch in each epoch, while the streaming methods choose a batch size automatically.
 
 .. code-block:: python
 
