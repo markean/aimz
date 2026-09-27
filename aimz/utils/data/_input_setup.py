@@ -214,10 +214,13 @@ def _setup_inputs(
 
     Returns:
         - The data loader for batching.
-        - Extra keyword arguments to be passed downstream.
+        - The constants of the call, passed whole to every batch.
     """
     kwargs_array, kwargs_extra = _group_kwargs(
         kwargs,
+        n_obs=(
+            np.shape(X)[0] if isinstance(X, ArrayLike) and np.ndim(X) >= 1 else None
+        ),
         forbid=(param_input, param_output),
     )
 
@@ -260,12 +263,6 @@ def _setup_inputs(
         if y is not None:
             msg = "`y` must be `None` when `X` is already a data loader."
             raise TypeError(msg)
-        if kwargs_array:
-            msg = (
-                "Array keyword arguments are not supported alongside a data loader; "
-                "include them as batch fields instead."
-            )
-            raise ValueError(msg)
         if isinstance(X, ArrayLoader) and X.shuffle and not shuffle:
             msg = (
                 "The data loader shuffles, so results will not follow the data order. "

@@ -24,7 +24,7 @@ from jax import Array, device_put, jit, lax, random, shard_map
 from jax.sharding import PartitionSpec
 
 from aimz.sampling._forward import _sample_forward
-from aimz.utils._kwargs import _split_intervention_fields
+from aimz.utils._kwargs import _combine, _split_intervention_fields
 from aimz.utils._log_likelihood import _log_likelihood
 
 if TYPE_CHECKING:
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 def _create_sharded_sampler(
     mesh: Mesh | None,
     n_kwargs_array: int,
-    n_kwargs_extra: int,
+    n_kwargs_const: int,
     shard_axis: Literal["obs", "draw"] = "obs",
 ) -> Callable:
     """Create a sharded predictive sampling function.
@@ -46,8 +46,8 @@ def _create_sharded_sampler(
         mesh: The JAX mesh object defining the device mesh for sharding.
         n_kwargs_array: The number of arguments in the keyword arguments that are
             array-like.
-        n_kwargs_extra: The number of extra keyword arguments that are not array-like
-            (not sharded).
+        n_kwargs_const: The number of array leaves in the call constants, which are
+            traced and replicated rather than sharded.
         shard_axis: ``"obs"`` (default) shards the observation axis of ``X`` and the
             array-kwargs and replicates the posterior on every device. ``"draw"``
             shards the posterior draws axis and replicates ``X`` and the array-kwargs;
@@ -68,10 +68,12 @@ def _create_sharded_sampler(
                 as dynamic inputs rather than captured in a static kernel.
             - param_input: The name of the parameter in the ``kernel`` for the input
                 data.
-            - kwargs_key: A tuple of keyword argument names.
+            - kwargs_key: The names of the per-observation keyword arguments.
+            - kwargs_static: The static part of the call constants (see
+                :func:`~aimz.utils._kwargs._partition`).
             - X: Input data.
-            - *args: Additional arguments constructed from the original keyword
-                arguments (both array-like and non-array-like).
+            - *args: The per-observation keyword arguments in ``kwargs_key`` order,
+                then the array leaves of the call constants.
     """
     draws = shard_axis == "draw"
     axis = None
@@ -87,6 +89,7 @@ def _create_sharded_sampler(
         intervention: dict,
         param_input: str,
         kwargs_key: tuple[str, ...],
+        kwargs_static: tuple,
         X: Array,
         *args: object,
     ) -> dict[str, Array]:
@@ -102,8 +105,13 @@ def _create_sharded_sampler(
                 num=num_samples,
             )
 
+        n = len(kwargs_key)
         model_kwargs, fields = _split_intervention_fields(
-            {param_input: X, **dict(zip(kwargs_key, args, strict=True))},
+            {
+                param_input: X,
+                **dict(zip(kwargs_key, args[:n], strict=True)),
+                **_combine(args[n:], kwargs_static),
+            },
         )
 
         return _sample_forward(
@@ -124,6 +132,7 @@ def _create_sharded_sampler(
                 "return_sites",
                 "param_input",
                 "kwargs_key",
+                "kwargs_static",
             ],
         )(f)
 
@@ -149,6 +158,7 @@ def _create_sharded_sampler(
             "return_sites",
             "param_input",
             "kwargs_key",
+            "kwargs_static",
         ],
     )(
         partial(
@@ -163,10 +173,11 @@ def _create_sharded_sampler(
                 PartitionSpec(),  # intervention
                 None,  # param_input
                 None,  # kwargs_key
+                None,  # kwargs_static
                 x_spec,  # X
                 *(
                     [kw_spec] * n_kwargs_array  # kwargs_array
-                    + [None] * n_kwargs_extra  # kwargs_extra
+                    + [PartitionSpec()] * n_kwargs_const  # kwargs_const
                 ),
             ),
             out_specs=out_spec,
@@ -178,7 +189,7 @@ def _create_sharded_sampler(
 def _create_sharded_log_likelihood(
     mesh: Mesh | None,
     n_kwargs_array: int,
-    n_kwargs_extra: int,
+    n_kwargs_const: int,
     shard_axis: Literal["obs", "draw"] = "obs",
 ) -> Callable:
     """Create a sharded log-likelihood function.
@@ -187,8 +198,8 @@ def _create_sharded_log_likelihood(
         mesh: The JAX mesh object defining the device mesh for sharding.
         n_kwargs_array: The number of arguments in the keyword arguments that are
             array-like.
-        n_kwargs_extra: The number of extra keyword arguments that are not array-like
-            (not sharded).
+        n_kwargs_const: The number of array leaves in the call constants, which are
+            traced and replicated rather than sharded.
         shard_axis: ``"obs"`` (default) shards the observation axis of ``X``/``y`` and
             the array-kwargs and replicates the posterior. ``"draw"`` shards the
             posterior draws axis and replicates ``X``/``y`` and the array-kwargs.
@@ -201,11 +212,13 @@ def _create_sharded_log_likelihood(
                 data.
             - param_output: The name of the parameter in the ``kernel`` for the output
                 data.
-            - kwargs_key: A tuple of keyword argument names.
+            - kwargs_key: The names of the per-observation keyword arguments.
+            - kwargs_static: The static part of the call constants (see
+                :func:`~aimz.utils._kwargs._partition`).
             - X: Input data.
             - y: Output data.
-            - *args: Additional arguments constructed from the original keyword
-                arguments (both array-like and non-array-like).
+            - *args: The per-observation keyword arguments in ``kwargs_key`` order,
+                then the array leaves of the call constants.
     """
     draws = shard_axis == "draw"
 
@@ -215,17 +228,20 @@ def _create_sharded_log_likelihood(
         param_input: str,
         param_output: str,
         kwargs_key: tuple[str, ...],
+        kwargs_static: tuple,
         X: Array,
         y: Array,
         *args: object,
     ) -> Array:
+        n = len(kwargs_key)
         return _log_likelihood(
             kernel,
             samples=samples,
             model_kwargs={
                 param_input: X,
                 param_output: y,
-                **dict(zip(kwargs_key, args, strict=True)),
+                **dict(zip(kwargs_key, args[:n], strict=True)),
+                **_combine(args[n:], kwargs_static),
             },
         )[param_output]
 
@@ -237,6 +253,7 @@ def _create_sharded_log_likelihood(
                 "param_input",
                 "param_output",
                 "kwargs_key",
+                "kwargs_static",
             ],
         )(f)
 
@@ -261,6 +278,7 @@ def _create_sharded_log_likelihood(
             "param_input",
             "param_output",
             "kwargs_key",
+            "kwargs_static",
         ],
     )(
         partial(
@@ -272,11 +290,12 @@ def _create_sharded_log_likelihood(
                 None,  # param_input
                 None,  # param_output
                 None,  # kwargs_key
+                None,  # kwargs_static
                 xy_spec,  # X
                 xy_spec,  # y
                 *(
                     [kw_spec] * n_kwargs_array  # kwargs_array
-                    + [None] * n_kwargs_extra  # kwargs_extra
+                    + [PartitionSpec()] * n_kwargs_const  # kwargs_const
                 ),
             ),
             out_specs=out_spec,

@@ -52,7 +52,7 @@ def test_train_on_batch_lm_with_kwargs_array(
 def test_train_on_batch_different_extra_kwargs(
     synthetic_data: tuple[Array, Array],
 ) -> None:
-    """Calls with different non-array kwargs each get their own static wrapper."""
+    """Calls with different static (non-array) kwargs each compile their own update."""
     X, y = synthetic_data
 
     def kernel(
@@ -77,4 +77,6 @@ def test_train_on_batch_different_extra_kwargs(
     # Each call passes a different set of string (non-array, static) kwargs
     im.train_on_batch(X=X, y=y, link="identity")
     im.train_on_batch(X=X, y=y, noise="normal")
-    assert sorted(im._fn_vi_update) == [("link",), ("noise",)]
+    num_configs = 2
+    assert im._fn_vi_update is not None
+    assert im._fn_vi_update._cache_size() == num_configs

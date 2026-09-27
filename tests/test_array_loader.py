@@ -162,8 +162,8 @@ class TestArrayLoader:
         key_before = random.key_data(im.rng_key)
         loader = ArrayLoader(ArrayDataset(X=X, y=y), rng_key=random.key(0))
 
-        with pytest.raises(ValueError, match="not supported alongside a data loader"):
-            im.fit(X=loader, c=y, progress=False)
+        with pytest.raises(TypeError, match="must be `None` when `X` is already"):
+            im.fit(X=loader, y=y, progress=False)
         with pytest.raises(TypeError, match="unexpected keyword argument 'c'"):
             im.fit(X=X, y=y, c=1.0, progress=False)
 
@@ -277,7 +277,7 @@ class TestArrayLoader:
         X, y = synthetic_data
         im = im_lm_with_kwargs_svi_fitted
         loader = ArrayLoader(ArrayDataset(X=X, c=y), rng_key=random.key(0))
-        with pytest.raises(ValueError, match="not supported alongside a data loader"):
+        with pytest.raises(ValueError, match="also fields of the data loader"):
             im.predict(loader, c=y, progress=False)
         no_input = ArrayLoader(ArrayDataset(c=y), rng_key=random.key(0))
         with pytest.raises(ValueError, match="no field named 'X'"):

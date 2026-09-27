@@ -230,30 +230,27 @@ def _validate_batch_size(
 def _validate_aligned_inputs(
     X: ArrayLike | ArrayLoader | Iterable[Mapping[str, Array | np.ndarray]],
     y: ArrayLike | None,
-    kwargs: dict,
 ) -> None:
-    """Validate array inputs share one leading-axis size, for either parallel path.
+    """Validate that ``X`` and ``y`` share one leading-axis size, for either path.
 
-    Called from the streaming entry points before any artifact path is created. A
-    data loader is skipped. For an array ``X``, then ``X``, ``y`` (if given), and every
-    array-like kwarg must be at least 1-D and share ``X``'s leading-axis size.
+    Called from the streaming entry points and ``fit`` before any artifact path is
+    created. A data loader is skipped. For an array ``X``, then ``X`` and ``y`` (if
+    given) must be at least 1-D and share ``X``'s leading-axis size. Keyword arguments
+    are not checked: an array whose leading axis differs is a constant of the call.
 
     Args:
         X: Input data.
         y: Output data, or ``None``.
-        kwargs: Additional arguments passed to the model; only array-like values are
-            checked.
 
     Raises:
-        ValueError: If any checked input is 0-D, ``X`` is empty, or the inputs do not
-            all share one leading-axis size.
+        ValueError: If ``X`` or ``y`` is 0-D, ``X`` is empty, or ``y`` does not share
+            ``X``'s leading-axis size.
     """
     if not isinstance(X, ArrayLike):
         return
     inputs: dict[str, ArrayLike] = {"X": X}
     if y is not None:
         inputs["y"] = y
-    inputs.update({k: v for k, v in kwargs.items() if _is_arraylike(v)})
 
     sizes: dict[str, int] = {}
     for name, arr in inputs.items():

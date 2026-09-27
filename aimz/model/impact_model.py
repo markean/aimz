@@ -62,10 +62,9 @@ from aimz.utils._format import (
     _build_datatree,
     _dict_to_datatree,
 )
-from aimz.utils._kwargs import _group_kwargs
+from aimz.utils._kwargs import _combine, _group_kwargs, _partition
 from aimz.utils._validation import (
     _check_is_fitted,
-    _is_arraylike,
     _validate_aligned_inputs,
     _validate_batch_size,
     _validate_group,
@@ -163,7 +162,7 @@ class ImpactModel(BaseModel):
 
     def _init_runtime_attrs(self) -> None:
         """Initialize runtime attributes."""
-        self._fn_vi_update: dict[tuple[str, ...], Callable] = {}
+        self._fn_vi_update: Callable | None = None
         self._num_devices = local_device_count()
         if self._num_devices > 1:
             mesh = make_mesh(
@@ -766,7 +765,9 @@ class ImpactModel(BaseModel):
                 garbage-collected. Pass an explicit ``output_dir`` to keep results
                 beyond the model's lifetime.
             progress: Whether to display a progress bar.
-            **kwargs: Additional arguments passed to the model.
+            **kwargs: Additional arguments passed to the model. Arrays aligned with
+                ``X`` are batched with it; other values are passed whole, arrays
+                traced and the rest static.
 
         Returns:
             Prior predictive samples. Posterior samples are included if available.
@@ -791,11 +792,15 @@ class ImpactModel(BaseModel):
         _validate_shard_axis(shard_axis, X=X)
         _validate_batch_size(batch_size, X=X)
         _validate_store(store, output_dir=output_dir)
-        _validate_aligned_inputs(X, y=None, kwargs=kwargs)
+        _validate_aligned_inputs(X, y=None)
 
         stream = None
         if isinstance(X, ArrayLike):
             args_bound = self._bind_kernel_args(X, kwargs=kwargs)
+            obs_names = {
+                self.param_input,
+                *_group_kwargs(kwargs, n_obs=np.shape(X)[0])[0],
+            }
         else:
             stream = self._streamer.setup_stream(
                 _WriteRequest(
@@ -818,13 +823,15 @@ class ImpactModel(BaseModel):
                 batch.pop(self.param_input),
                 kwargs={**kwargs, **batch},
             )
+            obs_names = {self.param_input, *batch}
 
         # Build the kernel spec from a single-row slice so the trace runs on a tiny
         # input. Only when the spec is not already cached (fitted models keep theirs),
         # and before the return-site defaults resolve so they work even before fitting.
         if not (self._kernel_spec and self._kernel_spec.traced):
+            # Slice only the per-observation arguments; call constants stay whole
             probe = {
-                k: (cast("Any", v)[:1] if _is_arraylike(v) else v)
+                k: (cast("Any", v)[:1] if k in obs_names else v)
                 for k, v in args_bound.items()
             }
             self._build_kernel_spec(probe, with_output=False)
@@ -1067,7 +1074,9 @@ class ImpactModel(BaseModel):
                 garbage-collected. Pass an explicit ``output_dir`` to keep results
                 beyond the model's lifetime.
             progress: Whether to display a progress bar.
-            **kwargs: Additional arguments passed to the model.
+            **kwargs: Additional arguments passed to the model. Arrays aligned with
+                ``X`` are batched with it; other values are passed whole, arrays
+                traced and the rest static.
 
         Returns:
             Posterior predictive samples. Posterior samples are included if available.
@@ -1124,10 +1133,7 @@ class ImpactModel(BaseModel):
             necessary to capture the returned state externally unless explicitly needed.
             However, the returned loss value can be used for monitoring or logging.
         """
-        _, kwargs_extra = _group_kwargs(
-            kwargs,
-            forbid=(self.param_input, self.param_output),
-        )
+        _group_kwargs(kwargs, forbid=(self.param_input, self.param_output))
         batch = {self.param_input: X, self.param_output: y, **kwargs}
 
         if self._vi_state is None:
@@ -1138,19 +1144,21 @@ class ImpactModel(BaseModel):
             if rng_key is None:
                 self._rng_key, rng_key = random.split(self._rng_key)
             self._vi_state = cast("SVI", self.inference).init(rng_key, **batch)
-        # Cache one jitted update per set of non-array kwarg names: the names are baked
-        # into `static_argnames`, so a call with different extras needs its own wrapper
-        # rather than reusing a stale one.
-        fn_key = tuple(sorted(kwargs_extra))
-        fn_vi_update = self._fn_vi_update.get(fn_key)
-        if fn_vi_update is None:
-            fn_vi_update = jit(
-                cast("SVI", self.inference).update,
-                static_argnames=fn_key,
-            )
-            self._fn_vi_update[fn_key] = fn_vi_update
+        # Trace the array leaves and hold every other value static, so arguments such
+        # as integers and strings can set shapes or drive control flow in the kernel.
+        if self._fn_vi_update is None:
+            svi = cast("SVI", self.inference)
 
-        self._vi_state, loss = fn_vi_update(self._vi_state, **batch)
+            def update(
+                state: SVIState,
+                leaves: list,
+                static: tuple,
+            ) -> tuple[SVIState, Array]:
+                return svi.update(state, **_combine(leaves, static))
+
+            self._fn_vi_update = jit(update, static_argnums=2)
+        leaves, static = _partition(batch)
+        self._vi_state, loss = self._fn_vi_update(self._vi_state, leaves, static)
 
         return self._vi_state, loss
 
@@ -1302,7 +1310,9 @@ class ImpactModel(BaseModel):
             epochs: The number of epochs for variational inference optimization.
             shuffle: Whether to shuffle the data at each epoch. Ignored if ``X`` is a
                 data loader.
-            **kwargs: Additional arguments passed to the model.
+            **kwargs: Additional arguments passed to the model. Arrays aligned with
+                ``X`` are batched with it; other values are passed whole, arrays
+                traced and the rest static.
 
         Returns:
             The fitted model instance, enabling method chaining.
@@ -1310,8 +1320,8 @@ class ImpactModel(BaseModel):
         Raises:
             TypeError: If the inference method is MCMC or ``X`` is another data loader
                 rather than arrays or an :class:`~aimz.utils.data.ArrayLoader`.
-            ValueError: If ``y`` is missing when ``X`` is array-like, or the array
-                inputs do not share one leading-axis size.
+            ValueError: If ``y`` is missing when ``X`` is array-like, or ``y`` does
+                not share ``X``'s leading-axis size.
 
         Note:
             This method continues training from the existing SVI state if available.
@@ -1320,7 +1330,7 @@ class ImpactModel(BaseModel):
             (e.g., using `NumPyro`_'s :external:func:`~numpyro.primitives.subsample` or
             similar constructs).
         """
-        _validate_aligned_inputs(X, y=y, kwargs=kwargs)
+        _validate_aligned_inputs(X, y=y)
         if not isinstance(X, (ArrayLike, ArrayLoader)):
             msg = (
                 f"`fit()` requires arrays or an ArrayLoader, got {type(X).__name__!r}; "
@@ -1673,7 +1683,9 @@ class ImpactModel(BaseModel):
                 garbage-collected. Pass an explicit ``output_dir`` to keep results
                 beyond the model's lifetime.
             progress: Whether to display a progress bar.
-            **kwargs: Additional arguments passed to the model.
+            **kwargs: Additional arguments passed to the model. Arrays aligned with
+                ``X`` are batched with it; other values are passed whole, arrays
+                traced and the rest static.
 
         Returns:
             Posterior predictive samples. Posterior samples are included if available.
@@ -1684,9 +1696,8 @@ class ImpactModel(BaseModel):
                 argument, or ``shard_axis="draw"`` is used with a data loader ``X``.
             ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``, ``store`` is
                 not ``"persistent"`` or ``"memory"``, ``output_dir`` is passed with
-                ``store="memory"``, the array inputs do not share one leading-axis
-                size, or ``intervention`` names a site that is not a sample site of
-                the kernel.
+                ``store="memory"``, ``X`` is 0-D or empty, or ``intervention`` names
+                a site that is not a sample site of the kernel.
             NotImplementedError: If a return site's axis-1 size does not match the
                 input batch size (``shard_axis="obs"`` only).
 
@@ -1699,7 +1710,7 @@ class ImpactModel(BaseModel):
         _validate_shard_axis(shard_axis, X=X)
         _validate_batch_size(batch_size, X=X)
         _validate_store(store, output_dir=output_dir)
-        _validate_aligned_inputs(X, y=None, kwargs=kwargs)
+        _validate_aligned_inputs(X, y=None)
         # No posterior to shard means draw-parallel has nothing to chunk, so it behaves
         # identically to the data-parallel path.
         if not self.posterior:
@@ -1961,7 +1972,9 @@ class ImpactModel(BaseModel):
                 garbage-collected. Pass an explicit ``output_dir`` to keep results
                 beyond the model's lifetime.
             progress: Whether to display a progress bar.
-            **kwargs: Additional arguments passed to the model.
+            **kwargs: Additional arguments passed to the model. Arrays aligned with
+                ``X`` are batched with it; other values are passed whole, arrays
+                traced and the rest static.
 
         Returns:
             Log-likelihood values. Posterior samples are included if available.
@@ -1971,8 +1984,8 @@ class ImpactModel(BaseModel):
             TypeError: If ``shard_axis="draw"`` is used with a data loader ``X``.
             ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``, ``store`` is
                 not ``"persistent"`` or ``"memory"``, ``output_dir`` is passed with
-                ``store="memory"``, ``y`` is missing when ``X`` is array-like, or the
-                array inputs do not share one leading-axis size.
+                ``store="memory"``, ``y`` is missing when ``X`` is array-like, or
+                ``y`` does not share ``X``'s leading-axis size.
             NotImplementedError: If a return site's axis-1 size does not match the
                 input batch size (``shard_axis="obs"`` only).
 
@@ -1985,7 +1998,7 @@ class ImpactModel(BaseModel):
         _validate_batch_size(batch_size, X=X)
         _validate_store(store, output_dir=output_dir)
         _group_kwargs(kwargs, forbid=(self.param_input, self.param_output))
-        _validate_aligned_inputs(X, y=y, kwargs=kwargs)
+        _validate_aligned_inputs(X, y=y)
         if y is None and isinstance(X, ArrayLike):
             msg = (
                 "`y` is required for `log_likelihood()` when `X` is array-like. "
