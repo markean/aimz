@@ -268,8 +268,9 @@ To reconstruct the same :external:class:`xarray.DataTree` from the files alone, 
     # 1 for SVI, or the number of MCMC chains (`im.inference.num_chains`)
     num_chains = 1
 
-    # Split the stacked draws into `chain` and `draw` and add coordinates, as aimz does on read
+    # Sort the sites by name, split the stacked draws into `chain` and `draw`, and add coordinates, as aimz does on read
     ds = xr.open_zarr(store, consolidated=False)
+    ds = ds[sorted(ds.data_vars)]
     ds = ds.coarsen(draw=ds.sizes["draw"] // num_chains).construct(draw=("chain", "draw"))
     ds = ds.assign_coords({dim: np.arange(ds.sizes[dim]) for dim in ds.sizes})
 

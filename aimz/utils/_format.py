@@ -103,9 +103,10 @@ def _dict_to_datatree(
 def _zarr_to_datatree(artifact_path: Path, num_chains: int = 1) -> xr.DataTree:
     """Load a Zarr group as an xarray DataTree.
 
-    Reads the store with :external:func:`~xarray.open_zarr` and splits its ``draw``
-    dimension into ``chain`` and ``draw``, along with coordinates for each dimension,
-    matching the structure produced by :func:`_dict_to_datatree`.
+    Reads the store with :external:func:`~xarray.open_zarr`, sorts its sites by name,
+    and splits its ``draw`` dimension into ``chain`` and ``draw``, along with
+    coordinates for each dimension, matching the structure produced by
+    :func:`_dict_to_datatree`.
 
     Args:
         artifact_path: Path holding the Zarr group.
@@ -116,6 +117,7 @@ def _zarr_to_datatree(artifact_path: Path, num_chains: int = 1) -> xr.DataTree:
             coordinates for each array dimension.
     """
     ds = open_zarr(artifact_path, consolidated=False)
+    ds = ds[sorted(ds.data_vars)]
     # An empty result (no return sites) has no draw axis to split into chains
     ds = (
         ds.coarsen(draw=ds.sizes["draw"] // num_chains).construct(
