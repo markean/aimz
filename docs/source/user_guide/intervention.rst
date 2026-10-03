@@ -35,21 +35,24 @@ Before fitting, you can explore the model's prior predictions with ``z`` fixed a
     prior = im.sample_prior_predictive_on_batch(X, intervention={"z": 0.0})
 
 After fitting, the same mapping applies the intervention while using posterior samples for the other latent sites.
-Here, the baseline holds ``z`` at one and the modified scenario holds it at zero:
+Here, the baseline holds ``z`` at one and the modified scenario holds it at zero, both drawn with the same key:
 
 .. code-block:: python
 
     im.fit_on_batch(X, y)
 
+    key = random.key(1)
     baseline = im.predict_on_batch(
         X,
         intervention={"z": 1.0},
         in_sample=False,
+        rng_key=key,
     )
     modified = im.predict_on_batch(
         X,
         intervention={"z": 0.0},
         in_sample=False,
+        rng_key=key,
     )
 
 
@@ -62,6 +65,8 @@ The returned :class:`~xarray.DataTree` contains the differences in the shared pr
 One baseline and one intervention scenario must be provided, either eagerly (``output_baseline`` / ``output_intervention``) or lazily through argument dictionaries (``args_baseline`` / ``args_intervention``).
 Mixing is allowed; for example, a precomputed baseline can be supplied with ``output_baseline`` while the intervention is generated lazily with ``args_intervention`` (or the reverse).
 Use the same predictive group, variable sets, and shapes for both scenarios so their draws can be compared.
+Scenarios drawn by the same method with the same ``rng_key`` are paired: they use the same random numbers, so their draws differ only through the intervention.
+Two lazily generated scenarios share a key automatically; for precomputed or mixed scenarios, pass the same ``rng_key`` to each, as in the examples below.
 
 Eager (precomputed scenarios)::
 
@@ -93,7 +98,9 @@ Mixed (precomputed baseline, lazy intervention)::
             "X": X,
             "intervention": {"z": 0.0},
             "in_sample": False,
+            "rng_key": key,
         },
+        on_batch=True,
     )
 
 Prior predictive (precomputed scenarios, no fitted model needed)::
@@ -257,12 +264,19 @@ Comparing these two distributions allows us to estimate the effect of ``Z`` on `
     )
     im.fit_on_batch(X, y, C=C)
 
-    # Predict under factual (Z) and counterfactual (zeroed Z) scenarios
-    dt_factual = im.predict_on_batch(X, C=C, intervention={"z": Z})
+    # Predict under factual (Z) and counterfactual (zeroed Z) scenarios with one key
+    rng_key, rng_subkey = random.split(rng_key)
+    dt_factual = im.predict_on_batch(
+        X,
+        C=C,
+        intervention={"z": Z},
+        rng_key=rng_subkey,
+    )
     dt_counterfactual = im.predict_on_batch(
         X,
         C=C,
         intervention={"z": jnp.zeros_like(Z)},
+        rng_key=rng_subkey,
     )
 
     # Estimate effect of intervening on Z while conditioning on C
