@@ -43,6 +43,7 @@ def _prepare_batch(
     *,
     param_input: str,
     device: Sharding | None = None,
+    size: int = 0,
 ) -> tuple[dict[str, Array | np.ndarray], int]:
     """Validate named observation arrays and optionally pad/place them for inference.
 
@@ -52,7 +53,9 @@ def _prepare_batch(
     Args:
         batch: Mapping of parameter names to NumPy or JAX arrays.
         param_input: Required model input field.
-        device: Observation sharding, or ``None`` for unpadded inspection.
+        device: Observation sharding, or ``None`` to leave the arrays unplaced.
+        size: Row count to pad a smaller batch up to, so it has the same shape as the
+            stream's first batch and reuses its compiled program.
 
     Returns:
         The prepared mapping and the number of valid observations.
@@ -83,14 +86,16 @@ def _prepare_batch(
         msg = "All batch fields must have the same observation-axis size."
         raise ValueError(msg)
 
-    if device is not None:
-        n_pad = -n_valid % device.num_devices
-        for name, value in arrays.items():
-            arr = value
-            if n_pad:
-                pad = jnp.pad if isinstance(arr, Array) else np.pad
-                arr = pad(arr, [(0, n_pad), *[(0, 0)] * (arr.ndim - 1)], mode="edge")
-            arrays[name] = device_put(arr, device)
+    # Rows up to `size`, then up to a multiple of the device count
+    n_rows = max(n_valid, size)
+    n_rows += -n_rows % (1 if device is None else device.num_devices)
+    n_pad = n_rows - n_valid
+    for name, value in arrays.items():
+        arr = value
+        if n_pad:
+            pad = jnp.pad if isinstance(arr, Array) else np.pad
+            arr = pad(arr, [(0, n_pad), *[(0, 0)] * (arr.ndim - 1)], mode="edge")
+        arrays[name] = arr if device is None else device_put(arr, device)
 
     return arrays, n_valid
 
