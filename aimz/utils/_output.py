@@ -287,7 +287,7 @@ def _create_site_array(
             "draw",
             *tuple(f"{site}_dim_{i}" for i in range(arr.ndim - 1)),
         ),
-        compressors=BloscCodec(cname="zstd", clevel=3, shuffle="shuffle"),
+        compressors=BloscCodec(cname="zstd", clevel=1, shuffle="shuffle"),
     )
 
 
