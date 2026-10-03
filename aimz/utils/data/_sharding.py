@@ -350,22 +350,25 @@ def _prepare_draw_chunk(
     draw_keys: Array | None,
     start: int,
     stop: int,
+    size: int,
     num_devices: int,
     sharding: Sharding | None,
 ) -> tuple[dict[str, Array], Array | None, int]:
     """Slice, pad, and shard one draw chunk for draw-parallel streaming.
 
     Returns ``(chunk_samples, chunk_keys, per_device)`` for draws ``[start:stop)``: the
-    posterior slice and per-draw keys edge-padded so the chunk's draw count is a
-    multiple of ``num_devices`` (so it splits evenly under draw-parallel sharding),
-    with the per-device draw count. ``chunk_samples`` is empty for prior predictive;
-    ``chunk_keys`` is ``None`` when no keys are used.
+    posterior slice and per-draw keys edge-padded to ``size`` draws rounded up to a
+    multiple of ``num_devices``, so a shorter last chunk has the same shape as the
+    others (reusing their compiled program) and splits evenly under draw-parallel
+    sharding, with the per-device draw count. ``chunk_samples`` is empty for prior
+    predictive; ``chunk_keys`` is ``None`` when no keys are used.
 
     Args:
         posterior: The whole posterior to slice (empty for prior predictive).
         draw_keys: The whole per-draw key array, or ``None`` when no keys are used.
         start: Start index of the chunk along the draw axis.
         stop: Stop index of the chunk along the draw axis.
+        size: Draw count to pad a shorter chunk up to.
         num_devices: Number of devices the draw axis is sharded across.
         sharding: The draw-sharding to place the chunk on, or ``None`` on a single
             device.
@@ -375,12 +378,8 @@ def _prepare_draw_chunk(
         per-device draw count.
     """
     clen = stop - start
-    d = num_devices
-    if d <= 1:
-        per_device, n_pad = clen, 0
-    else:
-        clen_pad = ((clen + d - 1) // d) * d
-        per_device, n_pad = clen_pad // d, clen_pad - clen
+    clen_pad = -(-max(clen, size) // num_devices) * num_devices
+    per_device, n_pad = clen_pad // num_devices, clen_pad - clen
     chunk_samples = {
         k: jnp.pad(
             v[start:stop],

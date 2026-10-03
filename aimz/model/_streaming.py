@@ -599,6 +599,10 @@ class _OutputStreamer:
         # External lengths may be estimates or raise; execution never queries them.
         known_size = type(dataloader) is ArrayLoader
         n_batches = len(dataloader) if known_size else None
+        # The built-in loader's only shorter batch is the last; padding it to the first
+        # batch's size keeps one compiled shape for at most one batch of padded rows.
+        # Other loaders may vary their batch sizes freely, so theirs stay unpadded.
+        size = first[self._ctx.param_input].shape[0] if known_size else 0
 
         def dispatch(item: object) -> tuple[dict[str, Array], int]:
             nonlocal rng_key
@@ -606,6 +610,7 @@ class _OutputStreamer:
                 item,
                 param_input=self._ctx.param_input,
                 device=self._ctx.partitioned_sharding,
+                size=size,
             )
             if batch.keys() != first.keys() or any(
                 arr.shape[1:] != first[name].shape[1:] for name, arr in batch.items()
@@ -727,6 +732,7 @@ class _OutputStreamer:
                 draw_keys=draw_keys,
                 start=start,
                 stop=stop,
+                size=batch_size,
                 num_devices=self._ctx.num_devices,
                 sharding=self._ctx.partitioned_sharding,
             )
