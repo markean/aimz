@@ -27,7 +27,7 @@ from numpyro.infer import MCMC, NUTS, SVI
 
 from aimz import ImpactModel
 from aimz.model._streaming import _OutputStreamer, _RuntimeContext
-from tests.conftest import _make_svi, latent_intervention_model, lm
+from tests.conftest import _make_svi, latent_intervention_model, lm_subsample
 
 
 def _iter_batches(
@@ -90,7 +90,7 @@ def test_predict_warns_on_unknown_return_site(
         im_lm_svi_fitted.predict(X=X, return_sites="typo", progress=False)
 
 
-@pytest.mark.parametrize("vi", [lm], indirect=True)
+@pytest.mark.parametrize("vi", [lm_subsample], indirect=True)
 def test_predict_after_cleanup(
     synthetic_data: tuple[Array, Array],
     vi: SVI,
@@ -98,7 +98,7 @@ def test_predict_after_cleanup(
 ) -> None:
     """Test `.predict()` recreates tempdir after `.cleanup()`."""
     X, y = synthetic_data
-    im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
+    im = ImpactModel(lm_subsample, rng_key=random.key(42), inference=vi)
     im.fit(X=X, y=y, batch_size=3)
     msg = (
         r"The `batch_size` \(\d+\) is not divisible by the number of devices \(\d+\)\."

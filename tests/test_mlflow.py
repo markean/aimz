@@ -29,7 +29,7 @@ from numpyro.optim import Adam
 
 from aimz import ImpactModel
 from aimz.utils.data import ArrayDataset, ArrayLoader
-from tests.conftest import _make_svi, lm
+from tests.conftest import _make_svi, lm, lm_subsample
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -364,7 +364,7 @@ def test_autolog_logs_elbo_history_dataset_and_model_params(
     assert info.signature is not None
 
 
-@pytest.mark.parametrize("vi", [lm], indirect=True)
+@pytest.mark.parametrize("vi", [lm_subsample], indirect=True)
 def test_autolog_logs_model_with_loader_input(
     synthetic_data: tuple[Array, Array],
     vi: SVI,
@@ -373,7 +373,7 @@ def test_autolog_logs_model_with_loader_input(
     X, y = synthetic_data
     autolog()
     try:
-        im = ImpactModel(lm, rng_key=random.key(0), inference=vi)
+        im = ImpactModel(lm_subsample, rng_key=random.key(0), inference=vi)
         loader = ArrayLoader(
             ArrayDataset(X=X, y=y),
             rng_key=random.key(1),

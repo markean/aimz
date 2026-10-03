@@ -22,7 +22,7 @@ from numpyro.infer import SVI
 
 from aimz import ImpactModel
 from aimz.utils.data import ArrayDataset, ArrayLoader
-from tests.conftest import lm
+from tests.conftest import lm, lm_subsample
 
 
 class TestArrayDataset:
@@ -131,7 +131,7 @@ class TestArrayLoader:
             np.testing.assert_array_equal(np.sort(epoch), y)
         assert not np.array_equal(epochs[0], epochs[1])
 
-    @pytest.mark.parametrize("vi", [lm], indirect=True)
+    @pytest.mark.parametrize("vi", [lm_subsample], indirect=True)
     def test_fit_dataloader_y_not_none_error(
         self,
         synthetic_data: tuple[Array, Array],
@@ -139,7 +139,7 @@ class TestArrayLoader:
     ) -> None:
         """Passing a data loader as `X` and a non-None `y` raises an error."""
         X, y = synthetic_data
-        im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
+        im = ImpactModel(lm_subsample, rng_key=random.key(42), inference=vi)
         dataloader = ArrayLoader(ArrayDataset(X=X, y=y), rng_key=random.key(42))
         with pytest.raises(
             TypeError,
@@ -172,7 +172,7 @@ class TestArrayLoader:
         out = im.predict(X, store="memory", progress=False)
         assert out.posterior_predictive["y"].sizes["draw"] == num_samples
 
-    @pytest.mark.parametrize("vi", [lm], indirect=True)
+    @pytest.mark.parametrize("vi", [lm_subsample], indirect=True)
     def test_fit_consistency_with_array_and_dataloader(
         self,
         synthetic_data: tuple[Array, Array],
@@ -186,7 +186,9 @@ class TestArrayLoader:
         rng_key = random.key(42)
         rng_key, rng_subkey = random.split(rng_key)
         rng_key, _ = random.split(rng_subkey)
-        im_without_dataloader = ImpactModel(lm, rng_key=random.key(0), inference=vi)
+        im_without_dataloader = ImpactModel(
+            lm_subsample, rng_key=random.key(0), inference=vi
+        )
         try:
             im_without_dataloader.fit(
                 X=X,
@@ -209,7 +211,9 @@ class TestArrayLoader:
             rng_key = random.key(42)
             rng_key, rng_subkey = random.split(rng_key)
             rng_key, rng_loader_key = random.split(rng_subkey)
-            im_with_dataloader = ImpactModel(lm, rng_key=random.key(0), inference=vi)
+            im_with_dataloader = ImpactModel(
+                lm_subsample, rng_key=random.key(0), inference=vi
+            )
             im_with_dataloader.fit(
                 X=ArrayLoader(
                     ArrayDataset(X=X, y=y),
