@@ -101,7 +101,7 @@ def test_estimate_effect_on_batch_dict(
     *,
     in_sample: bool,
 ) -> None:
-    """Dict results from `predict_on_batch` are wrapped in the correct group."""
+    """`in_sample` picks the group of on-batch scenarios, even if dicts are asked."""
     X, _ = synthetic_data
 
     expected_group = "posterior_predictive" if in_sample else "predictions"
@@ -154,7 +154,7 @@ def test_estimate_effect_group_mismatch_raises(
     im_lm_svi_fitted: ImpactModel,
 ) -> None:
     """A predictive group missing from either side raises ``ValueError``."""
-    X, _ = synthetic_data
+    X, y = synthetic_data
 
     # Group present in the baseline but missing from the intervention.
     with pytest.raises(
@@ -166,13 +166,23 @@ def test_estimate_effect_group_mismatch_raises(
             output_intervention=im_lm_svi_fitted.predict_on_batch(X, in_sample=False),
         )
 
-    # Group missing from the baseline (prior-predictive has no posterior_predictive).
+    # A prior predictive baseline needs a prior predictive intervention.
+    with pytest.raises(
+        ValueError,
+        match=r"Group 'prior_predictive' not found in `dt_intervention`.",
+    ):
+        im_lm_svi_fitted.estimate_effect(
+            output_baseline=im_lm_svi_fitted.sample_prior_predictive_on_batch(X),
+            output_intervention=im_lm_svi_fitted.predict_on_batch(X),
+        )
+
+    # A baseline without any predictive group, such as a log-likelihood tree
     with pytest.raises(
         ValueError,
         match=r"Group 'posterior_predictive' not found in `dt_baseline`.",
     ):
         im_lm_svi_fitted.estimate_effect(
-            output_baseline=im_lm_svi_fitted.sample_prior_predictive_on_batch(X),
+            output_baseline=im_lm_svi_fitted.log_likelihood(X, y, store="memory"),
             output_intervention=im_lm_svi_fitted.predict_on_batch(X),
         )
 

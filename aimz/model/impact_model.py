@@ -1816,7 +1816,10 @@ class ImpactModel(BaseModel):
         """Estimate the effect of an intervention.
 
         This computes (intervention - baseline) for every variable in the shared
-        predictive group, preserving sampling (chain/draw) dimensions.
+        predictive group, preserving sampling (chain/draw) dimensions. Precomputed
+        outputs of :meth:`~aimz.ImpactModel.sample_prior_predictive` give the effect
+        under the prior, also for an unfitted model; pass the same ``rng_key`` to both
+        calls so the scenarios share their prior draws.
 
         Args:
             output_baseline: Precomputed output for the baseline scenario.
@@ -1836,13 +1839,15 @@ class ImpactModel(BaseModel):
 
         Returns:
             The estimated impact of an intervention. Posterior samples are included if
-            available. When a scenario's output was streamed to disk, the effect tree
-            records that scenario's call-specific artifact path in an
-            ``artifact_path_baseline`` / ``artifact_path_intervention`` root attribute;
-            in-memory results set neither.
+            available, except in an effect under the prior. When a scenario's output
+            was streamed to disk, the effect tree records that scenario's
+            call-specific artifact path in an ``artifact_path_baseline`` /
+            ``artifact_path_intervention`` root attribute; in-memory results set
+            neither.
 
         Raises:
-            NotFittedError: If the model is not fitted.
+            NotFittedError: If the model is not fitted and ``output_baseline`` or
+                ``output_intervention`` is not provided.
             ValueError: If neither ``output_baseline`` nor ``args_baseline`` is
                 provided, if neither ``output_intervention`` nor
                 ``args_intervention`` is provided, if an ``intervention`` passed
@@ -1854,7 +1859,8 @@ class ImpactModel(BaseModel):
             :meth:`~aimz.ImpactModel.cleanup` to remove the temporary directory if
             created.
         """
-        _check_is_fitted(self)
+        if output_baseline is None or output_intervention is None:
+            _check_is_fitted(self)
         for output, args in (
             (output_baseline, args_baseline),
             (output_intervention, args_intervention),
@@ -1874,7 +1880,12 @@ class ImpactModel(BaseModel):
             )
             raise ValueError(msg)
 
-        _predict = self.predict_on_batch if on_batch else self.predict
+        # Ask predict_on_batch for a tree, which names its own predictive group
+        _predict = cast(
+            "Callable[..., xr.DataTree]",
+            self.predict_on_batch if on_batch else self.predict,
+        )
+        overrides = {"return_datatree": True} if on_batch else {}
 
         # Lazily generated scenarios share one sampling key, so their contrast carries
         # only the intervention.
@@ -1893,40 +1904,19 @@ class ImpactModel(BaseModel):
         dt_baseline = (
             output_baseline
             if output_baseline is not None
-            else _predict(**cast("dict", args_baseline))
+            else _predict(**{**cast("dict", args_baseline), **overrides})
         )
         dt_intervention = (
             output_intervention
             if output_intervention is not None
-            else _predict(**cast("dict", args_intervention))
+            else _predict(**{**cast("dict", args_intervention), **overrides})
         )
-
-        if isinstance(dt_baseline, dict):
-            in_sample = args_baseline.get("in_sample", True) if args_baseline else True
-            group = "posterior_predictive" if in_sample else "predictions"
-            wrapper = xr.DataTree(name="root")
-            wrapper[group] = _dict_to_datatree(
-                dt_baseline,
-                num_chains=self._num_chains,
-            )
-            dt_baseline = wrapper
-        if isinstance(dt_intervention, dict):
-            in_sample = (
-                args_intervention.get("in_sample", True) if args_intervention else True
-            )
-            group = "posterior_predictive" if in_sample else "predictions"
-            wrapper = xr.DataTree(name="root")
-            wrapper[group] = _dict_to_datatree(
-                dt_intervention,
-                num_chains=self._num_chains,
-            )
-            dt_intervention = wrapper
 
         group = _validate_group(dt_baseline, dt_intervention=dt_intervention)
 
         out = xr.DataTree(name="root")
         out[group] = dt_intervention[group] - dt_baseline[group]
-        if self.posterior:
+        if self.posterior and group != "prior_predictive":
             out["posterior"] = _dict_to_datatree(
                 self.posterior,
                 num_chains=self._num_chains,
