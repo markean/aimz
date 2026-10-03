@@ -32,7 +32,7 @@ JIT-compiled, sharded sampling streams results to chunked [Zarr](https://zarr.re
 - **Structured outputs:**
 Predictions, samples, and effect estimates are materialized as [Xarray](https://xarray.dev/) objects backed by Zarr or host memory, integrating cleanly with the scientific Python ecosystem.
 - **Intervention handling and impact modeling:**
-Specify interventions declaratively and estimate effects from posterior predictive distributions.
+Specify interventions declaratively and estimate effects from prior or posterior predictive distributions.
 - **Experiment tracking:**
 [MLflow](https://mlflow.org/) integration for logging runs, parameters, metrics, and model artifacts with full lineage.
 
@@ -57,11 +57,11 @@ from aimz import ImpactModel
 
 
 # Define a probabilistic model (kernel) using NumPyro primitives
-def model(X, y=None): ...
+def model(X, trt, y=None): ...
 
 
-# Load or prepare data
-X, y = ...
+# Load or prepare data, including the treatment trt
+X, trt, y = ...
 
 # Initialize ImpactModel with SVI or MCMC inference
 im = ImpactModel(
@@ -71,14 +71,16 @@ im = ImpactModel(
 )
 
 # Fit model with minibatch SVI and draw posterior samples
-im.fit(X, y, batch_size=32, epochs=10)
+im.fit(X, y, trt=trt, batch_size=32, epochs=10)
 
 # Generate posterior predictive samples
-dt = im.predict(X)
+dt = im.predict(X, trt=trt)
 
-# Estimate the effect of fixing the sample site "treatment" to 1.0
-dt_intervention = im.predict(X, intervention={"treatment": 1.0})
-effect = im.estimate_effect(dt, dt_intervention)
+# Estimate the effect of treating every unit versus none
+effect = im.estimate_effect(
+    args_baseline={"X": X, "trt": 0.0},
+    args_intervention={"X": X, "trt": 1.0},
+)
 ```
 
 ## Contributing
