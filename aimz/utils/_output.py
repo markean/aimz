@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from jax import Array as JaxArray
     from tqdm.auto import tqdm
     from zarr import Array, Group
+    from zarr.core.array_spec import ArrayConfigParams
 
 
 # Maximum in-flight compute steps in `_write_loop`. Depth 2 dispatches the next step
@@ -64,6 +65,9 @@ _WRITER_COUNT_MAX = 8
 # Sentinel a concurrency-safe strategy returns from ``max_writers`` to signal "no
 # strategy-imposed limit"; the effective cap is then the item count and CPU/ceiling.
 _WRITER_COUNT_UNBOUNDED = 2**31 - 1
+# Every chunk is written, even one holding only the fill value, so a chunk missing on
+# read means the artifact was removed, which `_zarr_to_datatree` reports as an error.
+_ARRAY_CONFIG: ArrayConfigParams = {"write_empty_chunks": True}
 
 
 def _iter_pipelined(
@@ -412,7 +416,10 @@ class _AppendWriteStrategy(_WriteStrategy):
             array: The site's Zarr array.
             item: The batch array to append.
         """
-        cast("Array", array).append(cast("np.ndarray", item), axis=self._axis)
+        cast("Array", array).with_config(_ARRAY_CONFIG).append(
+            cast("np.ndarray", item),
+            axis=self._axis,
+        )
 
     def create_arrays(self, site_arrays: Mapping[str, np.ndarray]) -> None:
         """Create zero-width Zarr arrays for sites not yet seen.
@@ -496,7 +503,7 @@ class _SliceWriteStrategy(_WriteStrategy):
         start, arr = cast("tuple[int, np.ndarray]", item)
         idx: list = [slice(None)] * arr.ndim
         idx[self._axis] = slice(start, start + arr.shape[self._axis])
-        cast("Array", array)[tuple(idx)] = arr
+        cast("Array", array).with_config(_ARRAY_CONFIG)[tuple(idx)] = arr
 
     def create_arrays(self, site_arrays: Mapping[str, np.ndarray]) -> None:
         """Preallocate full-size Zarr arrays for sites not yet seen.

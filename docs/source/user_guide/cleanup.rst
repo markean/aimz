@@ -116,7 +116,7 @@ The output below shows an example :external:class:`xarray.DataTree` illustrating
 .. note::
 
     A temporary directory is reclaimed when :meth:`~aimz.ImpactModel.cleanup` or :meth:`~aimz.ImpactModel.cleanup_models` is called, or when the model is garbage-collected.
-    Afterwards the returned :external:class:`xarray.DataTree` and all its group entries remain accessible, but any arrays that were stored on disk read back with **all values set to zero**, since the underlying data files are gone.
+    Afterwards the returned :external:class:`xarray.DataTree` keeps its structure (groups, dimensions, coordinates, and attributes) and its in-memory ``posterior`` group, but reading the values of any array that was stored on disk raises an error, since the underlying data files are gone.
     A temporary result is therefore valid only while its model is alive; pass an explicit ``output_dir`` to keep results beyond the model's lifetime.
     Results returned by ``store="memory"`` live entirely in host memory and are unaffected by cleanup.
 

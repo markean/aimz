@@ -93,7 +93,7 @@ requires-dist = [
     { name = "sphinx-copybutton", marker = "extra == 'docs'", specifier = ">=0.5" },
     { name = "sphinx-design", marker = "extra == 'docs'", specifier = ">=0.7" },
     { name = "xarray", specifier = ">=2026.1" },
-    { name = "zarr", specifier = ">=3,<4" },
+    { name = "zarr", specifier = ">=3.2" },
 ]
 provides-extras = ["dev", "gpu", "mlflow", "docs"]
 

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+
+- Reading a tree from a streaming method with `store="persistent"` after its artifact was removed, for example by {meth}`~aimz.ImpactModel.cleanup` or by the model being garbage-collected, now raises an error instead of returning zeros for every value ([#384](https://github.com/markean/aimz/issues/384)).
+
 ### Fixed
 
 - The streaming predictive methods ({meth}`~aimz.ImpactModel.predict`, {meth}`~aimz.ImpactModel.sample_posterior_predictive`, {meth}`~aimz.ImpactModel.sample_prior_predictive`, and lazily generated scenarios in {meth}`~aimz.ImpactModel.estimate_effect`) with `store="persistent"` now return the sites of the output group sorted by name, as with `store="memory"`, instead of in an arbitrary order that could differ between calls ([#382](https://github.com/markean/aimz/issues/382)).
