@@ -18,7 +18,6 @@ Two regression kernels are fitted to data generated with a quadratic term, so th
 
     import logging
 
-    import arviz_stats as azs
     import jax.numpy as jnp
     import numpyro.distributions as dist
     from jax import random
@@ -28,6 +27,8 @@ Two regression kernels are fitted to data generated with a quadratic term, so th
     from numpyro.infer.autoguide import AutoNormal
 
     from aimz import ImpactModel
+
+    import arviz_stats as azs
 
     logging.basicConfig(level=logging.INFO, force=True)
 

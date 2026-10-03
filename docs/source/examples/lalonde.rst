@@ -10,9 +10,6 @@ The model includes a treatment x covariate interaction, decomposing the overall 
 
     import logging
 
-    import arviz_base as az
-    import arviz_plots as azp
-    import arviz_stats as azs
     import jax
     import jax.numpy as jnp
     import matplotlib.pyplot as plt
@@ -24,6 +21,10 @@ The model includes a treatment x covariate interaction, decomposing the overall 
     from numpyro.infer import MCMC, NUTS
 
     from aimz import ImpactModel
+
+    import arviz_base as az
+    import arviz_plots as azp
+    import arviz_stats as azs
 
     logging.basicConfig(level=logging.INFO, force=True)
 
