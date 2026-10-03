@@ -2,7 +2,7 @@ Interventions & Effect Estimation
 =================================
 Interventions let you explore how a model's predictions change when specified variables are set to chosen values.
 You can use them with prior predictive sampling to explore the implications of your assumptions, or with posterior predictive sampling to incorporate what the model has learned from data.
-For posterior predictive scenarios, :meth:`~aimz.ImpactModel.estimate_effect` computes the difference between a baseline and an intervention scenario while preserving the individual draws.
+For prior or posterior predictive scenarios, :meth:`~aimz.ImpactModel.estimate_effect` computes the difference between a baseline and an intervention scenario while preserving the individual draws.
 
 
 Interventions
@@ -55,9 +55,9 @@ Here, the baseline holds ``z`` at one and the modified scenario holds it at zero
 
 Effect Estimation
 -----------------
-The :meth:`~aimz.ImpactModel.estimate_effect` method compares two posterior predictive scenarios by computing their elementwise difference (``intervention - baseline``).
-It requires a fitted model and accepts scenarios in ``posterior_predictive`` or ``predictions``; it does not accept ``prior_predictive`` results.
-The returned :class:`~xarray.DataTree` contains the differences in the shared predictive group, preserving the ``chain`` and ``draw`` dimensions, and includes the stored posterior samples when available.
+The :meth:`~aimz.ImpactModel.estimate_effect` method compares two predictive scenarios by computing their elementwise difference (``intervention - baseline``).
+It accepts scenarios in ``posterior_predictive``, ``predictions``, or ``prior_predictive``, and requires a fitted model only to generate a scenario from an argument dictionary.
+The returned :class:`~xarray.DataTree` contains the differences in the shared predictive group, preserving the ``chain`` and ``draw`` dimensions, and includes the stored posterior samples when available, except for prior predictive scenarios.
 
 One baseline and one intervention scenario must be provided, either eagerly (``output_baseline`` / ``output_intervention``) or lazily through argument dictionaries (``args_baseline`` / ``args_intervention``).
 Mixing is allowed; for example, a precomputed baseline can be supplied with ``output_baseline`` while the intervention is generated lazily with ``args_intervention`` (or the reverse).
@@ -96,6 +96,27 @@ Mixed (precomputed baseline, lazy intervention)::
         },
     )
 
+Prior predictive (precomputed scenarios, no fitted model needed)::
+
+    key = random.key(0)
+    prior_baseline = im.sample_prior_predictive_on_batch(
+        X,
+        intervention={"z": 1.0},
+        rng_key=key,
+    )
+    prior_modified = im.sample_prior_predictive_on_batch(
+        X,
+        intervention={"z": 0.0},
+        rng_key=key,
+    )
+    effect = im.estimate_effect(
+        output_baseline=prior_baseline,
+        output_intervention=prior_modified,
+    )
+
+This gives the effect the model implies before seeing any data.
+Pass the same ``rng_key`` to both calls so the two scenarios share their prior draws and differ only by the intervention.
+
 .. note::
 
    A lazily generated scenario (``args_baseline`` / ``args_intervention``) runs the streaming :meth:`~aimz.ImpactModel.predict` internally with its default persistent store, writing artifacts under the model's temporary directory (unless an ``output_dir`` or ``store`` entry is included in the argument dictionary).
@@ -107,7 +128,7 @@ Any subsequent summary (e.g. mean, intervals) can be computed using Xarray, Arvi
 
 .. note::
 
-   :meth:`~aimz.ImpactModel.estimate_effect` computes the posterior predictive contrast between two scenarios under structural interventions, propagating full posterior uncertainty through the difference.
+   :meth:`~aimz.ImpactModel.estimate_effect` computes the predictive contrast between two scenarios under structural interventions, propagating the full posterior (or prior) uncertainty through the difference.
    Whether this contrast admits a causal interpretation depends on the structural assumptions encoded in the model (the kernel): causal identification is a property of the model specification, not the estimation procedure.
    When the user-defined model encodes appropriate causal assumptions, such as conditioning on confounders and specifying correct functional relationships, this contrast corresponds to a causal effect estimate.
 

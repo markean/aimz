@@ -65,27 +65,32 @@ def _check_is_fitted(model: ImpactModel) -> None:
 def _validate_group(dt_baseline: xr.DataTree, dt_intervention: xr.DataTree) -> str:
     """Select the shared predictive group and check the two scenarios are comparable.
 
-    Picks ``predictions`` if present in ``dt_baseline``, otherwise
-    ``posterior_predictive``, and verifies it exists in both trees.
+    Picks the first of ``predictions``, ``posterior_predictive``, and
+    ``prior_predictive`` present in ``dt_baseline``, and verifies it exists in both
+    trees.
 
     Args:
         dt_baseline: Precomputed output for the baseline scenario.
         dt_intervention: Precomputed output for the intervention scenario.
 
     Returns:
-        The group name (``predictions`` or ``posterior_predictive``).
+        The group name (``predictions``, ``posterior_predictive``, or
+        ``prior_predictive``).
 
     Raises:
-        ValueError: If the chosen group is missing from ``dt_baseline`` or
-            ``dt_intervention``.
+        ValueError: If ``dt_baseline`` has none of these groups, or the chosen group
+            is missing from ``dt_intervention``.
         UserWarning: If the chosen group's dimension sizes or coordinate labels
             differ between the two scenarios (the effect subtraction would then
             inner-join to the overlap).
     """
-    group = (
-        "predictions"
-        if "predictions" in dt_baseline.children
-        else "posterior_predictive"
+    group = next(
+        (
+            name
+            for name in ("predictions", "posterior_predictive", "prior_predictive")
+            if name in dt_baseline.children
+        ),
+        "posterior_predictive",
     )
 
     if group not in dt_baseline.children:
