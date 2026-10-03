@@ -9,9 +9,6 @@ We build two `NumPyro`_ models, one for conversion and one for spend (a logistic
 
     import logging
 
-    import arviz_base as az
-    import arviz_plots as azp
-    import arviz_stats as azs
     import jax
     import jax.numpy as jnp
     import matplotlib.pyplot as plt
@@ -24,6 +21,10 @@ We build two `NumPyro`_ models, one for conversion and one for spend (a logistic
     from numpyro.infer import MCMC, NUTS
 
     from aimz import ImpactModel
+
+    import arviz_base as az
+    import arviz_plots as azp
+    import arviz_stats as azs
 
     logging.basicConfig(level=logging.INFO, force=True)
 
