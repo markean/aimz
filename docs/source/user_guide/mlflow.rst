@@ -81,9 +81,9 @@ Artifacts
     + An input example is copied from the first few rows of the data passed to :meth:`~aimz.ImpactModel.fit` or :meth:`~aimz.ImpactModel.fit_on_batch`, before training starts.
     + If the first positional argument (``X``) is an :class:`~aimz.utils.data.ArrayLoader`, the example is built from its underlying arrays except for the output variable.
     + A signature is inferred by running a short forward pass through :meth:`~aimz.ImpactModel.predict` on the input example, with the ``progress`` parameter recorded in the signature so it can be passed at inference time.
-    + Non-array keyword arguments passed to the kernel, such as a scalar hyperparameter, are logged as parameters but are left out of the example and the signature, and the model does not store them.
-      If the kernel requires such an argument, no signature is inferred, and the argument goes in the dict input when predicting.
-      If the kernel gives it a default, predictions through the pyfunc interface use that default instead of the training value, so log the model manually with the value in the params of the input example, such as ``input_example=(X[:5], {"scale": 2.0})``, to record it in the signature.
+    + Non-array keyword arguments passed to the kernel, such as a scalar hyperparameter, are logged as parameters.
+      Booleans, integers, floats, and strings are also recorded in the signature with their training values as defaults, so predictions through the pyfunc interface use those values unless ``params`` overrides them.
+      Other non-array values are left out of the example and the signature: if the kernel requires such an argument, no signature is inferred and the argument goes in the dict input when predicting, and if the kernel gives it a default, predictions through the pyfunc interface use that default.
 
 
 .. note::

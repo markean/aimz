@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Reading a tree from a streaming method with `store="persistent"` after its artifact was removed, for example by {meth}`~aimz.ImpactModel.cleanup` or by the model being garbage-collected, now raises an error instead of returning zeros for every value ([#384](https://github.com/markean/aimz/issues/384)).
+- {func}`~aimz.mlflow.autolog` now records the boolean, integer, float, and string keyword arguments passed to the kernel in the logged model's signature, with their training values as defaults, so predictions through the pyfunc interface use those values instead of the kernel's defaults ([#387](https://github.com/markean/aimz/issues/387)).
 
 ### Fixed
 

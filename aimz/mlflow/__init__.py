@@ -30,7 +30,7 @@ from __future__ import annotations
 import logging
 import pickle
 from importlib.metadata import version
-from inspect import getsource
+from inspect import getsource, signature
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -727,6 +727,7 @@ def _log_model_with_signature(
     model_id: str | None,
     input_example: dict[str, np.ndarray] | np.ndarray | None,
     input_example_exc: Exception | None,
+    params: dict[str, object],
     *,
     log_input_examples: bool,
     log_model_signatures: bool,
@@ -740,6 +741,8 @@ def _log_model_with_signature(
             training, or ``None`` if collecting it failed.
         input_example_exc: The exception raised while collecting the input example,
             if any.
+        params: Prediction parameters to record in the signature, with their values
+            as defaults.
         log_input_examples: Whether to log the input example along with the model.
         log_model_signatures: Whether to log the model signature along with the model.
     """
@@ -752,13 +755,13 @@ def _log_model_with_signature(
     def infer_model_signature(input_example: object) -> ModelSignature | None:
         # `ImpactModel.predict` returns an `xarray.DataTree`, which schema inference
         # does not support, so the signature is inferred through the same helper used
-        # at save time, with the `progress` parameter recorded in the signature.
+        # at save time, with `params` recorded in the signature.
         # Signature inference runs a real prediction; restore the rng key so that
         # autologging does not change the model's future prediction stream.
         rng_key = model.rng_key
         try:
             return _infer_signature_from_input_example(
-                _Example((input_example, {"progress": False})),
+                _Example((input_example, params)),
                 _AimzModelWrapper(model),
             )
         finally:
@@ -1011,6 +1014,17 @@ def autolog(
                 model_id,
                 input_example,
                 input_example_exc,
+                # Kernel keywords a signature can hold keep their training values as
+                # defaults, so pyfunc predictions do not fall back to the kernel's
+                {
+                    "progress": False,
+                    **{
+                        k: v
+                        for k, v in kwargs.items()
+                        if k not in signature(original).parameters
+                        and isinstance(v, (bool, int, float, str))
+                    },
+                },
                 log_input_examples=log_input_examples,
                 log_model_signatures=log_model_signatures,
             )
