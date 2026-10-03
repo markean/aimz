@@ -107,7 +107,8 @@ def lm_with_kwargs_array(X: Array, c: Array, y: Array | None = None) -> None:
     b = sample("b", dist.Normal(0, 1))
     mu = jnp.dot(X, w) + b + c
     sigma = sample("sigma", dist.Exponential(1.0))
-    sample("y", dist.Normal(mu, sigma), obs=y)
+    with numpyro.plate("data", size=100, subsample_size=X.shape[0]):
+        sample("y", dist.Normal(mu, sigma), obs=y)
 
 
 def mlm(X: Array, y: Array | None = None) -> None:

@@ -20,10 +20,10 @@ from jax import Array, random
 from numpyro.infer import SVI
 
 from aimz import ImpactModel
-from tests.conftest import lm
+from tests.conftest import lm_subsample
 
 
-@pytest.mark.parametrize("vi", [lm], indirect=True)
+@pytest.mark.parametrize("vi", [lm_subsample], indirect=True)
 def test_rng_key_consistency(synthetic_data: tuple[Array, Array], vi: SVI) -> None:
     """Test that the ImpactModel's internal rng_key remains unchanged.
 
@@ -32,7 +32,7 @@ def test_rng_key_consistency(synthetic_data: tuple[Array, Array], vi: SVI) -> No
     """
     X, y = synthetic_data
     rng_key = random.key(42)
-    im = ImpactModel(lm, rng_key=rng_key, inference=vi)
+    im = ImpactModel(lm_subsample, rng_key=rng_key, inference=vi)
     assert jnp.allclose(im.rng_key, rng_key)
     im.train_on_batch(X=X, y=y, rng_key=rng_key)
     assert jnp.allclose(im.rng_key, rng_key)
