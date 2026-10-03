@@ -16,13 +16,18 @@
 
 from queue import Queue
 
+import jax.numpy as jnp
+import numpy as np
+import numpyro.distributions as dist
 import pytest
 import xarray as xr
 from jax import Array, random
+from numpyro import deterministic, plate, sample
 from numpyro.infer import SVI
+from zarr.errors import ChunkNotFoundError
 
 from aimz import ImpactModel
-from tests.conftest import lm
+from tests.conftest import _make_svi, lm
 
 
 def test_predict_persistent_matches_memory_obs(
@@ -239,6 +244,33 @@ def test_memory_store_leaves_filesystem_untouched(
         im.predict(X, store="memory", batch_size=30, progress=False)
 
     assert im.temp_dir is None
+
+
+def test_persistent_read_raises_after_artifact_removal(
+    synthetic_data: tuple[Array, Array],
+) -> None:
+    """A chunk holding only the fill value reads back; a removed artifact raises."""
+    X, y = synthetic_data
+    t = jnp.zeros(len(X)).at[60:].set(1.0)
+
+    def kernel(X: Array, t: Array, y: Array | None = None) -> None:
+        b = sample("b", dist.Normal())
+        with plate("n", size=X.shape[0]):
+            # Exactly +0.0 where `t` is 0, so the first two chunks hold only the fill
+            # value
+            deterministic("effect", t * b**2)
+            sample("y", dist.Normal(X.sum(axis=-1) + b * t, 1.0), obs=y)
+
+    im = ImpactModel(kernel, rng_key=random.key(42), inference=_make_svi(kernel))
+    im.fit_on_batch(X=X, y=y, t=t, num_steps=10, num_samples=10, progress=False)
+    dt = im.predict(X, t=t, batch_size=30, progress=False)
+
+    np.testing.assert_array_equal(dt["posterior_predictive"]["effect"][..., :60], 0.0)
+
+    im.cleanup()
+
+    with pytest.raises(ChunkNotFoundError):
+        dt["posterior_predictive"]["effect"].load()
 
 
 def test_interrupted_memory_stream_releases_partial_batches(

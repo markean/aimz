@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, cast
 import numpy as np
 import xarray as xr
 from xarray import open_zarr
+from zarr import config as zarr_config
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -116,7 +117,8 @@ def _zarr_to_datatree(artifact_path: Path, num_chains: int = 1) -> xr.DataTree:
         The loaded dataset with ``chain`` and ``draw`` dimensions, along with
             coordinates for each array dimension.
     """
-    ds = open_zarr(artifact_path, consolidated=False)
+    with zarr_config.set({"array.read_missing_chunks": False}):
+        ds = open_zarr(artifact_path, consolidated=False)
     ds = ds[sorted(ds.data_vars)]
     # An empty result (no return sites) has no draw axis to split into chains
     ds = (

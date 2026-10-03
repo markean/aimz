@@ -20,7 +20,7 @@ dependencies = [
     "numpyro>=0.22",
     "psutil>=6",
     "xarray>=2026.1",
-    "zarr>=3,<4",
+    "zarr>=3.2",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
