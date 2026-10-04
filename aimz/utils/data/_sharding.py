@@ -20,6 +20,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Literal
 
 import jax.numpy as jnp
+import numpy as np
 from jax import Array, device_put, jit, lax, random, shard_map
 from jax.sharding import PartitionSpec
 
@@ -345,6 +346,24 @@ def _replicate(arr: ArrayLike, sharding: Sharding | None) -> Array:
     return device_put(jnp.asarray(arr), device=sharding)
 
 
+@partial(jit, static_argnames="size")
+def _take_draws(arr: Array, start: int, *, size: int) -> Array:
+    """Take ``size`` draws from ``start`` along the leading axis.
+
+    ``start`` is traced, so every chunk of a call reuses one compiled program. Indices
+    past the last draw repeat it, which pads a shorter last chunk.
+
+    Args:
+        arr: The whole array of draws or per-draw keys.
+        start: Index of the first draw to take.
+        size: Number of draws to take.
+
+    Returns:
+        The ``size`` draws starting at ``start``.
+    """
+    return arr[jnp.minimum(start + jnp.arange(size), arr.shape[0] - 1)]
+
+
 def _prepare_draw_chunk(
     posterior: dict[str, Array],
     draw_keys: Array | None,
@@ -357,11 +376,12 @@ def _prepare_draw_chunk(
     """Slice, pad, and shard one draw chunk for draw-parallel streaming.
 
     Returns ``(chunk_samples, chunk_keys, per_device)`` for draws ``[start:stop)``: the
-    posterior slice and per-draw keys edge-padded to ``size`` draws rounded up to a
+    posterior slice and per-draw keys padded to ``size`` draws rounded up to a
     multiple of ``num_devices``, so a shorter last chunk has the same shape as the
     others (reusing their compiled program) and splits evenly under draw-parallel
-    sharding, with the per-device draw count. ``chunk_samples`` is empty for prior
-    predictive; ``chunk_keys`` is ``None`` when no keys are used.
+    sharding, with the per-device draw count. A host-backed posterior is sliced and
+    padded on the host, so only the keys need a compiled program. ``chunk_samples`` is
+    empty for prior predictive; ``chunk_keys`` is ``None`` when no keys are used.
 
     Args:
         posterior: The whole posterior to slice (empty for prior predictive).
@@ -380,21 +400,18 @@ def _prepare_draw_chunk(
     clen = stop - start
     clen_pad = -(-max(clen, size) // num_devices) * num_devices
     per_device, n_pad = clen_pad // num_devices, clen_pad - clen
-    chunk_samples = {
-        k: jnp.pad(
-            v[start:stop],
-            [(0, n_pad), *([(0, 0)] * (v.ndim - 1))],
-            mode="edge",
-        )
-        for k, v in posterior.items()
-    }
-    chunk_keys = None
-    if draw_keys is not None:
-        chunk_keys = draw_keys[start:stop]
-        if n_pad > 0:
-            chunk_keys = jnp.concatenate(
-                [chunk_keys, chunk_keys[jnp.zeros(n_pad, dtype=int)]],
-            )
+    chunk_samples = {}
+    for k, v in posterior.items():
+        if isinstance(v, Array):
+            chunk_samples[k] = _take_draws(v, start, size=clen_pad)
+            continue
+        arr = v[start:stop]
+        if n_pad:
+            arr = np.pad(arr, [(0, n_pad), *[(0, 0)] * (arr.ndim - 1)], mode="edge")
+        chunk_samples[k] = arr
+    chunk_keys = (
+        None if draw_keys is None else _take_draws(draw_keys, start, size=clen_pad)
+    )
     if sharding is not None:
         if chunk_samples:
             chunk_samples = device_put(chunk_samples, device=sharding)
