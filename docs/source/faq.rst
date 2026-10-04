@@ -162,6 +162,8 @@ Using the same initial key ensures that all subsequent stochastic operations are
 Stochastic methods accept an optional ``rng_key`` for per-call determinism.
 If provided, it affects only that call and does not modify the model's internal key.
 If omitted, a new subkey is derived internally, so repeated calls may produce different results.
+Under the default ``shard_axis="obs"``, the streaming methods draw each batch with its own key, so their results also depend on ``batch_size`` and the number of devices; under ``shard_axis="draw"`` they depend on neither.
+When ``batch_size`` is not given, the automatic choice can also depend on the machine's CPU count, so pass ``batch_size`` explicitly to reproduce results across machines.
 To fully reproduce results, log the initial seed along with other artifacts.
 
 

@@ -57,7 +57,10 @@ if TYPE_CHECKING:
 # transfer and the host-side write work; each in-flight step holds one output chunk on
 # device, so raising this raises peak device memory proportionally.
 _PIPELINE_DEPTH = 2
-_QUEUE_SIZE_MAX = 128
+# Ceiling on the items in flight on the host, queued plus being written. The pool
+# drains the queue as fast as the store allows, so a deeper queue adds no throughput;
+# it only holds more batches in memory when the store is slower than the producer.
+_QUEUE_SIZE_MAX = 16
 # Ceiling on the automatically chosen writer-thread pool size. Guards against
 # oversubscribing cores/disk; the effective count is further bounded by the write
 # strategy's own ceiling and the number of items.
