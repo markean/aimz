@@ -12,6 +12,7 @@ User Guide
    model_persistence
    mlflow
    intervention
+   estimands
    model_comparison
    dataloader
    mcmc
