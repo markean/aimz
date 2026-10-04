@@ -39,6 +39,7 @@ from jax import (
     device_get,
     jit,
     local_device_count,
+    local_devices,
     make_mesh,
     random,
 )
@@ -174,6 +175,7 @@ class ImpactModel(BaseModel):
                 (self._num_devices,),
                 axis_names=("obs",),
                 axis_types=(AxisType.Explicit,),
+                devices=local_devices(),
             )
             partitioned = NamedSharding(mesh, spec=PartitionSpec("obs"))
             replicated = NamedSharding(mesh, spec=PartitionSpec())
