@@ -39,7 +39,7 @@ A generator is consumed once, so build a fresh one for each call.
 
     Data loaders apply to the streaming methods under ``shard_axis="obs"`` (the default).
     ``shard_axis="draw"`` holds the whole input resident on every device, so it requires an in-memory array (see :doc:`sharding`).
-    :meth:`~aimz.ImpactModel.fit` accepts arrays or an :class:`~aimz.utils.data.ArrayLoader`; for any other loader, write a training loop with :meth:`~aimz.ImpactModel.train_on_batch` (see :ref:`external-loaders`).
+    :meth:`~aimz.ImpactModel.fit` iterates a data loader once per epoch, so with more than one epoch pass a loader that can be iterated repeatedly instead of a generator (see :ref:`external-loaders`).
     The ``batch_size`` argument of the streaming methods is ignored for a loader, which controls its own batching.
 
 
@@ -112,7 +112,7 @@ You can keep arrays on device by constructing a loader explicitly with ``to_jax=
 
 Integration with High-Level Methods
 -----------------------------------
-The streaming methods accept raw arrays (``X``, ``y``, etc.), an :class:`~aimz.utils.data.ArrayLoader`, or any data loader satisfying the contract above, while :meth:`~aimz.ImpactModel.fit` accepts raw arrays or an :class:`~aimz.utils.data.ArrayLoader`.
+The streaming methods and :meth:`~aimz.ImpactModel.fit` accept raw arrays (``X``, ``y``, etc.), an :class:`~aimz.utils.data.ArrayLoader`, or any data loader satisfying the contract above.
 Passing a loader gives finer control over batch size, ordering, shuffling, and storage backend (see above).
 If the user passes raw arrays instead, aimz builds a temporary loader internally.
 With ``batch_size=None``, :meth:`~aimz.ImpactModel.fit` uses the whole dataset as a single batch in each epoch, while the streaming methods choose a batch size automatically.
@@ -195,7 +195,20 @@ For the streaming methods, wrap an external loader in a generator that converts 
     dt = im.predict(batches())
     ll = im.log_likelihood(batches())
 
-For training, iterate the loader yourself and call :meth:`~aimz.ImpactModel.train_on_batch` on each batch:
+For training, pass the loader to :meth:`~aimz.ImpactModel.fit`, which iterates it once per epoch.
+A generator is consumed after one pass, so for several epochs wrap the loader in an object that starts a new pass each time it is iterated:
+
+.. code-block:: python
+
+    class Batches:
+        def __iter__(self):
+            for X_batch, y_batch in loader:
+                yield {"X": np.asarray(X_batch), "y": np.asarray(y_batch)}
+
+
+    im.fit(Batches(), epochs=10)
+
+For a custom training loop, iterate the loader yourself and call :meth:`~aimz.ImpactModel.train_on_batch` on each batch:
 
 .. code-block:: python
 

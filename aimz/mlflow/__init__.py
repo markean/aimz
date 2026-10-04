@@ -38,6 +38,7 @@ import mlflow
 import numpy as np
 import yaml
 from jax import random
+from jax.typing import ArrayLike
 from mlflow import pyfunc
 from mlflow.data.code_dataset_source import CodeDatasetSource
 from mlflow.data.numpy_dataset import from_numpy
@@ -678,6 +679,10 @@ def _run_params(
     X = kwargs["X"] if "X" in kwargs else args[0]
     if isinstance(X, ArrayLoader):
         params_to_log_for_fn |= {"batch_size": X.batch_size, "shuffle": X.shuffle}
+    elif not isinstance(X, ArrayLike):
+        # Another data loader batches and orders the data itself
+        params_to_log_for_fn.pop("batch_size", None)
+        params_to_log_for_fn.pop("shuffle", None)
     return {**params, **params_to_log_for_fn}
 
 
@@ -698,6 +703,10 @@ def _get_input_example(
 
     Returns:
         A copy of the first few rows of the training data.
+
+    Raises:
+        TypeError: If the training data is a data loader other than an
+            :class:`~aimz.utils.data.ArrayLoader`.
     """
     from aimz.utils.data import ArrayLoader
 
@@ -711,6 +720,9 @@ def _get_input_example(
         if len(input_example) == 1:
             return next(iter(input_example.values()))
         return input_example
+    if not isinstance(X, ArrayLike):
+        msg = "A data loader other than an ArrayLoader has no arrays to copy"
+        raise TypeError(msg)
     n_obs = len(np.asarray(X))
     input_example = {
         "X": np.array(np.asarray(X)[:INPUT_EXAMPLE_SAMPLE_ROWS]),
@@ -841,6 +853,9 @@ def _log_aimz_dataset(
         if len(features) == 1:
             features = next(iter(features.values()))
         label = X.dataset.arrays.get(aimz_model.param_output)
+    elif not isinstance(X, ArrayLike):
+        # Another data loader holds no arrays to record without consuming it
+        return
     else:
         features = {
             "X": np.asarray(X),

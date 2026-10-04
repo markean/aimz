@@ -173,6 +173,20 @@ class TestArrayLoader:
         assert out.posterior_predictive["y"].sizes["draw"] == num_samples
 
     @pytest.mark.parametrize("vi", [lm_subsample], indirect=True)
+    def test_fit_exhausted_data_loader_raises(
+        self,
+        synthetic_data: tuple[Array, Array],
+        vi: SVI,
+    ) -> None:
+        """A data loader that yields no batches in an epoch raises an error."""
+        X, y = synthetic_data
+        im = ImpactModel(lm_subsample, rng_key=random.key(42), inference=vi)
+        # A one-shot iterator is exhausted after the first epoch
+        batches = iter([{"X": X, "y": y}])
+        with pytest.raises(ValueError, match="yielded no batches in epoch 2"):
+            im.fit(batches, epochs=2, progress=False)
+
+    @pytest.mark.parametrize("vi", [lm_subsample], indirect=True)
     def test_fit_consistency_with_array_and_dataloader(
         self,
         synthetic_data: tuple[Array, Array],
