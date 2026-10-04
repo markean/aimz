@@ -1295,7 +1295,7 @@ class ImpactModel(BaseModel):
 
     def fit(
         self,
-        X: ArrayLike | ArrayLoader,
+        X: ArrayLike | ArrayLoader | Iterable[Mapping[str, Array | np.ndarray]],
         y: ArrayLike | None = None,
         *,
         num_samples: int = 1000,
@@ -1314,8 +1314,9 @@ class ImpactModel(BaseModel):
         then posterior samples are drawn from the fitted model.
 
         Args:
-            X: Input array with observations on the leading axis, or an
-                :class:`~aimz.utils.data.ArrayLoader`.
+            X: Input array with observations on the leading axis, or a data loader
+                yielding batch mappings keyed by kernel parameter names, including the
+                observed output. A data loader is iterated once per epoch.
             y: Output array with observations on the leading axis. Must be ``None``
                 if ``X`` is a data loader.
             num_samples: The number of posterior samples to draw.
@@ -1340,11 +1341,10 @@ class ImpactModel(BaseModel):
         Raises:
             TypeError: If :attr:`~aimz.ImpactModel.param_input` or
                 :attr:`~aimz.ImpactModel.param_output` is passed as an argument, the
-                inference method is MCMC, ``X`` is another data loader rather than
-                arrays or an :class:`~aimz.utils.data.ArrayLoader`, or ``y`` is passed
-                with a data loader ``X``.
-            ValueError: If ``y`` is missing when ``X`` is array-like, or ``y`` does
-                not share ``X``'s leading-axis size.
+                inference method is MCMC, or ``y`` is passed with a data loader ``X``.
+            ValueError: If ``y`` is missing when ``X`` is array-like, ``y`` does not
+                share ``X``'s leading-axis size, or a data loader yields no batches
+                in an epoch.
 
         Note:
             This method continues training from the existing SVI state if available.
@@ -1354,12 +1354,6 @@ class ImpactModel(BaseModel):
             similar constructs).
         """
         _validate_aligned_inputs(X, y=y)
-        if not isinstance(X, (ArrayLike, ArrayLoader)):
-            msg = (
-                f"`fit()` requires arrays or an ArrayLoader, got {type(X).__name__!r}; "
-                "use `train_on_batch()` for other data loaders."
-            )
-            raise TypeError(msg)
         if y is None and isinstance(X, ArrayLike):
             msg = (
                 "`y` is required for `fit()` when `X` is array-like. "
@@ -1384,7 +1378,11 @@ class ImpactModel(BaseModel):
             param_input=self.param_input,
             param_output=self.param_output,
             rng_key=rng_subkey,
-            batch_size=batch_size if batch_size is not None else len(cast("Sized", X)),
+            batch_size=(
+                len(cast("Sized", X))
+                if batch_size is None and isinstance(X, ArrayLike)
+                else batch_size
+            ),
             num_samples=num_samples,
             shuffle=shuffle,
             device=None,
@@ -1392,16 +1390,16 @@ class ImpactModel(BaseModel):
         )
         # Validate the provided parameters against the kernel's signature; the fields
         # of a data loader may supply the remaining ones
-        if isinstance(X, ArrayLoader):
-            missing = {self.param_input, self.param_output} - X.dataset.arrays.keys()
-            if missing:
-                msg = f"The data loader has no field named {min(missing)!r}."
-                raise ValueError(msg)
-            signature(self.kernel).bind_partial(**kwargs)
-        else:
+        names = {self.param_input, self.param_output}
+        if isinstance(X, ArrayLoader) and (missing := names - X.dataset.arrays.keys()):
+            msg = f"The data loader has no field named {min(missing)!r}."
+            raise ValueError(msg)
+        if isinstance(X, ArrayLike):
             signature(self.kernel).bind(
                 **{self.param_input: X, self.param_output: y, **kwargs},
             )
+        else:
+            signature(self.kernel).bind_partial(**kwargs)
         # Commit model state only once the inputs are accepted
         self._rng_key = rng_key_model
 
@@ -1413,7 +1411,8 @@ class ImpactModel(BaseModel):
             pbar = tqdm(
                 dataloader,
                 desc=f"Epoch {epoch + 1}/{epochs}",
-                total=len(cast("ArrayLoader", dataloader)),
+                # Other loaders need not define a length
+                total=len(dataloader) if isinstance(dataloader, ArrayLoader) else None,
                 disable=not progress,
                 dynamic_ncols=True,
             )
@@ -1429,6 +1428,13 @@ class ImpactModel(BaseModel):
                 loss_batch = device_get(loss)
                 losses_epoch.append(loss_batch)
                 pbar.set_postfix({"loss": f"{float(loss_batch):.4f}"})
+            if not losses_epoch:
+                # An exhausted one-shot iterator would otherwise skip the epoch silently
+                msg = (
+                    f"The data loader yielded no batches in epoch {epoch + 1}; pass a "
+                    "loader that can be iterated once per epoch."
+                )
+                raise ValueError(msg)
             # Host-side bookkeeping: the per-step losses are already on the host, so
             # stacking or accumulating them as device arrays would only add
             # host-to-device round trips and retain one device scalar per step.

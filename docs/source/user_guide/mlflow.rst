@@ -63,6 +63,7 @@ Metrics
 Datasets
 ~~~~~~~~
 * The training data passed to :meth:`~aimz.ImpactModel.fit` or :meth:`~aimz.ImpactModel.fit_on_batch` is logged as a run input (disable with ``log_datasets=False``) and linked to the logged model entity (if a model artifact is logged)
+* A data loader other than an :class:`~aimz.utils.data.ArrayLoader` holds no arrays to copy, so no run input, input example, or signature is recorded for it
 
 Artifacts
 ~~~~~~~~~
