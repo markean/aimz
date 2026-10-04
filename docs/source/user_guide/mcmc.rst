@@ -93,3 +93,5 @@ For example:
 
     im.set_posterior_sample(mcmc.get_samples())
     im.predict_on_batch(X)
+
+With several chains, pass ``num_chains=mcmc.num_chains`` as well, so the output trees keep the chains along their ``chain`` dimension.
