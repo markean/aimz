@@ -80,7 +80,7 @@ Artifacts
 
     + An input example is copied from the first few rows of the data passed to :meth:`~aimz.ImpactModel.fit` or :meth:`~aimz.ImpactModel.fit_on_batch`, before training starts.
     + If the first positional argument (``X``) is an :class:`~aimz.utils.data.ArrayLoader`, the example is built from its underlying arrays except for the output variable.
-    + A signature is inferred by running a short forward pass through :meth:`~aimz.ImpactModel.predict` on the input example, with the ``progress`` parameter recorded in the signature so it can be passed at inference time.
+    + A signature is inferred by running a short forward pass through :meth:`~aimz.ImpactModel.predict` on the input example, with the ``progress`` and ``return_datatree`` parameters recorded in the signature so they can be passed at inference time.
     + Non-array keyword arguments passed to the kernel, such as a scalar hyperparameter, are logged as parameters.
       Booleans, integers, floats, and strings are also recorded in the signature with their training values as defaults, so predictions through the pyfunc interface use those values unless ``params`` overrides them.
       Other non-array values are left out of the example and the signature: if the kernel requires such an argument, no signature is inferred and the argument goes in the dict input when predicting, and if the kernel gives it a default, predictions through the pyfunc interface use that default.
@@ -198,8 +198,24 @@ For a model saved with a signature, dict keys that are not inputs of the signatu
 Inputs must also have the dtypes recorded in the signature, so cast new data accordingly, such as ``X_new.astype(np.float32)`` for a model saved with a ``float32`` example.
 Under the hood the pyfunc wrapper delegates to :meth:`~aimz.ImpactModel.predict`, keeping results in memory (``store="memory"``) without progress bars (``progress=False``) instead of writing them to disk with progress bars as :meth:`~aimz.ImpactModel.predict` does by default.
 
-.. note::
-   Predictions are returned as an :class:`xarray.DataTree`, which MLflow cannot serialize, so neither serving with ``mlflow models serve`` nor batch scoring with :func:`mlflow.models.predict` is supported.
+Serving
+~~~~~~~
+Predictions are returned as an :class:`xarray.DataTree`, which MLflow cannot serialize for serving with ``mlflow models serve`` or batch scoring with :func:`mlflow.models.predict`.
+For those, pass ``return_datatree=False`` through ``params``: the predictive group is then returned as a dictionary mapping each site to an array with the chain, draw, and observation axes.
+Record the parameter in the signature when saving, so that it is the default of the served model:
+
+.. code-block:: python
+
+    save_model(
+        im,
+        path="./model_aimz",
+        input_example=(
+            np.asarray(X[:5]),
+            {"progress": False, "return_datatree": False},
+        ),
+    )
+
+A model logged by :func:`~aimz.mlflow.autolog` records the parameter with the tree as its default, so pass ``return_datatree=False`` with each request instead.
 
 
 Environment & Dependencies

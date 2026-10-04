@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A model saved or logged with {mod}`aimz.mlflow` can now be served with `mlflow models serve` and scored with `mlflow.models.predict`: with `return_datatree=False` passed through `params`, the pyfunc interface returns the predictions as a dictionary of arrays instead of an {class}`xarray.DataTree`, which MLflow cannot serialize. {func}`~aimz.mlflow.autolog` records the parameter in the logged model's signature ([#298](https://github.com/markean/aimz/issues/298)).
 - The streaming predictive methods ({meth}`~aimz.ImpactModel.predict`, {meth}`~aimz.ImpactModel.sample_posterior_predictive`, {meth}`~aimz.ImpactModel.sample_prior_predictive`, and lazily generated scenarios in {meth}`~aimz.ImpactModel.estimate_effect`) with `store="persistent"` now return the sites of the output group sorted by name, as with `store="memory"`, instead of in an arbitrary order that could differ between calls ([#382](https://github.com/markean/aimz/issues/382)).
 
 ## [v0.16.0](https://github.com/markean/aimz/releases/tag/v0.16.0) - 2026-09-27
