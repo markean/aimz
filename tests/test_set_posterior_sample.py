@@ -92,3 +92,17 @@ def test_inconsistent_batch_shapes(vi: SVI) -> None:
         match="Inconsistent batch shapes found in `posterior_sample`",
     ):
         im.set_posterior_sample({"a": jnp.ones((100, 10)), "b": jnp.ones((200,))})
+
+
+@pytest.mark.parametrize("vi", [lm], indirect=True)
+def test_chain_layout(
+    synthetic_data: tuple[Array, Array],
+    im_lm_svi_fitted: ImpactModel,
+    vi: SVI,
+) -> None:
+    """Output trees keep the chains the draws are stacked from."""
+    X, _ = synthetic_data
+    num_chains = 4
+    im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
+    im.set_posterior_sample(im_lm_svi_fitted.posterior, num_chains=num_chains)
+    assert im.predict_on_batch(X).posterior_predictive.sizes["chain"] == num_chains

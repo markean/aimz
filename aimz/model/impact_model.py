@@ -1475,7 +1475,12 @@ class ImpactModel(BaseModel):
         """
         return self._is_fitted
 
-    def set_posterior_sample(self, posterior_sample: dict[str, Array]) -> Self:
+    def set_posterior_sample(
+        self,
+        posterior_sample: dict[str, Array],
+        *,
+        num_chains: int = 1,
+    ) -> Self:
         """Set posterior samples for the model.
 
         This method sets externally obtained posterior samples on the model instance,
@@ -1494,7 +1499,10 @@ class ImpactModel(BaseModel):
         `NumPyro documentation <https://num.pyro.ai/en/stable/utilities.html#predictive>`__.
 
         Args:
-            posterior_sample: Posterior samples to set for the model.
+            posterior_sample: Posterior samples to set for the model, with the draws
+                along the leading axis of each array.
+            num_chains: Number of chains the draws are stacked from, chain by chain.
+                Output trees then keep the chains along their ``chain`` dimension.
 
         Returns:
             The model instance, treated as fitted with posterior samples set, enabling
@@ -1545,7 +1553,7 @@ class ImpactModel(BaseModel):
             raise ValueError(msg)
         (self._num_samples,) = batch_shapes.pop()
         self._posterior = posterior_sample
-        self._num_chains = 1
+        self._num_chains = num_chains
         if self._kernel_spec is None:
             self._kernel_spec = KernelSpec(
                 traced=False,

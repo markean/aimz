@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - {meth}`~aimz.ImpactModel.estimate_effect` now accepts outputs of {meth}`~aimz.ImpactModel.sample_prior_predictive`, giving the effect of an intervention under the prior, and no longer requires a fitted model when both scenario outputs are passed in ([#390](https://github.com/markean/aimz/issues/390)).
+- {meth}`~aimz.ImpactModel.set_posterior_sample` now takes a `num_chains` argument, so output trees keep the chains of an imported multi-chain posterior instead of holding all draws in one chain ([#395](https://github.com/markean/aimz/issues/395)).
 
 ### Changed
 
