@@ -42,6 +42,7 @@ The Criteo Uplift Dataset
 The Criteo Uplift Prediction dataset (v2.1) was constructed from several randomized incrementality tests in online advertising.
 In each test, a random subset of users was withheld from ad targeting (control) while the remainder was eligible for ads (treated).
 The treatment group is deliberately large (~85%) because withholding ads from control users has a direct revenue cost.
+Because the tests were pooled and the rows were subsampled non-uniformly for privacy, the share of treated users is 85% overall but varies with the features.
 The dataset contains approximately 14 million rows, each corresponding to a user with 12 anonymized features (``f0`` through ``f11``), a binary treatment indicator, and two binary outcomes.
 The dataset is also available from `Hugging Face <https://huggingface.co/datasets/criteo/criteo-uplift>`_ (~300 MB compressed).
 
@@ -288,7 +289,7 @@ The observed visit rate falls within the posterior predictive distribution in al
 Treatment Effect Estimation
 ---------------------------
 
-Because the dataset comes from a randomized experiment, the average treatment effect on visit probability can be estimated by predicting under both treatment scenarios and averaging the difference.
+Because treatment was randomized within each test and the model conditions on the features, the average treatment effect on visit probability can be estimated by predicting under both treatment scenarios and averaging the difference.
 The ``treatment`` column indicates eligibility for ad targeting rather than guaranteed ad exposure, so the estimated effect is an intention-to-treat (ITT) effect: the impact of allowing users to enter the ad auction, not the causal effect of actually viewing an ad.
 Treatment is a function argument (not a ``sample`` site), so :meth:`~aimz.ImpactModel.estimate_effect` runs :meth:`~aimz.ImpactModel.predict` twice with different treatment values.
 Alternatively, precomputed prediction outputs can be passed directly to avoid computation internally.
@@ -329,7 +330,7 @@ Alternatively, precomputed prediction outputs can be passed directly to avoid co
 
 \
 
-The difference-in-means provides a simple benchmark for comparison:
+For comparison, the difference-in-means ignores the features:
 
 .. code-block:: python
 
@@ -344,6 +345,9 @@ The difference-in-means provides a simple benchmark for comparison:
 
     Difference-in-means: 0.0103
     Model:               0.0073
+
+The difference-in-means is not a reliable benchmark here, because the share of treated users varies with the features, which also predict visits.
+The model conditions on the features, so its estimate does not attribute these differences to treatment.
 
 
 Cleanup
