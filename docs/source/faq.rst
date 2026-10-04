@@ -170,7 +170,8 @@ To fully reproduce results, log the initial seed along with other artifacts.
 Why do some methods return :class:`~xarray.DataTree`?
 -----------------------------------------------------
 A :class:`~xarray.DataTree` organizes heterogeneous groups (``posterior``, ``posterior_predictive``, ``predictions``) with labeled dimensions and coordinates, facilitating I/O, slicing, and downstream analysis.
-It can also be passed directly to `ArviZ`_ functions.
+It can also be passed to `ArviZ`_ functions.
+Trees from the streaming methods are lazy, and ArviZ functions operate on loaded arrays, so call :external:meth:`~xarray.DataTree.load` on the tree first, or on a reduced result when the tree does not fit in memory.
 If desired, you can pass ``return_datatree=False`` to methods such as :meth:`~aimz.ImpactModel.predict_on_batch` to return a plain dictionary instead.
 
 
