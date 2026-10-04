@@ -129,6 +129,29 @@ def test_pyfunc_returns_arrays_for_serving(
     scoring_server.predictions_to_json(out, StringIO())
 
 
+def test_pyfunc_seed_sets_sampling_key(
+    im_lm_svi_fitted: ImpactModel,
+    synthetic_data: tuple[Array, Array],
+    tmp_path: Path,
+) -> None:
+    """A ``seed`` fixes the draws of a call; the recorded seed is the default."""
+    X, _ = synthetic_data
+    save_model(
+        im_lm_svi_fitted,
+        tmp_path / "model",
+        input_example=(
+            np.asarray(X[:5]),
+            {"progress": False, "return_datatree": False, "seed": 0},
+        ),
+    )
+    loaded = mlflow.pyfunc.load_model(str(tmp_path / "model"))
+
+    out = loaded.predict(np.asarray(X))["y"]
+    np.testing.assert_array_equal(out, loaded.predict(np.asarray(X))["y"])
+    seeded = loaded.predict(np.asarray(X), params={"seed": 1})["y"]
+    assert not np.array_equal(out, seeded)
+
+
 def test_pyfunc_predict_with_dict_input(
     im_lm_svi_fitted: ImpactModel,
     synthetic_data: tuple[Array, Array],
@@ -388,6 +411,9 @@ def test_autolog_logs_elbo_history_dataset_and_model_params(
     # The kernel source is logged, and the model carries an inferred signature
     assert "model.py" in artifacts
     assert info.signature is not None
+    # The seed is recorded without a default, so predictions stay unseeded unless set
+    seed = next(p for p in info.signature.params if p.name == "seed")
+    assert seed.default is None
 
 
 @pytest.mark.parametrize("vi", [lm_subsample], indirect=True)

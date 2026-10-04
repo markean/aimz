@@ -80,7 +80,7 @@ Artifacts
 
     + An input example is copied from the first few rows of the data passed to :meth:`~aimz.ImpactModel.fit` or :meth:`~aimz.ImpactModel.fit_on_batch`, before training starts.
     + If the first positional argument (``X``) is an :class:`~aimz.utils.data.ArrayLoader`, the example is built from its underlying arrays except for the output variable.
-    + A signature is inferred by running a short forward pass through :meth:`~aimz.ImpactModel.predict` on the input example, with the ``progress`` and ``return_datatree`` parameters recorded in the signature so they can be passed at inference time.
+    + A signature is inferred by running a short forward pass through :meth:`~aimz.ImpactModel.predict` on the input example, with the ``progress``, ``return_datatree``, and ``seed`` parameters recorded in the signature so they can be passed at inference time.
     + Non-array keyword arguments passed to the kernel, such as a scalar hyperparameter, are logged as parameters.
       Booleans, integers, floats, and strings are also recorded in the signature with their training values as defaults, so predictions through the pyfunc interface use those values unless ``params`` overrides them.
       Other non-array values are left out of the example and the signature: if the kernel requires such an argument, no signature is inferred and the argument goes in the dict input when predicting, and if the kernel gives it a default, predictions through the pyfunc interface use that default.
@@ -216,6 +216,11 @@ Record the parameter in the signature when saving, so that it is the default of 
     )
 
 A model logged by :func:`~aimz.mlflow.autolog` records the parameter with the tree as its default, so pass ``return_datatree=False`` with each request instead.
+
+Every server process restores the model with the same sampling key, so the processes repeat each other's draws.
+Pass an integer ``seed`` through ``params`` to set the key of a call, which makes its draws reproducible.
+Recorded in the signature like ``return_datatree``, the seed is the default of every request that does not pass its own.
+:func:`~aimz.mlflow.autolog` records ``seed`` without a default, so predictions stay unseeded unless a request sets one.
 
 
 Environment & Dependencies

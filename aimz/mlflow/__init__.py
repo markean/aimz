@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import mlflow
 import numpy as np
 import yaml
+from jax import random
 from mlflow import pyfunc
 from mlflow.data.code_dataset_source import CodeDatasetSource
 from mlflow.data.numpy_dataset import from_numpy
@@ -52,6 +53,7 @@ from mlflow.tracking._model_registry import DEFAULT_AWAIT_MAX_SLEEP_SECONDS
 from mlflow.tracking.artifact_utils import _download_artifact_from_uri
 from mlflow.tracking.context import registry as context_registry
 from mlflow.tracking.fluent import _initialize_logged_model
+from mlflow.types import ParamSchema, ParamSpec
 from mlflow.utils import _get_fully_qualified_class_name
 from mlflow.utils.autologging_utils import (
     INPUT_EXAMPLE_SAMPLE_ROWS,
@@ -572,7 +574,8 @@ class _AimzModelWrapper:
                 prediction keyword arguments pass through the pyfunc boundary.
             params: Additional parameters to pass to the model for inference. With
                 ``return_datatree=False``, the predictive group is returned as a
-                dictionary of arrays, which a scoring server can serialize.
+                dictionary of arrays, which a scoring server can serialize. An integer
+                ``seed`` sets the sampling key of the call.
 
         Returns:
             Model predictions.
@@ -585,6 +588,8 @@ class _AimzModelWrapper:
             **(params or {}),
         }
         return_datatree = kwargs.pop("return_datatree", True)
+        if (seed := kwargs.pop("seed", None)) is not None:
+            kwargs["rng_key"] = random.key(seed)
         dt = self.aimz_model.predict(**kwargs)
         if return_datatree:
             return dt
@@ -765,12 +770,20 @@ def _log_model_with_signature(
         # autologging does not change the model's future prediction stream.
         rng_key = model.rng_key
         try:
-            return _infer_signature_from_input_example(
+            signature = _infer_signature_from_input_example(
                 _Example((input_example, params)),
                 _AimzModelWrapper(model),
             )
         finally:
             model._rng_key = rng_key
+        if signature is not None and signature.params is not None:
+            # Inference records a value for every parameter, so the seed, which has
+            # none unless a call sets it, is added here.
+            signature.params = ParamSchema(
+                [*signature.params.params, ParamSpec("seed", "long", default=None)],
+            )
+
+        return signature
 
     # Will only resolve `input_example` and `signature` if `log_models` is `True`.
     input_example, signature = resolve_input_example_and_signature(
