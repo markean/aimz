@@ -132,6 +132,7 @@ Pass the same ``rng_key`` to both calls so the two scenarios share their prior d
 
 The returned :class:`~xarray.DataTree` captures the elementwise difference for every variable present in the predictive group.
 Any subsequent summary (e.g. mean, intervals) can be computed using Xarray, ArviZ, or standard NumPy / JAX utilities.
+See :doc:`estimands` for common summaries, such as the ATE, ATT, CATE, and relative lift.
 
 .. note::
 
