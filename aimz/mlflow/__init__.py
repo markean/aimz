@@ -564,30 +564,35 @@ class _AimzModelWrapper:
         self,
         data: object,
         params: dict[str, Any] | None = None,
-    ) -> xr.DataTree:
+    ) -> xr.DataTree | dict[str, np.ndarray]:
         """Run predictions using the wrapped ImpactModel.
 
         Args:
             data: Model input data. A mapping is unpacked into keyword arguments, so
                 prediction keyword arguments pass through the pyfunc boundary.
-            params: Additional parameters to pass to the model for inference.
+            params: Additional parameters to pass to the model for inference. With
+                ``return_datatree=False``, the predictive group is returned as a
+                dictionary of arrays, which a scoring server can serialize.
 
         Returns:
             Model predictions.
         """
         # Results default to the in-memory store, without progress bars
-        kwargs: dict[str, Any]
-        if isinstance(data, dict):
-            kwargs = {
-                "store": "memory",
-                "progress": False,
-                **cast("dict[str, Any]", data),
-                **(params or {}),
-            }
-            return self.aimz_model.predict(**kwargs)
-        kwargs = {"store": "memory", "progress": False, **(params or {})}
+        kwargs: dict[str, Any] = {
+            "store": "memory",
+            "progress": False,
+            **(cast("dict[str, Any]", data) if isinstance(data, dict) else {"X": data}),
+            **(params or {}),
+        }
+        return_datatree = kwargs.pop("return_datatree", True)
+        dt = self.aimz_model.predict(**kwargs)
+        if return_datatree:
+            return dt
+        group = (
+            "posterior_predictive" if kwargs.get("in_sample", True) else "predictions"
+        )
 
-        return self.aimz_model.predict(cast("Any", data), **kwargs)
+        return {str(site): var.values for site, var in dt[group].data_vars.items()}
 
 
 def _log_kernel_source(model: ImpactModel) -> None:
@@ -1018,6 +1023,7 @@ def autolog(
                 # defaults, so pyfunc predictions do not fall back to the kernel's
                 {
                     "progress": False,
+                    "return_datatree": True,
                     **{
                         k: v
                         for k, v in kwargs.items()

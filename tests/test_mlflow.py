@@ -16,6 +16,7 @@
 
 import logging
 from functools import partial
+from io import StringIO
 from logging.handlers import BufferingHandler
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -41,6 +42,7 @@ import mlflow.pyfunc
 import yaml
 from mlflow.entities import LoggedModelStatus
 from mlflow.exceptions import MlflowException
+from mlflow.pyfunc import scoring_server
 
 from aimz.mlflow import (
     _get_input_example,
@@ -101,6 +103,30 @@ def test_pyfunc_round_trip_predicts(
     assert out["posterior_predictive"]["y"].sizes["y_dim_0"] == len(X)
     # Predictions default to the in-memory store, which has no artifact on disk
     assert "artifact_path" not in out.attrs
+
+
+def test_pyfunc_returns_arrays_for_serving(
+    im_lm_svi_fitted: ImpactModel,
+    synthetic_data: tuple[Array, Array],
+    tmp_path: Path,
+) -> None:
+    """``return_datatree=False`` returns arrays, which a scoring server serializes."""
+    X, _ = synthetic_data
+    save_model(
+        im_lm_svi_fitted,
+        tmp_path / "model",
+        input_example=(
+            np.asarray(X[:5]),
+            {"progress": False, "return_datatree": False},
+        ),
+    )
+    loaded = mlflow.pyfunc.load_model(str(tmp_path / "model"))
+
+    # The signature records the parameter, so it is the loaded model's default
+    out = cast("dict[str, np.ndarray]", loaded.predict(np.asarray(X)))
+
+    assert out["y"].shape[-1] == len(X)
+    scoring_server.predictions_to_json(out, StringIO())
 
 
 def test_pyfunc_predict_with_dict_input(
