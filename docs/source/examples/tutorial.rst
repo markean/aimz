@@ -136,7 +136,7 @@ Next Steps
 ----------
 
 - :doc:`../user_guide/intervention` shows how to fix sample sites with the ``intervention`` argument and how to estimate effects under the prior.
-- :doc:`../user_guide/estimands` summarizes unit-level effects into average effects for the treated or a subgroup, and into a relative lift.
+- :doc:`../user_guide/estimands` summarizes unit-level effects into average effects for the treated or a subgroup, and into a relative effect.
 - :doc:`../user_guide/streaming_and_on_batch` compares the streaming methods with their ``*_on_batch`` counterparts, including :meth:`~aimz.ImpactModel.fit` for training on minibatches.
 - :doc:`../user_guide/sharding` explains how the streaming methods split the work across devices.
 - :doc:`The other examples <index>` apply the workflow to real data sets.
