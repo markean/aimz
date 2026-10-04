@@ -2,15 +2,15 @@ Effect Estimands
 ================
 
 :meth:`~aimz.ImpactModel.estimate_effect` returns the difference between two scenarios for every unit and posterior draw.
-This guide shows how to summarize these unit-level effects into average effects for all units, for the treated units, or for a subgroup, and into a relative lift.
+This guide shows how to summarize these unit-level effects into average effects for all units, for the treated units, or for a subgroup, and into a relative effect.
 It also covers which site to summarize, how an intervention interacts with the posterior draws of latent sites, and how to sweep a lever without recompiling.
 
 
 Example Model
 -------------
 
-The examples use simulated conversion data: 3,000 customers in three segments, with one covariate, a binary treatment, and a binary outcome.
-Customers in segment 2 are the most likely to be treated and respond the most, while customers in segment 0 are the least likely to be treated and do not respond at all.
+The examples use simulated data: 3,000 units in three groups, with one covariate, a binary treatment, and a binary outcome.
+Units in group 2 are the most likely to be treated and respond the most, while units in group 0 are the least likely to be treated and do not respond at all.
 
 .. jupyter-execute::
 
@@ -33,27 +33,27 @@ Customers in segment 2 are the most likely to be treated and respond the most, w
     n_obs = 3_000
 
     X = rng.normal(size=(n_obs, 1))
-    segment = rng.integers(0, 3, size=n_obs)
-    trt = rng.binomial(1, p=np.array([0.2, 0.5, 0.8])[segment])
+    group = rng.integers(0, 3, size=n_obs)
+    trt = rng.binomial(1, p=np.array([0.2, 0.5, 0.8])[group])
     logits = (
-        np.array([-1.5, -1.0, -0.5])[segment]
+        np.array([-1.5, -1.0, -0.5])[group]
         + 0.8 * X[:, 0]
-        + np.array([0.0, 0.5, 1.0])[segment] * trt
+        + np.array([0.0, 0.5, 1.0])[group] * trt
     )
     y = rng.binomial(1, p=1 / (1 + np.exp(-logits)))
 
-The kernel records the conversion probability of each customer in the deterministic site ``p``.
-After fitting it, we estimate the effect of treating every customer against treating none.
+The kernel records the outcome probability of each unit in the deterministic site ``p``.
+After fitting it, we estimate the effect of treating every unit against treating none.
 
 .. jupyter-execute::
     :hide-output:
 
-    def model(X, segment, trt, y=None):
+    def model(X, group, trt, y=None):
         alpha = sample("alpha", dist.Normal(0.0, 2.0).expand([3]))
         beta = sample("beta", dist.Normal(0.0, 2.0))
         tau = sample("tau", dist.Normal(0.0, 2.0).expand([3]))
         with plate("obs", size=X.shape[0]):
-            logits = alpha[segment] + beta * X[:, 0] + tau[segment] * trt
+            logits = alpha[group] + beta * X[:, 0] + tau[group] * trt
             p = deterministic("p", nn.sigmoid(logits))
             sample("y", dist.Bernoulli(probs=p), obs=y)
 
@@ -63,25 +63,25 @@ After fitting it, we estimate the effect of treating every customer against trea
         rng_key=random.key(0),
         inference=MCMC(NUTS(model), num_warmup=500, num_samples=1_000),
     )
-    im.fit_on_batch(X, y, segment=segment, trt=trt)
+    im.fit_on_batch(X, y, group=group, trt=trt)
 
     effect = im.estimate_effect(
-        args_baseline={"X": X, "segment": segment, "trt": np.zeros(n_obs)},
-        args_intervention={"X": X, "segment": segment, "trt": np.ones(n_obs)},
+        args_baseline={"X": X, "group": group, "trt": np.zeros(n_obs)},
+        args_intervention={"X": X, "group": group, "trt": np.ones(n_obs)},
     )
 
 
 Expected and Predictive Effects
 -------------------------------
 
-The effect tree holds a difference for every return site: here ``p``, the conversion probability, and ``y``, the simulated conversion.
-A customer's effect on ``y`` is the difference between two simulated conversions, so it is -1, 0, or 1 in every draw.
+The effect tree holds a difference for every return site: here ``p``, the outcome probability, and ``y``, the simulated outcome.
+A unit's effect on ``y`` is the difference between two simulated outcomes, so it is -1, 0, or 1 in every draw.
 
 .. jupyter-execute::
 
     np.unique(effect.posterior_predictive["y"])
 
-Averaged over many customers, both sites estimate the same average treatment effect (ATE), but the draws from ``y`` also carry the noise of the simulated outcomes.
+Averaged over many units, both sites estimate the same average treatment effect (ATE), but the draws from ``y`` also carry the noise of the simulated outcomes.
 
 .. jupyter-execute::
 
@@ -91,19 +91,19 @@ Averaged over many customers, both sites estimate the same average treatment eff
     print(f"ATE from y: {ate_y.mean().item():.3f} (sd {ate_y.std().item():.3f})")
 
 Summarize a deterministic site such as ``p`` for the expected effect, in particular for unit-level effects and small groups.
-Summarize the outcome site when the question is about the outcomes themselves, such as the number of extra conversions a campaign would bring.
+Summarize the outcome site when the question is about the outcomes themselves, such as the number of additional positive outcomes if every unit were treated.
 
 
 Average Effects
 ---------------
 
 Each estimand averages the unit-level effects over a set of units, separately in every draw, so its draws carry the posterior uncertainty.
-The ATE averages over all customers, the average treatment effect on the treated (ATT) over the customers who were treated, and a conditional average treatment effect (CATE) over a subgroup, here each segment.
+The ATE averages over all units, the average treatment effect on the treated (ATT) over the units that were treated, and a conditional average treatment effect (CATE) over a subgroup, here each group.
 
 .. jupyter-execute::
 
     ite = effect.posterior_predictive["p"].load()
-    cate = ite.assign_coords(segment=("p_dim_0", segment)).groupby("segment").mean()
+    cate = ite.assign_coords(group=("p_dim_0", group)).groupby("group").mean()
     estimands = xr.Dataset(
         {
             "ATE": ite.mean("p_dim_0"),
@@ -113,32 +113,32 @@ The ATE averages over all customers, the average treatment effect on the treated
     )
     azs.summary(estimands, kind="stats", ci_prob=0.95, ci_kind="hdi", round_to=3)
 
-The treated customers come mostly from segment 2, which responds the most, so the ATT exceeds the ATE.
+The treated units come mostly from group 2, which responds the most, so the ATT exceeds the ATE.
 
 
-Relative Lift
--------------
+Relative Effects
+----------------
 
-A relative effect, such as the lift in conversions, is a ratio of the scenario totals, so it needs the level of each scenario rather than their difference.
-Predict both scenarios with one key so they stay paired, sum each over the customers, and take the ratio in every draw.
+A relative effect, such as the percentage change in the outcome rate, is a ratio of the scenario totals, so it needs the level of each scenario rather than their difference.
+Predict both scenarios with one key so they stay paired, sum each over the units, and take the ratio in every draw.
 
 .. jupyter-execute::
     :hide-output:
 
     key = random.key(1)
-    baseline = im.predict(X, segment=segment, trt=np.zeros(n_obs), rng_key=key)
-    treated = im.predict(X, segment=segment, trt=np.ones(n_obs), rng_key=key)
+    baseline = im.predict(X, group=group, trt=np.zeros(n_obs), rng_key=key)
+    treated = im.predict(X, group=group, trt=np.ones(n_obs), rng_key=key)
 
 .. jupyter-execute::
 
     total_baseline = baseline.posterior_predictive["p"].sum("p_dim_0")
     total_treated = treated.posterior_predictive["p"].sum("p_dim_0")
-    lift = (total_treated / total_baseline - 1).load()
-    lower, upper = azs.hdi(lift, prob=0.95).values
-    print(f"Lift: {lift.mean().item():.1%} (95% HDI: {lower:.1%} to {upper:.1%})")
+    relative = (total_treated / total_baseline - 1).load()
+    lower, upper = azs.hdi(relative, prob=0.95).values
+    print(f"Relative effect: {relative.mean().item():.1%} (95% HDI: {lower:.1%} to {upper:.1%})")
 
 The same two trees give the difference with ``im.estimate_effect(output_baseline=baseline, output_intervention=treated)``.
-Averaging the unit-level ratios instead answers a different question: it gives heavy weight to customers with a small baseline probability, and with ``y`` it divides by zero wherever a baseline draw is 0.
+Averaging the unit-level ratios instead answers a different question: it gives heavy weight to units with a small baseline probability, and with ``y`` it divides by zero wherever a baseline draw is 0.
 
 
 Interventions on Latent Sites
@@ -203,16 +203,16 @@ Write the kernel so that every path an intervention should change runs through d
 Sweeping a Lever
 ----------------
 
-A response curve or a budget sweep calls :meth:`~aimz.ImpactModel.estimate_effect` once for each value of a lever.
+A response curve calls :meth:`~aimz.ImpactModel.estimate_effect` once for each value of a lever.
 A Python number passed as a keyword argument is static, so each new value compiles the kernel again; pass the value as a NumPy or JAX array instead, and the whole sweep reuses one compiled program (see :ref:`streaming-keyword-arguments`).
-For a kernel that takes a ``price`` argument:
+For a kernel that takes a ``dose`` argument:
 
 .. code-block:: python
 
     curve = {}
-    for price in (8.0, 9.0, 10.0, 11.0, 12.0):
+    for dose in (0.5, 1.0, 1.5, 2.0):
         effect = im.estimate_effect(
-            args_baseline={"X": X, "price": np.float32(10.0)},
-            args_intervention={"X": X, "price": np.float32(price)},
+            args_baseline={"X": X, "dose": np.float32(0.0)},
+            args_intervention={"X": X, "dose": np.float32(dose)},
         )
-        curve[price] = effect.posterior_predictive["y"].mean("y_dim_0").load()
+        curve[dose] = effect.posterior_predictive["y"].mean("y_dim_0").load()
