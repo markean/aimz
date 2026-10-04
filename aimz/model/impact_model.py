@@ -163,6 +163,7 @@ class ImpactModel(BaseModel):
         self._vi_state = None
         self._is_fitted = False
         self._posterior: dict[str, Array] | None = None
+        self._num_samples = 0
         self._num_chains = 1
         self._init_runtime_attrs()
 
@@ -389,23 +390,9 @@ class ImpactModel(BaseModel):
             TypeError: If :attr:`~aimz.ImpactModel.param_input` or
                 :attr:`~aimz.ImpactModel.param_output` is passed as an argument.
         """
-        if self.param_input in kwargs:
-            msg = (
-                f"{self.param_input!r} is a reserved kernel parameter and cannot be "
-                "passed as a keyword argument."
-            )
-            raise TypeError(msg)
-        args_bound = (
-            signature(self.kernel).bind(**{self.param_input: X, **kwargs}).arguments
-        )
-        if self.param_output in args_bound:
-            msg = (
-                f"{self.param_output!r} is a reserved kernel parameter and cannot be "
-                "passed as a keyword argument."
-            )
-            raise TypeError(msg)
+        _group_kwargs(kwargs, forbid=(self.param_input, self.param_output))
 
-        return args_bound
+        return signature(self.kernel).bind(**{self.param_input: X, **kwargs}).arguments
 
     def _build_kernel_spec(
         self,
@@ -1230,13 +1217,7 @@ class ImpactModel(BaseModel):
         """
         X, y = _validate_X_y_to_jax(X, y=y)
 
-        for name in (self.param_input, self.param_output):
-            if name in kwargs:
-                msg = (
-                    f"{name!r} is a reserved kernel parameter and cannot be passed "
-                    "as a keyword argument."
-                )
-                raise TypeError(msg)
+        _group_kwargs(kwargs, forbid=(self.param_input, self.param_output))
         # Validate the provided parameters against the kernel's signature
         args_bound = (
             signature(self.kernel)

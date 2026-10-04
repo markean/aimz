@@ -57,7 +57,7 @@ def _is_per_observation(value: object, n_obs: int | None) -> bool:
 
 
 def _group_kwargs(
-    kwargs: dict,
+    kwargs: Mapping[str, object],
     n_obs: int | None = None,
     forbid: tuple[str, ...] = (),
 ) -> tuple[dict, dict]:
