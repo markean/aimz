@@ -247,8 +247,12 @@ def _validate_streamed_axis_size(
         msg = (
             f"Streaming requires each site's axis-{axis} size to match "
             f"{requirement}. Site {site!r} emitted shape {arr.shape} for a batch "
-            f"of size {chunk_size}; this kernel is not currently supported under "
-            "streaming."
+            f"of size {chunk_size}. "
+        ) + (
+            'Pass `shard_axis="draw"`, or leave the site out of `return_sites` where '
+            "the method takes it."
+            if axis == 1
+            else "This kernel is not currently supported under streaming."
         )
         raise NotImplementedError(msg)
 
