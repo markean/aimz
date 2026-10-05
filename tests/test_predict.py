@@ -25,7 +25,7 @@ from jax import Array, random
 from numpyro import sample
 from numpyro.infer import MCMC, NUTS, SVI
 
-from aimz import ImpactModel
+from aimz import ImpactModel, OutputWarning, PerformanceWarning
 from aimz.model._streaming import _OutputStreamer, _RuntimeContext
 from tests.conftest import _make_svi, latent_intervention_model, lm_subsample
 
@@ -86,7 +86,7 @@ def test_predict_warns_on_unknown_return_site(
 ) -> None:
     """`.predict()` warns on a return site absent from the kernel trace."""
     X, _ = synthetic_data
-    with pytest.warns(UserWarning, match=r"not seen in any trace so far: 'typo'"):
+    with pytest.warns(OutputWarning, match=r"not seen in any trace so far: 'typo'"):
         im_lm_svi_fitted.predict(X=X, return_sites="typo", progress=False)
 
 
@@ -103,13 +103,13 @@ def test_predict_after_cleanup(
     msg = (
         r"The `batch_size` \(\d+\) is not divisible by the number of devices \(\d+\)\."
     )
-    with pytest.warns(UserWarning, match=msg):
+    with pytest.warns(PerformanceWarning, match=msg):
         im.predict(X=X, batch_size=len(X) // 2, progress=False)
     temp_dir_before = im.temp_dir
     str(im)
     repr(im)
     im.cleanup()
-    with pytest.warns(UserWarning, match=msg):
+    with pytest.warns(PerformanceWarning, match=msg):
         im.predict(X=X, batch_size=len(X) // 2, progress=False)
     temp_dir_after = im.temp_dir
 
@@ -118,7 +118,7 @@ def test_predict_after_cleanup(
     im.cleanup()
 
     # `.sample_posterior_predictive()` is an alias for `.predict()`.
-    with pytest.warns(UserWarning, match=msg):
+    with pytest.warns(PerformanceWarning, match=msg):
         im.sample_posterior_predictive(
             X=X,
             return_sites=["y"],

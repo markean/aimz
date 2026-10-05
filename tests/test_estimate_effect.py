@@ -21,7 +21,7 @@ import pytest
 from jax import Array, random
 from numpyro.infer import SVI
 
-from aimz import ImpactModel
+from aimz import ImpactModel, OutputWarning, PerformanceWarning
 from tests.conftest import lm
 
 
@@ -69,7 +69,7 @@ def test_estimate_effect_artifact_paths_lazy_args(
         r"The `batch_size` \(\d+\) is not divisible by the number of devices"
         r" \(\d+\)\."
     )
-    with pytest.warns(UserWarning, match=msg):
+    with pytest.warns(PerformanceWarning, match=msg):
         effect = im.estimate_effect(
             args_baseline={
                 "X": X,
@@ -197,7 +197,7 @@ def test_estimate_effect_warns_on_size_mismatch(
     base = im_lm_svi_fitted.predict_on_batch(X)
     intervention = im_lm_svi_fitted.predict_on_batch(X[:80])
 
-    with pytest.warns(UserWarning, match="different dimension sizes"):
+    with pytest.warns(OutputWarning, match="different dimension sizes"):
         im_lm_svi_fitted.estimate_effect(
             output_baseline=base,
             output_intervention=intervention,
@@ -214,7 +214,7 @@ def test_estimate_effect_warns_on_coordinate_mismatch(
     base = im_lm_svi_fitted.predict_on_batch(X[:50])
     intervention = im_lm_svi_fitted.predict_on_batch(X).isel(y_dim_0=slice(50, 100))
 
-    with pytest.warns(UserWarning, match="different coordinate labels"):
+    with pytest.warns(OutputWarning, match="different coordinate labels"):
         im_lm_svi_fitted.estimate_effect(
             output_baseline=base,
             output_intervention=intervention,

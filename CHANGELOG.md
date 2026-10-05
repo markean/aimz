@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - {meth}`~aimz.ImpactModel.set_posterior_sample` now takes a `num_chains` argument, so output trees keep the chains of an imported multi-chain posterior instead of holding all draws in one chain ([#395](https://github.com/markean/aimz/issues/395)).
 - The pyfunc interface of {mod}`aimz.mlflow` now accepts an integer `seed` through `params`, which sets the sampling key of a call so that served predictions can be reproduced. {func}`~aimz.mlflow.autolog` records the parameter in the logged model's signature ([#398](https://github.com/markean/aimz/issues/398)).
 - {meth}`~aimz.ImpactModel.fit` now accepts any data loader that yields batch mappings, not only an {class}`~aimz.utils.data.ArrayLoader`, and iterates it once per epoch ([#400](https://github.com/markean/aimz/issues/400)).
+- The warnings aimz issues now have their own categories, {class}`~aimz.AimzWarning` and its subclasses {class}`~aimz.FitWarning`, {class}`~aimz.OutputWarning`, and {class}`~aimz.PerformanceWarning`, so they can be filtered or turned into errors by category, as in `warnings.filterwarnings("error", category=aimz.OutputWarning)`. Each is a `UserWarning`, and {class}`~aimz.FitWarning` is also a `RuntimeWarning`, so existing filters still match. The non-finite loss warning, previously only a `RuntimeWarning`, is now matched by `UserWarning` filters too ([#XXX](https://github.com/markean/aimz/issues/XXX)).
 
 ### Changed
 

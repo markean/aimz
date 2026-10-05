@@ -22,7 +22,7 @@ from jax import Array, random
 from numpyro import sample
 from numpyro.infer import MCMC, NUTS
 
-from aimz import ImpactModel
+from aimz import ImpactModel, PerformanceWarning
 
 
 def test_empty_posterior(
@@ -122,7 +122,7 @@ def test_explicit_batch_size_not_divisible_by_devices(
         r"The `batch_size` \(\d+\) is not divisible by the number of devices "
         r"\(\d+\)\."
     )
-    with pytest.warns(UserWarning, match=msg):
+    with pytest.warns(PerformanceWarning, match=msg):
         im_lm_svi_fitted.log_likelihood(X=X, y=y, batch_size=2, progress=False)
 
 
