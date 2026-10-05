@@ -118,7 +118,7 @@ def test_intervention_on_non_sample_site(
     if method == "estimate_effect":
         # Lazily generated scenarios are checked before either is sampled
         kwargs = {"args_baseline": {"X": X}, "args_intervention": kwargs}
-    with pytest.raises(ValueError, match="not among the kernel's sample sites"):
+    with pytest.raises(ValueError, match=r"\. Sample sites: 'b', 'y'\.$"):
         getattr(im, method)(**kwargs)
     assert jnp.allclose(im.rng_key, rng_key)
 

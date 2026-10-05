@@ -155,7 +155,8 @@ def _validate_intervention(
     if unknown:
         msg = (
             f"Intervention site(s) not among the kernel's sample sites: "
-            f"{', '.join(map(repr, unknown))}."
+            f"{', '.join(map(repr, unknown))}. Sample sites: "
+            f"{', '.join(map(repr, kernel_spec.sample_sites))}."
         )
         raise ValueError(msg)
 
