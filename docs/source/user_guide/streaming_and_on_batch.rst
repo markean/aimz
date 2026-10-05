@@ -250,6 +250,32 @@ The example below requests two batches to illustrate this case.
     im.predict(X, batch_size=50)
 
 
+.. _output-attributes:
+
+Output Attributes
+-----------------
+A predictive group of the returned :external:class:`xarray.DataTree` records in its attributes how its samples were drawn.
+:meth:`~aimz.ImpactModel.estimate_effect` compares them between two scenarios to tell whether their draws are paired.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Attribute
+     - Meaning
+   * - ``rng_key``
+     - The sampling key of the call, stored as a list of integers.
+       To use the key again, rebuild it with ``jax.random.wrap_key_data(np.uint32(group.attrs["rng_key"]))`` and pass the result as the ``rng_key`` argument of another call.
+   * - ``shard_axis``
+     - Sharding strategy of a streaming method.
+   * - ``num_devices``, ``batch_size``
+     - Number of devices and batch size under ``shard_axis="obs"``, where the draws depend on them.
+       For an array, the batch size is the one the call used, given or chosen automatically; for an :class:`~aimz.utils.data.ArrayLoader`, it is the loader's own; any other data loader has none recorded.
+
+The attributes belong to the tree in memory and are not written to the Zarr_ store.
+An effect from :meth:`~aimz.ImpactModel.estimate_effect` keeps the attributes of its two scenarios that do not conflict.
+
+
 .. _reopening-persisted-outputs:
 
 Reopening Persisted Outputs

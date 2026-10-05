@@ -386,14 +386,13 @@ def test_estimate_effect_store_combinations_match(
 ) -> None:
     """All four `store` combinations return the same effect tree."""
     X, _ = synthetic_data
-    rng_key_baseline = random.key(13)
-    rng_key_intervention = random.key(17)
+    rng_key = random.key(13)
 
     effects = [
         im_lm_svi_fitted.estimate_effect(
             args_baseline={
                 "X": X,
-                "rng_key": rng_key_baseline,
+                "rng_key": rng_key,
                 "store": store_baseline,
                 "batch_size": 30,
                 "progress": False,
@@ -401,7 +400,7 @@ def test_estimate_effect_store_combinations_match(
             args_intervention={
                 "X": X,
                 "intervention": {"b": 0.0},
-                "rng_key": rng_key_intervention,
+                "rng_key": rng_key,
                 "store": store_intervention,
                 "batch_size": 30,
                 "progress": False,

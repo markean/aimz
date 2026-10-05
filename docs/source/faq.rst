@@ -165,6 +165,7 @@ If provided, it affects only that call and does not modify the model's internal 
 If omitted, a new subkey is derived internally, so repeated calls may produce different results.
 Under the default ``shard_axis="obs"``, the streaming methods draw each batch with its own key, so their results also depend on ``batch_size`` and the number of devices; under ``shard_axis="draw"`` they depend on neither.
 When ``batch_size`` is not given, the automatic choice can also depend on the machine's CPU count, so pass ``batch_size`` explicitly to reproduce results across machines.
+A predictive output records the key and the batching that its draws depend on in the attributes of its group (see :ref:`output-attributes`).
 To fully reproduce results, log the initial seed along with other artifacts.
 
 

@@ -14,6 +14,7 @@
 
 """Tests for the `.estimate_effect()` method."""
 
+import warnings
 from pathlib import Path
 
 import jax.numpy as jnp
@@ -22,7 +23,7 @@ from jax import Array, random
 from numpyro.infer import SVI
 
 from aimz import ImpactModel, OutputWarning, PerformanceWarning
-from tests.conftest import lm
+from tests.conftest import _make_svi, latent_intervention_model, lm
 
 
 def test_estimate_effect_argument_validation(
@@ -37,13 +38,18 @@ def test_estimate_effect_argument_validation(
     with pytest.raises(ValueError, match=msg):
         im.estimate_effect(output_baseline=None, args_baseline=None)
 
-    dt_baseline = im.predict_on_batch(X)
+    rng_key = random.key(0)
+    dt_baseline = im.predict_on_batch(X, rng_key=rng_key)
 
     msg = "Either `output_intervention` or `args_intervention` must be provided."
     with pytest.raises(ValueError, match=msg):
         im.estimate_effect(output_baseline=dt_baseline)
 
-    dt_intervention = im.predict_on_batch(X, intervention={"z": jnp.zeros_like(y)})
+    dt_intervention = im.predict_on_batch(
+        X,
+        intervention={"z": jnp.zeros_like(y)},
+        rng_key=rng_key,
+    )
 
     effect = im.estimate_effect(
         output_baseline=dt_baseline,
@@ -136,12 +142,13 @@ def test_estimate_effect_lazy_args_share_rng_key(
     )
     assert (effect.posterior_predictive["y"] == 0).all()
 
-    # Explicit keys are used as given.
-    effect = im.estimate_effect(
-        args_baseline={"X": X, "rng_key": random.key(0)},
-        args_intervention={"X": X, "rng_key": random.key(1)},
-        on_batch=True,
-    )
+    # Explicit keys are used as given, and the output is then not paired.
+    with pytest.warns(OutputWarning, match="differ in 'rng_key'; their draws of 'y'"):
+        effect = im.estimate_effect(
+            args_baseline={"X": X, "rng_key": random.key(0)},
+            args_intervention={"X": X, "rng_key": random.key(1)},
+            on_batch=True,
+        )
     expected = (
         im.predict_on_batch(X, rng_key=random.key(1)).posterior_predictive["y"]
         - im.predict_on_batch(X, rng_key=random.key(0)).posterior_predictive["y"]
@@ -194,8 +201,9 @@ def test_estimate_effect_warns_on_size_mismatch(
     """A dimension-size mismatch between the scenarios warns."""
     X, _ = synthetic_data
 
-    base = im_lm_svi_fitted.predict_on_batch(X)
-    intervention = im_lm_svi_fitted.predict_on_batch(X[:80])
+    rng_key = random.key(0)
+    base = im_lm_svi_fitted.predict_on_batch(X, rng_key=rng_key)
+    intervention = im_lm_svi_fitted.predict_on_batch(X[:80], rng_key=rng_key)
 
     with pytest.warns(OutputWarning, match="different dimension sizes"):
         im_lm_svi_fitted.estimate_effect(
@@ -211,11 +219,50 @@ def test_estimate_effect_warns_on_coordinate_mismatch(
     """A coordinate-label mismatch between equally sized scenarios warns."""
     X, _ = synthetic_data
 
-    base = im_lm_svi_fitted.predict_on_batch(X[:50])
-    intervention = im_lm_svi_fitted.predict_on_batch(X).isel(y_dim_0=slice(50, 100))
+    rng_key = random.key(0)
+    base = im_lm_svi_fitted.predict_on_batch(X[:50], rng_key=rng_key)
+    intervention = im_lm_svi_fitted.predict_on_batch(X, rng_key=rng_key).isel(
+        y_dim_0=slice(50, 100),
+    )
 
     with pytest.warns(OutputWarning, match="different coordinate labels"):
         im_lm_svi_fitted.estimate_effect(
             output_baseline=base,
             output_intervention=intervention,
+        )
+
+
+def test_estimate_effect_warns_on_stale_baseline(
+    synthetic_data: tuple[Array, Array],
+) -> None:
+    """A baseline kept from before a refit warns; a deterministic site stays paired."""
+    X, y = synthetic_data
+    im = ImpactModel(
+        latent_intervention_model,
+        rng_key=random.key(42),
+        inference=_make_svi(latent_intervention_model),
+    )
+    im.fit_on_batch(X, y, num_steps=10, progress=False)
+    baseline = im.predict_on_batch(X, rng_key=random.key(0), return_sites="mu")
+
+    # A deterministic site is computed from the posterior samples alone, so scenarios
+    # drawn with different keys are still paired on it.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", OutputWarning)
+        im.estimate_effect(
+            output_baseline=baseline,
+            output_intervention=im.predict_on_batch(
+                X,
+                rng_key=random.key(1),
+                return_sites="mu",
+            ),
+        )
+
+    # A refit replaces the posterior samples that the baseline was computed from.
+    im.fit_on_batch(X, y, num_steps=10, progress=False)
+    with pytest.warns(OutputWarning, match="have different posterior samples"):
+        im.estimate_effect(
+            output_baseline=baseline,
+            args_intervention={"X": X, "return_sites": "mu"},
+            on_batch=True,
         )

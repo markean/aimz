@@ -201,6 +201,7 @@ def _build_datatree(
     posterior: Mapping[str, Array | npt.NDArray] | None = None,
     num_chains: int = 1,
     dims: Mapping[str, Sequence[str]] | None = None,
+    attrs: Mapping[str, object] | None = None,
 ) -> xr.DataTree:
     """Build the aimz output DataTree.
 
@@ -224,6 +225,8 @@ def _build_datatree(
             from the posterior.
         dims: Names of the dimensions after ``draw``, by variable. A Zarr group already
             carries them.
+        attrs: Attributes describing the call that produced the site data, added to
+            the ``group`` node.
 
     Returns:
         A DataTree rooted at ``"root"`` with the site data attached under ``group``
@@ -243,5 +246,6 @@ def _build_datatree(
         out.attrs["artifact_path"] = str(data)
     else:
         out[group] = _dict_to_datatree(data, num_chains=group_chains, dims=dims)
+    out[group].attrs.update(attrs or {})
 
     return out

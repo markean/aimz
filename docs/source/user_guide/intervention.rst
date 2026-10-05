@@ -67,6 +67,9 @@ Mixing is allowed; for example, a precomputed baseline can be supplied with ``ou
 Use the same predictive group, variable sets, and shapes for both scenarios so their draws can be compared.
 Scenarios drawn by the same method with the same ``rng_key`` are paired: they use the same random numbers, so their draws differ only through the intervention.
 Two lazily generated scenarios share a key automatically; for precomputed or mixed scenarios, pass the same ``rng_key`` to each, as in the examples below.
+The method warns if the ``posterior`` groups of the two scenarios hold different samples, as when one scenario was computed before a refit.
+It also warns if the output, or any site under the prior, was not drawn in both scenarios with the same key, sharding strategy, and batching, which it reads from the attributes of the scenarios (see :ref:`output-attributes`).
+A scenario without the group or the attributes, such as a tree built by hand, is not checked.
 
 Eager (precomputed scenarios)::
 
