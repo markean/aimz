@@ -15,6 +15,7 @@
 """Initialize package with global setup."""
 
 import logging
+from importlib.metadata import version
 
 from aimz._exceptions import (
     AimzWarning,
@@ -35,5 +36,7 @@ __all__ = [
     "OutputWarning",
     "PerformanceWarning",
 ]
+
+__version__ = version("aimz")
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())
