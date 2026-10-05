@@ -72,7 +72,8 @@ def _validate_group(dt_baseline: xr.DataTree, dt_intervention: xr.DataTree) -> s
 
     Picks the first of ``predictions``, ``posterior_predictive``, and
     ``prior_predictive`` present in ``dt_baseline``, and verifies it exists in both
-    trees.
+    trees. The ``posterior`` group of a tree holds the posterior samples a scenario
+    was computed from; a scenario without it is not checked.
 
     Args:
         dt_baseline: Precomputed output for the baseline scenario.
@@ -85,9 +86,12 @@ def _validate_group(dt_baseline: xr.DataTree, dt_intervention: xr.DataTree) -> s
     Raises:
         ValueError: If ``dt_baseline`` has none of these groups, or the chosen group
             is missing from ``dt_intervention``.
+
+    Warns:
         OutputWarning: If the chosen group's dimension sizes or coordinate labels
             differ between the two scenarios (the effect subtraction would then
-            inner-join to the overlap).
+            inner-join to the overlap), or if the scenarios hold different posterior
+            samples.
     """
     group = next(
         (
@@ -130,6 +134,16 @@ def _validate_group(dt_baseline: xr.DataTree, dt_intervention: xr.DataTree) -> s
             f"{', '.join(map(repr, unmatched))} in group {group!r}; the effect "
             "covers only the labels present in both."
         )
+        warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
+
+    # Draws under the prior do not come from the posterior samples
+    if (
+        group != "prior_predictive"
+        and "posterior" in dt_baseline.children
+        and "posterior" in dt_intervention.children
+        and not dt_baseline["posterior"].equals(dt_intervention["posterior"])
+    ):
+        msg = "Baseline and intervention have different posterior samples."
         warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
 
     return group

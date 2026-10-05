@@ -696,6 +696,47 @@ class ImpactModel(BaseModel):
 
         return shard_axis, resolved
 
+    def _draw_attrs(
+        self,
+        rng_key: Array,
+        *,
+        X: object = None,
+        shard_axis: str | None = None,
+        batch_size: int | None = None,
+    ) -> dict[str, object]:
+        """Describe what the draws of a predictive call depend on.
+
+        Besides the posterior samples and the arguments of the call, the draws depend
+        on the sampling key and, under ``shard_axis="obs"``, where each batch is drawn
+        with a key of its own, on the number of devices and the batch size.
+        :meth:`~aimz.ImpactModel.estimate_effect` compares the attributes between two
+        scenarios to tell whether their draws are paired. Every value is a string, an
+        integer, or a list of integers, so a tree written to a file keeps them.
+
+        Args:
+            rng_key: The sampling key of the call.
+            X: The input of a streamed call.
+            shard_axis: The sharding strategy of a streamed call.
+            batch_size: The batch size of a streamed call, or ``None`` for a data
+                loader.
+
+        Returns:
+            The attributes of the predictive group.
+        """
+        attrs: dict[str, object] = {"rng_key": random.key_data(rng_key).tolist()}
+        if shard_axis is not None:
+            attrs["shard_axis"] = shard_axis
+        if shard_axis == "obs":
+            attrs["num_devices"] = self._num_devices
+            # The built-in loader batches by its own size; any other loader may vary
+            # its batches freely, so it has no size to record.
+            if isinstance(X, ArrayLoader):
+                batch_size = X.batch_size
+            if batch_size is not None:
+                attrs["batch_size"] = batch_size
+
+        return attrs
+
     def _stream_to_datatree(
         self,
         write: Callable[[Path | None], dict[str, DaskArray] | None],
@@ -703,6 +744,7 @@ class ImpactModel(BaseModel):
         store: str,
         output_dir: str | Path | None,
         group: str,
+        attrs: Mapping[str, object] | None = None,
     ) -> xr.DataTree:
         """Run one streamed write and assemble its output tree.
 
@@ -718,6 +760,8 @@ class ImpactModel(BaseModel):
             store: The result store, ``"persistent"`` or ``"memory"``.
             output_dir: Base directory for disk-backed outputs.
             group: Output group name for the resulting tree.
+            attrs: Attributes describing how the call draws its samples, as
+                :meth:`_draw_attrs` returns them.
 
         Returns:
             The output tree: lazy in both modes, Dask-backed by the Zarr store for
@@ -738,6 +782,7 @@ class ImpactModel(BaseModel):
                 posterior=self.posterior,
                 num_chains=self._num_chains,
                 dims=self._dims,
+                attrs=attrs,
             )
         except BaseException:
             if artifact_path is not None:
@@ -814,6 +859,7 @@ class ImpactModel(BaseModel):
             posterior=self.posterior,
             num_chains=self._num_chains,
             dims=self._dims,
+            attrs=self._draw_attrs(rng_key),
         )
 
     def sample_prior_predictive(
@@ -981,6 +1027,12 @@ class ImpactModel(BaseModel):
             store=store,
             output_dir=output_dir,
             group="prior_predictive",
+            attrs=self._draw_attrs(
+                rng_key,
+                X=X,
+                shard_axis=shard_axis,
+                batch_size=batch_size,
+            ),
         )
 
     def sample(
@@ -1765,6 +1817,7 @@ class ImpactModel(BaseModel):
             posterior=self.posterior,
             num_chains=self._num_chains,
             dims=self._dims,
+            attrs=self._draw_attrs(rng_key),
         )
 
     def predict(
@@ -1915,6 +1968,12 @@ class ImpactModel(BaseModel):
             store=store,
             output_dir=output_dir,
             group=group,
+            attrs=self._draw_attrs(
+                rng_key,
+                X=X,
+                shard_axis=shard_axis,
+                batch_size=batch_size,
+            ),
         )
 
     def estimate_effect(
@@ -1967,6 +2026,12 @@ class ImpactModel(BaseModel):
                 through ``args_baseline`` or ``args_intervention`` names a site that
                 is not a sample site of the kernel, or if the scenarios do not share a
                 predictive group.
+
+        Warns:
+            OutputWarning: If the scenarios differ in dimension sizes or coordinate
+                labels, if they hold different posterior samples, or if the output,
+                or any site under the prior, was not drawn in both with the same key,
+                sharding strategy, and batching.
 
         See Also:
             :meth:`~aimz.ImpactModel.cleanup` to remove the temporary directory if
@@ -2029,6 +2094,35 @@ class ImpactModel(BaseModel):
 
         out = xr.DataTree(name="root")
         out[group] = dt_intervention[group] - dt_baseline[group]
+        # The key and the batching decide the draws of the sites a call samples anew:
+        # every site under the prior, and the output otherwise. Attributes read back
+        # from a file may be arrays, hence the array comparison.
+        attrs_baseline = dt_baseline[group].attrs
+        attrs_intervention = dt_intervention[group].attrs
+        unmatched = [
+            name
+            for name in ("rng_key", "shard_axis", "num_devices", "batch_size")
+            if not np.array_equal(
+                attrs_baseline.get(name), attrs_intervention.get(name)
+            )
+        ]
+        unpaired = [
+            site
+            for site in out[group].data_vars
+            if group == "prior_predictive" or site == self.param_output
+        ]
+        if (
+            "rng_key" in attrs_baseline
+            and "rng_key" in attrs_intervention
+            and unmatched
+            and unpaired
+        ):
+            msg = (
+                f"Baseline and intervention differ in "
+                f"{', '.join(map(repr, unmatched))}; their draws of "
+                f"{', '.join(map(repr, unpaired))} in group {group!r} are not paired."
+            )
+            warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
         if self.posterior and group != "prior_predictive":
             out["posterior"] = _dict_to_datatree(
                 self.posterior,

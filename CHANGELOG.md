@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - {meth}`~aimz.ImpactModel.fit` now accepts any data loader that yields batch mappings, not only an {class}`~aimz.utils.data.ArrayLoader`, and iterates it once per epoch ([#400](https://github.com/markean/aimz/issues/400)).
 - `aimz.__version__`, read from the installed package metadata ([#411](https://github.com/markean/aimz/issues/411)).
 - The warnings aimz issues now have their own categories, {class}`~aimz.AimzWarning` and its subclasses {class}`~aimz.FitWarning`, {class}`~aimz.OutputWarning`, and {class}`~aimz.PerformanceWarning`, so they can be filtered or turned into errors by category, as in `warnings.filterwarnings("error", category=aimz.OutputWarning)`. Each is a `UserWarning`, and {class}`~aimz.FitWarning` is also a `RuntimeWarning`, so existing filters still match. The non-finite loss warning, previously only a `RuntimeWarning`, is now matched by `UserWarning` filters too ([#407](https://github.com/markean/aimz/issues/407)).
+- Predictive outputs now record how their samples were drawn in the attributes of their group: the sampling key and the batching that the draws depend on ([#414](https://github.com/markean/aimz/issues/414)).
 
 ### Changed
 
@@ -22,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reading a tree from a streaming method with `store="persistent"` after its artifact was removed, for example by {meth}`~aimz.ImpactModel.cleanup` or by the model being garbage-collected, now raises an error instead of returning zeros for every value ([#384](https://github.com/markean/aimz/issues/384)).
 - {func}`~aimz.mlflow.autolog` now records the boolean, integer, float, and string keyword arguments passed to the kernel in the logged model's signature, with their training values as defaults, so predictions through the pyfunc interface use those values instead of the kernel's defaults ([#387](https://github.com/markean/aimz/issues/387)).
 - Output trees now name the dimensions of a site after the plates around it: a site inside `plate("obs", ...)` has the dimension `obs` instead of `<site>_dim_0`, and sites in the same plate share it. A site's other dimensions are named `<site>_dim_<i>`, numbered from zero among them, so the second dimension of a site inside one plate changes from `<site>_dim_1` to `<site>_dim_0`, and they can be named through the site's `infer={"event_dims": [...]}`. Persisted outputs store the names, and models saved by earlier versions keep their previous names ([#404](https://github.com/markean/aimz/issues/404)).
+- {meth}`~aimz.ImpactModel.estimate_effect` now warns when its two scenarios hold different posterior samples, such as a baseline kept from before a refit, and when the output, or any site under the prior, was not drawn with the same key, sharding strategy, and batching in both scenarios, instead of returning the effect without notice ([#XXX](https://github.com/markean/aimz/issues/XXX)).
 
 ### Fixed
 
