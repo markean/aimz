@@ -218,7 +218,7 @@ The example below requests two batches to illustrate this case.
     def model(X: ArrayLike, y: ArrayLike | None = None) -> None:
         # Model includes a local latent variable
         sigma = sample("sigma", dist.Exponential().expand((X.shape[0],)))
-        with plate("data", size=X.shape[0]):
+        with plate("obs", size=X.shape[0]):
             sample("y", dist.Normal(0.0, sigma), obs=y)
 
 

@@ -110,7 +110,7 @@ The tree reads its draws lazily, so we load the averages before summarizing them
 
 .. jupyter-execute::
 
-    ate = effect.posterior_predictive["mu"].mean(dim="mu_dim_0").load()
+    ate = effect.posterior_predictive["mu"].mean(dim="obs").load()
     lower, upper = azs.hdi(ate, prob=0.95).values
     print(f"Posterior mean ATE: {ate.mean().item():.2f}")
     print(f"95% HDI: [{lower:.2f}, {upper:.2f}]")

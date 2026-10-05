@@ -57,7 +57,7 @@ A minimal linear regression model and synthetic data are defined as an example b
         b = sample("b", dist.Normal())
         mu = jnp.dot(X, w) + b
         sigma = sample("sigma", dist.Exponential())
-        with plate("data", size=X.shape[0]):
+        with plate("obs", size=X.shape[0]):
             sample("y", dist.Normal(mu, sigma), obs=y)
 
 
@@ -137,7 +137,7 @@ We join the ``posterior_predictive`` group from ``dt_posterior_predictive`` to t
     dt["/posterior_predictive"] = dt_posterior_predictive.posterior_predictive
 
     # Create a dataset for observed data and add as a new group
-    ds = xr.Dataset({"y": xr.DataArray(y, dims=["y_dim_0"])})
+    ds = xr.Dataset({"y": xr.DataArray(y, dims=["obs"])})
     dt["/observed_data"] = xr.DataTree(ds)
 
     # Plot the posterior predictive distribution

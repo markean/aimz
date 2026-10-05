@@ -39,7 +39,7 @@ def test_predict_on_batch_lm_with_kwargs_array(
         return_sites="y",
     )
     assert set(dt.posterior_predictive.data_vars) == {"y"}
-    assert dt.posterior_predictive["y"].sizes["y_dim_0"] == X.shape[0]
+    assert dt.posterior_predictive["y"].sizes["data"] == X.shape[0]
 
     # `.sample_posterior_predictive_on_batch()` is an alias for `.predict_on_batch()`.
     samples = im_lm_with_kwargs_svi_fitted.sample_posterior_predictive_on_batch(
@@ -86,5 +86,5 @@ def test_predict_on_batch_mlm() -> None:
     im.fit_on_batch(X=X, y=y, num_steps=10, num_samples=10, progress=False)
     out = im.predict_on_batch(X=X)
 
-    assert out["posterior_predictive"]["y"].sizes["y_dim_0"] == n_obs
-    assert out["posterior_predictive"]["y"].sizes["y_dim_1"] == n_targets
+    assert out["posterior_predictive"]["y"].sizes["data"] == n_obs
+    assert out["posterior_predictive"]["y"].sizes["y_dim_0"] == n_targets

@@ -172,6 +172,10 @@ Why do some methods return :class:`~xarray.DataTree`?
 -----------------------------------------------------
 A :class:`~xarray.DataTree` organizes heterogeneous groups (``posterior``, ``posterior_predictive``, ``predictions``) with labeled dimensions and coordinates, facilitating I/O, slicing, and downstream analysis.
 It can also be passed to `ArviZ`_ functions.
+The dimensions of a site are named after the plates around it, for example ``obs`` for a site inside ``plate("obs", ...)``.
+Its other dimensions are named ``<site>_dim_<i>``, numbered from zero among them, so a site of shape ``(obs, 3)`` has the dimensions ``obs`` and ``<site>_dim_0``.
+To name such a dimension, list it in the site's ``infer={"event_dims": [...]}``.
+The plate names come from a trace of the kernel, which fitting or prior predictive sampling runs, so a posterior set with :meth:`~aimz.ImpactModel.set_posterior_sample` on a model that was never traced keeps the default names.
 Trees from the streaming methods are lazy, and ArviZ functions operate on loaded arrays, so call :external:meth:`~xarray.DataTree.load` on the tree first, or on a reduced result when the tree does not fit in memory.
 If desired, you can pass ``return_datatree=False`` to methods such as :meth:`~aimz.ImpactModel.predict_on_batch` to return a plain dictionary instead.
 

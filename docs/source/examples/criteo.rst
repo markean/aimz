@@ -144,7 +144,7 @@ Treatment is concatenated with the 12 features as an input column, making this a
             prior=dist.Normal(),
         )
         X_aug = jnp.column_stack([X, treatment[:, None]])
-        with plate("data", size=n_obs, subsample_size=len(X)):
+        with plate("obs", size=n_obs, subsample_size=len(X)):
             logits = nn_p(X_aug)
             deterministic("p", nnx.sigmoid(logits))
             sample("y", dist.Bernoulli(logits=logits), obs=y)
@@ -153,7 +153,7 @@ The network outputs logits, which are passed to ``Bernoulli(logits=...)``.
 The 13th input column is the treatment indicator.
 During counterfactual prediction, changing this column from 0 to 1 (or vice versa) produces predictions under the alternative treatment scenario.
 
-The ``plate("data", size=n_obs, subsample_size=len(X))`` construct declares that the current batch is a subsample of ``n_obs`` total observations.
+The ``plate("obs", size=n_obs, subsample_size=len(X))`` construct declares that the current batch is a subsample of ``n_obs`` total observations.
 During minibatch training, :meth:`~aimz.ImpactModel.fit` passes minibatches to the model, so ``len(X)`` equals the current batch size and the plate scales each batch's log-likelihood to the full dataset.
 During prediction, :meth:`~aimz.ImpactModel.predict` also passes batches, so ``len(X)`` equals the prediction batch size.
 The scaling applies only to the log-likelihood, not to the sampled values, so predictions are unaffected.
@@ -248,7 +248,7 @@ We verify the model fit by comparing the observed visit rate against the posteri
 
     # Overall
     obs_rate = float(y_visit.mean())
-    pred_rate = pp_visit.mean(dim="y_dim_0").to_numpy().flatten()
+    pred_rate = pp_visit.mean(dim="obs").to_numpy().flatten()
     axes[0].hist(pred_rate, bins=20, color="C0")
     axes[0].axvline(
         obs_rate,
@@ -264,7 +264,7 @@ We verify the model fit by comparing the observed visit rate against the posteri
     for i, (arm_val, label) in enumerate([(0, "Control"), (1, "Treated")]):
         mask = np.asarray(treatment == arm_val)
         obs_arm = float(np.asarray(y_visit)[mask].mean())
-        pred_arm = pp_visit.isel(y_dim_0=mask).mean(dim="y_dim_0").to_numpy().flatten()
+        pred_arm = pp_visit.isel(obs=mask).mean(dim="obs").to_numpy().flatten()
         axes[i + 1].hist(pred_arm, bins=20, color=f"C{i + 1}")
         axes[i + 1].axvline(
             obs_arm,
@@ -307,7 +307,7 @@ Alternatively, precomputed prediction outputs can be passed directly to avoid co
         },
     )
 
-    ate = effect.posterior_predictive["p"].mean(dim="p_dim_0")
+    ate = effect.posterior_predictive["p"].mean(dim="obs")
 
 .. code-block:: python
 

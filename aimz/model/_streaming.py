@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from itertools import chain
 from typing import TYPE_CHECKING, Literal, NamedTuple, cast
 
@@ -58,7 +58,7 @@ from aimz.utils.data._sharding import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Iterator, Sized
+    from collections.abc import Callable, Iterable, Iterator, Sequence, Sized
     from pathlib import Path
 
     import numpy as np
@@ -94,6 +94,8 @@ class _WriteRequest:
     progress: bool
     loader_rng_key: Array
     kwargs: dict[str, object]
+    dims: Mapping[str, Sequence[str]] = field(default_factory=dict)
+    """Names of the dimensions after the draw axis, by site, for the Zarr arrays."""
 
 
 class _Step(NamedTuple):
@@ -649,6 +651,7 @@ class _OutputStreamer:
             req.artifact_path,
             total=len(dataloader.dataset) if known_size else None,
             batch_size=first[self._ctx.param_input].shape[0],
+            dims=req.dims,
         )
         _write_loop(
             items=batches,
@@ -761,6 +764,7 @@ class _OutputStreamer:
             total=req.num_samples,
             batch_size=batch_size,
             axis=0,
+            dims=req.dims,
         )
         _write_loop(
             items=range(0, req.num_samples, batch_size),

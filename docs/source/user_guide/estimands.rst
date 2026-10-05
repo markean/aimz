@@ -85,8 +85,8 @@ Averaged over many units, both sites estimate the same average treatment effect 
 
 .. jupyter-execute::
 
-    ate_p = effect.posterior_predictive["p"].mean("p_dim_0").load()
-    ate_y = effect.posterior_predictive["y"].mean("y_dim_0").load()
+    ate_p = effect.posterior_predictive["p"].mean("obs").load()
+    ate_y = effect.posterior_predictive["y"].mean("obs").load()
     print(f"ATE from p: {ate_p.mean().item():.3f} (sd {ate_p.std().item():.3f})")
     print(f"ATE from y: {ate_y.mean().item():.3f} (sd {ate_y.std().item():.3f})")
 
@@ -103,11 +103,11 @@ The ATE averages over all units, the average treatment effect on the treated (AT
 .. jupyter-execute::
 
     ite = effect.posterior_predictive["p"].load()
-    cate = ite.assign_coords(group=("p_dim_0", group)).groupby("group").mean()
+    cate = ite.assign_coords(group=("obs", group)).groupby("group").mean()
     estimands = xr.Dataset(
         {
-            "ATE": ite.mean("p_dim_0"),
-            "ATT": ite.isel(p_dim_0=trt == 1).mean("p_dim_0"),
+            "ATE": ite.mean("obs"),
+            "ATT": ite.isel(obs=trt == 1).mean("obs"),
             "CATE": cate,
         },
     )
@@ -131,8 +131,8 @@ Predict both scenarios with one key so they stay paired, sum each over the units
 
 .. jupyter-execute::
 
-    total_baseline = baseline.posterior_predictive["p"].sum("p_dim_0")
-    total_treated = treated.posterior_predictive["p"].sum("p_dim_0")
+    total_baseline = baseline.posterior_predictive["p"].sum("obs")
+    total_treated = treated.posterior_predictive["p"].sum("obs")
     relative = (total_treated / total_baseline - 1).load()
     lower, upper = azs.hdi(relative, prob=0.95).values
     print(f"Relative effect: {relative.mean().item():.1%} (95% HDI: {lower:.1%} to {upper:.1%})")
@@ -188,7 +188,7 @@ Both kernels fit the same data, and each estimates the effect of setting ``z`` t
             args_baseline={"X": X_small},
             args_intervention={"X": X_small, "intervention": {"z": 0.0}},
         )
-        ates[kernel.__name__] = effect_z.posterior_predictive["mu"].mean("mu_dim_0").load()
+        ates[kernel.__name__] = effect_z.posterior_predictive["mu"].mean("obs").load()
 
 .. jupyter-execute::
 
@@ -215,4 +215,4 @@ For a kernel that takes a ``dose`` argument:
             args_baseline={"X": X, "dose": np.float32(0.0)},
             args_intervention={"X": X, "dose": np.float32(dose)},
         )
-        curve[dose] = effect.posterior_predictive["y"].mean("y_dim_0").load()
+        curve[dose] = effect.posterior_predictive["y"].mean("obs").load()
