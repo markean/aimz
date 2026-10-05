@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import copyreg
 import logging
+import math
 import pickle
 from datetime import UTC, datetime
 from functools import partial
@@ -78,6 +79,7 @@ from aimz.utils._validation import (
 from aimz.utils.data import ArrayLoader
 from aimz.utils.data._input_setup import (
     _fits_single_batch,
+    _resolve_batch_size,
     _setup_inputs,
 )
 
@@ -148,6 +150,7 @@ class ImpactModel(BaseModel):
         super().__init__(kernel, param_input, param_output)
         self._kernel_spec: KernelSpec | None = None
         self._dims: dict[str, tuple[str, ...]] = {}
+        self._site_sizes: dict[str, tuple[int, int]] = {}
         if isinstance(rng_key, Array) and rng_key.dtype == jnp.uint32:
             msg = "Legacy `uint32` PRNGKey detected; converting to a typed key array."
             warn(msg, category=UserWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
@@ -281,6 +284,8 @@ class ImpactModel(BaseModel):
         self.__dict__.setdefault("_num_chains", 1)
         # Models pickled before dimension names were recorded keep the default names
         self.__dict__.setdefault("_dims", {})
+        # Models pickled before site sizes were recorded count one value per observation
+        self.__dict__.setdefault("_site_sizes", {})
         self._init_runtime_attrs()
         # A sampler pickled with parallel chains may be loaded on fewer devices
         inference = self._inference
@@ -448,7 +453,9 @@ class ImpactModel(BaseModel):
         # event dimensions named in its `infer` dictionary. A site whose names are not
         # strings or outnumber its dimensions, or whose leading axes do not follow its
         # plates (a global quantity computed inside a plate, a site inside `scan`),
-        # keeps the default names.
+        # keeps the default names. The values a site holds per draw, per observation
+        # when its leading axis follows the input's rows, size the streaming batches.
+        rows = getattr(args_bound[self.param_input], "shape", ())[:1]
         for k, v in model_trace.items():
             if v["type"] not in {"sample", "deterministic"}:
                 continue
@@ -462,6 +469,12 @@ class ImpactModel(BaseModel):
                 and shape[: len(frames)] == tuple(f.size for f in frames)
             ):
                 self._dims[k] = names
+            if hasattr(v["value"], "shape"):
+                self._site_sizes[k] = (
+                    (math.prod(shape[1:]), 0)
+                    if shape[:1] == rows
+                    else (0, math.prod(shape))
+                )
         prev = self._kernel_spec
         if prev is not None and prev.traced:
             sample_sites = tuple(dict.fromkeys(prev.sample_sites + sample_sites))
@@ -554,56 +567,117 @@ class ImpactModel(BaseModel):
 
         return artifact_path
 
-    def _plan_obs_batching(
+    def _output_nbytes(self, return_sites: tuple[str, ...]) -> tuple[int, int]:
+        """Return the bytes of output that the return sites hold in each draw.
+
+        The value counts come from the kernel's trace, and each value counts at the
+        width of the default float type, as the trace holds the observed data, whose
+        type the predictive output need not share. A site the trace did not record
+        counts as one value per observation.
+
+        Args:
+            return_sites: Names of the return sites.
+
+        Returns:
+            The bytes per observation, and those of the sites without an observation
+            axis.
+        """
+        itemsize = jnp.result_type(float).itemsize
+        sizes = [self._site_sizes.get(site, (1, 0)) for site in return_sites]
+
+        return itemsize * sum(n for n, _ in sizes), itemsize * sum(n for _, n in sizes)
+
+    def _plan_execution(
         self,
         X: ArrayLike | ArrayLoader | Iterable[Mapping[str, Array | np.ndarray]],
+        *,
+        shard_axis: Literal["obs", "draw"],
         batch_size: int | None,
-    ) -> Literal["proceed", "whole", "fallback"]:
-        """Decide how the observation axis may be batched given the posterior.
+        num_samples: int,
+        nbytes: tuple[int, int],
+        posterior: dict[str, Array] | None,
+    ) -> tuple[Literal["obs", "draw"], int | None]:
+        """Choose the sharding strategy and the batch size of a streamed call.
 
         A posterior site shaped ``(num_samples, n_obs, ...)`` indexes the observation
         axis of ``X``; data-parallel streaming splits that axis across devices or into
         batches, which would sever such a site from the observations it indexes. Only
-        a single whole-input batch on a single device keeps it intact.
+        a single whole-input batch on a single device keeps it intact, so the call
+        otherwise runs draw-parallel, with a warning. A requested observation batch that
+        does not divide among the devices also warns. An automatic batch size keeps the
+        output of each batch, counted over every return site, within the memory budget.
 
         Args:
             X: Input array with observations on the leading axis, or a data loader
                 yielding batch mappings keyed by kernel parameter names.
-            batch_size: The requested batch size, or ``None`` to use the default.
+            shard_axis: The requested sharding strategy.
+            batch_size: The requested batch size, or ``None`` to choose it.
+            num_samples: Number of draws the call produces.
+            nbytes: Bytes of output in each draw, per observation and for the sites
+                without an observation axis, as :meth:`_output_nbytes` returns them.
+            posterior: The posterior samples the call conditions on, if any.
 
         Returns:
-            - ``"proceed"``: batching as requested is safe. A data loader, an empty or
-              globally-shaped posterior, or an explicit ``batch_size`` already covering
-              the whole input.
-            - ``"whole"``: an aligned site with automatic batching on a single device,
-              and the whole input fits the memory budget; the caller pins
-              ``batch_size = n_obs`` so automatic splitting for I/O parallelism does
-              not apply.
-            - ``"fallback"``: an aligned site that data-parallel cannot serve. A
-              multi-device mesh, an explicit smaller ``batch_size``, or a
-              budget-exceeding input; the caller reruns draw-parallel.
+            The sharding strategy and the batch size, which is ``None`` for a data
+            loader, as it batches itself.
         """
-        if not isinstance(X, ArrayLike) or not self.posterior:
-            return "proceed"
+        if not isinstance(X, ArrayLike):
+            return shard_axis, None
 
         n_obs = len(cast("Sized", X))
+        row_nbytes, rest_nbytes = nbytes
         min_aligned_ndim = 2
-        if not any(
+        if shard_axis == "obs" and any(
             v.ndim >= min_aligned_ndim and v.shape[1] == n_obs
-            for v in self.posterior.values()
+            for v in (posterior or {}).values()
         ):
-            return "proceed"
+            if (
+                self._num_devices == 1
+                and batch_size is None
+                and _fits_single_batch(n_obs, item_nbytes=num_samples * row_nbytes)
+            ):
+                batch_size = n_obs
+            elif self._num_devices > 1 or batch_size is None or batch_size < n_obs:
+                msg = (
+                    "One or more posterior sample shapes are not compatible with "
+                    "`shard_axis='obs'`; rerunning with `shard_axis='draw'`. Pass "
+                    "`shard_axis='draw'` to silence this warning."
+                )
+                warn(msg, category=UserWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
+                shard_axis, batch_size = "draw", None
+        if (
+            shard_axis == "obs"
+            and batch_size is not None
+            and batch_size % self._num_devices
+        ):
+            msg = (
+                f"The `batch_size` ({batch_size}) is not divisible by the number of "
+                f"devices ({self._num_devices}). Use a multiple of {self._num_devices} "
+                "for optimal performance."
+            )
+            warn(msg, category=UserWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
 
-        if self._num_devices > 1:
-            return "fallback"
+        resolved = (
+            _resolve_batch_size(
+                batch_size,
+                axis_size=n_obs,
+                other_size=num_samples,
+                num_devices=self._num_devices,
+                item_nbytes=num_samples * row_nbytes,
+            )
+            if shard_axis == "obs"
+            else _resolve_batch_size(
+                batch_size,
+                axis_size=num_samples,
+                other_size=n_obs,
+                num_devices=self._num_devices,
+                item_nbytes=n_obs * row_nbytes + rest_nbytes,
+            )
+        )
+        if batch_size is None:
+            logger.debug("Resolved batch_size=%d automatically.", resolved)
 
-        if batch_size is not None:
-            return "proceed" if batch_size >= n_obs else "fallback"
-
-        if _fits_single_batch(n_obs, other_size=self._num_samples):
-            return "whole"
-
-        return "fallback"
+        return shard_axis, resolved
 
     def _stream_to_datatree(
         self,
@@ -852,6 +926,14 @@ class ImpactModel(BaseModel):
         _validate_intervention(intervention, kernel_spec=self._kernel_spec)
 
         return_sites = self._coerce_return_sites(return_sites)
+        shard_axis, batch_size = self._plan_execution(
+            X,
+            shard_axis=shard_axis,
+            batch_size=batch_size,
+            num_samples=num_samples,
+            nbytes=self._output_nbytes(return_sites),
+            posterior=None,
+        )
 
         if rng_key is None:
             self._rng_key, rng_key = random.split(self._rng_key)
@@ -1384,14 +1466,8 @@ class ImpactModel(BaseModel):
             param_input=self.param_input,
             param_output=self.param_output,
             rng_key=rng_subkey,
-            batch_size=(
-                len(cast("Sized", X))
-                if batch_size is None and isinstance(X, ArrayLike)
-                else batch_size
-            ),
-            num_samples=num_samples,
+            batch_size=batch_size,
             shuffle=shuffle,
-            device=None,
             **kwargs,
         )
         # Validate the provided parameters against the kernel's signature; the fields
@@ -1767,39 +1843,19 @@ class ImpactModel(BaseModel):
 
         if isinstance(X, ArrayLike):
             _ = self._bind_kernel_args(X, kwargs=kwargs)
-            plan = (
-                self._plan_obs_batching(X, batch_size=batch_size)
-                if shard_axis == "obs"
-                else "proceed"
-            )
-            if plan == "fallback":
-                msg = (
-                    "One or more posterior sample shapes are not compatible with "
-                    "`.predict()` under `shard_axis='obs'`; rerunning with "
-                    "`shard_axis='draw'`. Pass `shard_axis='draw'` to silence this "
-                    "warning."
-                )
-                warn(msg, category=UserWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
-                return self.predict(
-                    X,
-                    intervention=intervention,
-                    rng_key=rng_key,
-                    in_sample=in_sample,
-                    return_sites=return_sites,
-                    shard_axis="draw",
-                    batch_size=None,
-                    store=store,
-                    output_dir=output_dir,
-                    progress=progress,
-                    **kwargs,
-                )
-            if plan == "whole":
-                batch_size = len(cast("Sized", X))
+
+        return_sites = self._coerce_return_sites(return_sites)
+        shard_axis, batch_size = self._plan_execution(
+            X,
+            shard_axis=shard_axis,
+            batch_size=batch_size,
+            num_samples=self._num_samples,
+            nbytes=self._output_nbytes(return_sites),
+            posterior=self.posterior,
+        )
 
         if rng_key is None:
             self._rng_key, rng_key = random.split(self._rng_key)
-
-        return_sites = self._coerce_return_sites(return_sites)
 
         group = "posterior_predictive" if in_sample else "predictions"
 
@@ -2055,31 +2111,16 @@ class ImpactModel(BaseModel):
         # identically to the data-parallel path (a single-draw result).
         if not self.posterior:
             shard_axis = "obs"
-
-        plan = (
-            self._plan_obs_batching(X, batch_size=batch_size)
-            if shard_axis == "obs"
-            else "proceed"
+        # One value of the default float type per observation, whatever the output's
+        # own shape and dtype
+        shard_axis, batch_size = self._plan_execution(
+            X,
+            shard_axis=shard_axis,
+            batch_size=batch_size,
+            num_samples=self._num_samples,
+            nbytes=(jnp.result_type(float).itemsize, 0),
+            posterior=self.posterior,
         )
-        if plan == "fallback":
-            msg = (
-                "One or more posterior sample shapes are not compatible with "
-                "`.log_likelihood()` under `shard_axis='obs'`; rerunning with "
-                "`shard_axis='draw'`. Pass `shard_axis='draw'` to silence this warning."
-            )
-            warn(msg, category=UserWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
-            return self.log_likelihood(
-                X,
-                y,
-                batch_size=None,
-                shard_axis="draw",
-                store=store,
-                output_dir=output_dir,
-                progress=progress,
-                **kwargs,
-            )
-        if plan == "whole":
-            batch_size = len(cast("Sized", X))
 
         # With no posterior, the single-draw result samples every latent site from the
         # prior, which requires a seeded kernel. A posterior from fitting covers every

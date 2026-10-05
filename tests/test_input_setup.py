@@ -16,8 +16,7 @@
 
 import jax.numpy as jnp
 import pytest
-from jax import local_device_count, make_mesh, random
-from jax.sharding import AxisType, NamedSharding, PartitionSpec
+from jax import local_device_count, random
 
 from aimz.utils.data._input_setup import (
     MAX_BYTES,
@@ -29,34 +28,20 @@ from aimz.utils.data._input_setup import (
 def test_batch_size_capped_when_exceeding_threshold() -> None:
     """Auto batch size is capped and aligned to num_devices."""
     num_devices = local_device_count()
-    mesh = make_mesh(
-        (num_devices,),
-        axis_names=("obs",),
-        axis_types=(AxisType.Explicit,),
-    )
-    device = NamedSharding(mesh, spec=PartitionSpec("obs"))
-
-    n = 10
     # Mirror the implementation's dtype-aware element budget.
     max_elements = MAX_BYTES // jnp.result_type(float).itemsize
-    num_samples = max_elements
-    X = jnp.ones((n, 2))
 
-    loader, _ = _setup_inputs(
-        X=X,
-        y=None,
-        param_input="X",
-        param_output="y",
-        rng_key=random.key(0),
-        batch_size=None,
-        num_samples=num_samples,
-        device=device,
+    batch_size = _resolve_batch_size(
+        None,
+        axis_size=10,
+        other_size=max_elements,
+        num_devices=num_devices,
     )
 
     # batch_size = max_elements // num_samples = max_elements // max_elements = 1.
     # Round down to nearest multiple of num_devices: 1 - 1 % num_devices = 0.
     # Floor at num_devices to avoid zero: max(0, num_devices) = num_devices.
-    assert loader.batch_size == num_devices
+    assert batch_size == num_devices
 
 
 def test_x_zero_dim_raises() -> None:
@@ -69,7 +54,6 @@ def test_x_zero_dim_raises() -> None:
             param_output="y",
             rng_key=random.key(0),
             batch_size=None,
-            num_samples=1,
         )
 
 
@@ -83,7 +67,6 @@ def test_y_zero_dim_raises() -> None:
             param_output="y",
             rng_key=random.key(0),
             batch_size=None,
-            num_samples=1,
         )
 
 
@@ -97,7 +80,6 @@ def test_x_wrong_type_raises() -> None:
             param_output="y",
             rng_key=random.key(0),
             batch_size=None,
-            num_samples=1,
         )
 
 
@@ -110,7 +92,6 @@ def test_non_array_kwargs_classified_as_extra() -> None:
         param_output="y",
         rng_key=random.key(0),
         batch_size=2,
-        num_samples=1,
         family="gaussian",
     )
 

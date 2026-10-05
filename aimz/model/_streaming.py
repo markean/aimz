@@ -47,7 +47,6 @@ from aimz.utils._output import (
 from aimz.utils.data import ArrayLoader
 from aimz.utils.data._input_setup import (
     _prepare_batch,
-    _resolve_batch_size,
     _setup_inputs,
 )
 from aimz.utils.data._sharding import (
@@ -243,9 +242,7 @@ class _OutputStreamer:
             param_output=self._ctx.param_output,
             rng_key=req.loader_rng_key,
             batch_size=req.batch_size,
-            num_samples=req.num_samples,
             shuffle=False,
-            device=self._ctx.partitioned_sharding,
             **req.kwargs,
         )
         batches = iter(loader)
@@ -703,14 +700,7 @@ class _OutputStreamer:
             The strategy's site arrays for in-memory accumulation, or ``None`` for a
             Zarr-backed write.
         """
-        batch_size = _resolve_batch_size(
-            req.batch_size,
-            axis_size=req.num_samples,
-            other_size=len(cast("Sized", req.X)),
-            num_devices=self._ctx.num_devices,
-        )
-        if req.batch_size is None:
-            logger.debug("Resolved batch_size=%d automatically.", batch_size)
+        batch_size = cast("int", req.batch_size)
         n_chunks = -(-req.num_samples // batch_size)
         # The public draw-parallel entry points reject data loaders, so `req.X` is
         # always an array here.
