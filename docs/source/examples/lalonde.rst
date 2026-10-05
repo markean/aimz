@@ -194,7 +194,7 @@ The treatment variable ``treat`` is a :func:`~numpyro.primitives.sample` site, o
         # Treatment sub-model: makes treat a sample site so that the
         # intervention keyword can fix its value via do().
         p_treat = sample("p_treat", dist.Beta(1.0, 1.0))
-        with plate("obs_treat", n_obs):
+        with plate("obs", size=n_obs):
             treat = sample("treat", dist.Bernoulli(probs=p_treat), obs=y_treat)
 
         # Outcome model with heterogeneous treatment effect.
@@ -210,9 +210,8 @@ The treatment variable ``treat`` is a :func:`~numpyro.primitives.sample` site, o
 
         nodegree = X[:, nodegree_idx]
         mu = intercept + (beta_treat + beta_interact * nodegree) * treat + X @ beta_cov
-        deterministic("mu_earnings", mu)
-
-        with plate("obs", n_obs):
+        with plate("obs", size=n_obs):
+            deterministic("mu_earnings", mu)
             sample("y", dist.Normal(mu, sigma), obs=y)
 
 \
@@ -269,7 +268,7 @@ The posterior predictive check below compares the observed and predicted mean ea
 
     # Overall
     obs_mean = float(y_earnings.mean())
-    pred_means = pp_earn.mean(dim="y_dim_0").to_numpy().flatten()
+    pred_means = pp_earn.mean(dim="obs").to_numpy().flatten()
     axes[0].hist(pred_means, bins=30, color="C0")
     axes[0].axvline(
         obs_mean,
@@ -285,7 +284,7 @@ The posterior predictive check below compares the observed and predicted mean ea
     for arm, color in [(0, "C0"), (1, "C1")]:
         mask = np.asarray(y_treat == arm)
         obs_arm = float(y_earnings[mask].mean())
-        pred_arm = pp_earn.isel(y_dim_0=mask).mean(dim="y_dim_0").to_numpy().flatten()
+        pred_arm = pp_earn.isel(obs=mask).mean(dim="obs").to_numpy().flatten()
         axes[1].hist(
             pred_arm,
             bins=30,
@@ -326,7 +325,7 @@ Averaging over all observations gives the overall ATE.
 .. jupyter-execute::
 
     ite = effect.posterior_predictive["mu_earnings"]
-    ate = ite.mean(dim="mu_earnings_dim_0")
+    ate = ite.mean(dim="obs")
 
 
 Overall ATE
@@ -366,8 +365,8 @@ We partition the observations and average each subset.
 
     nodegree_mask = np.asarray(df["nodegree"] == 1)
 
-    cate_no_degree = ite.isel(mu_earnings_dim_0=nodegree_mask).mean(dim="mu_earnings_dim_0")
-    cate_degree = ite.isel(mu_earnings_dim_0=~nodegree_mask).mean(dim="mu_earnings_dim_0")
+    cate_no_degree = ite.isel(obs=nodegree_mask).mean(dim="obs")
+    cate_degree = ite.isel(obs=~nodegree_mask).mean(dim="obs")
 
 .. jupyter-execute::
 

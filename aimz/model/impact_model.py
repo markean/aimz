@@ -147,6 +147,7 @@ class ImpactModel(BaseModel):
         """
         super().__init__(kernel, param_input, param_output)
         self._kernel_spec: KernelSpec | None = None
+        self._dims: dict[str, tuple[str, ...]] = {}
         if isinstance(rng_key, Array) and rng_key.dtype == jnp.uint32:
             msg = "Legacy `uint32` PRNGKey detected; converting to a typed key array."
             warn(msg, category=UserWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
@@ -278,6 +279,8 @@ class ImpactModel(BaseModel):
         self.__dict__.setdefault("_is_fitted", False)
         # Models pickled before chains were kept stacked their draws as one chain
         self.__dict__.setdefault("_num_chains", 1)
+        # Models pickled before dimension names were recorded keep the default names
+        self.__dict__.setdefault("_dims", {})
         self._init_runtime_attrs()
         # A sampler pickled with parallel chains may be loaded on fewer devices
         inference = self._inference
@@ -441,6 +444,24 @@ class ImpactModel(BaseModel):
                 if v["type"] == "deterministic" and k != self.param_output
             ),
         )
+        # Name the dimensions of each site after its plates, outermost first, then the
+        # event dimensions named in its `infer` dictionary. A site whose names are not
+        # strings or outnumber its dimensions, or whose leading axes do not follow its
+        # plates (a global quantity computed inside a plate, a site inside `scan`),
+        # keeps the default names.
+        for k, v in model_trace.items():
+            if v["type"] not in {"sample", "deterministic"}:
+                continue
+            frames = sorted(v.get("cond_indep_stack") or (), key=lambda f: f.dim)
+            event_dims = (v.get("infer") or {}).get("event_dims", ())
+            names = (*(f.name for f in frames), *event_dims)
+            shape = getattr(v["value"], "shape", ())
+            if (
+                0 < len(names) <= len(shape)
+                and all(isinstance(name, str) for name in names)
+                and shape[: len(frames)] == tuple(f.size for f in frames)
+            ):
+                self._dims[k] = names
         prev = self._kernel_spec
         if prev is not None and prev.traced:
             sample_sites = tuple(dict.fromkeys(prev.sample_sites + sample_sites))
@@ -625,6 +646,7 @@ class ImpactModel(BaseModel):
                 group=group,
                 posterior=self.posterior,
                 num_chains=self._num_chains,
+                dims=self._dims,
             )
         except BaseException:
             if artifact_path is not None:
@@ -699,6 +721,7 @@ class ImpactModel(BaseModel):
             group="prior_predictive",
             posterior=self.posterior,
             num_chains=self._num_chains,
+            dims=self._dims,
         )
 
     def sample_prior_predictive(
@@ -845,6 +868,7 @@ class ImpactModel(BaseModel):
                     progress=progress,
                     loader_rng_key=self.rng_key,
                     kwargs=kwargs,
+                    dims=self._dims,
                 ),
                 kernel=self.kernel,
                 rng_key=rng_key,
@@ -956,6 +980,7 @@ class ImpactModel(BaseModel):
             num_chains=(
                 self.inference.num_chains if isinstance(self.inference, MCMC) else 1
             ),
+            dims=self._dims,
         )
 
     def sample_posterior_predictive_on_batch(
@@ -1636,6 +1661,7 @@ class ImpactModel(BaseModel):
             group="posterior_predictive" if in_sample else "predictions",
             posterior=self.posterior,
             num_chains=self._num_chains,
+            dims=self._dims,
         )
 
     def predict(
@@ -1789,6 +1815,7 @@ class ImpactModel(BaseModel):
                     progress=progress,
                     loader_rng_key=self.rng_key,
                     kwargs=kwargs,
+                    dims=self._dims,
                 ),
                 kernel=self.kernel,
                 rng_key=rng_key,
@@ -1917,6 +1944,7 @@ class ImpactModel(BaseModel):
             out["posterior"] = _dict_to_datatree(
                 self.posterior,
                 num_chains=self._num_chains,
+                dims=self._dims,
             )
         # Record each scenario's artifact path when the scenario was computed by a
         # disk-backed method. In-memory (on_batch / *_on_batch / store="memory")
@@ -2073,6 +2101,7 @@ class ImpactModel(BaseModel):
                     progress=progress,
                     loader_rng_key=self.rng_key,
                     kwargs=kwargs,
+                    dims=self._dims,
                 ),
                 kernel=kernel,
                 posterior=self.posterior,

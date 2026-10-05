@@ -27,7 +27,7 @@ from xarray import open_zarr
 from zarr import config as zarr_config
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     import numpy.typing as npt
     from dask.array import Array as DaskArray
@@ -46,15 +46,74 @@ def _make_attrs() -> dict[str, str]:
     }
 
 
+def _site_dims(site: str, ndim: int, names: Sequence[str] = ()) -> list[str]:
+    """Name the dimensions of a site that follow its sample dimensions.
+
+    The given names come first and every other dimension takes the default
+    ``<site>_dim_<i>``, numbered from zero among the dimensions without a name. Names
+    beyond the dimensions are dropped, as for a log-likelihood, which has no event
+    dimensions. Names that cannot apply, being repeated or ``chain`` or ``draw``, give
+    way to the default names.
+
+    Args:
+        site: The site name.
+        ndim: Number of dimensions after the sample dimensions.
+        names: The site's dimension names, outermost first.
+
+    Returns:
+        The dimension names.
+    """
+    if len(set(names)) < len(names) or {"chain", "draw"} & set(names):
+        names = ()
+
+    return [*names[:ndim], *(f"{site}_dim_{i}" for i in range(ndim - len(names)))]
+
+
+def _group_dims(
+    shapes: Mapping[str, Sequence[int]],
+    dims: Mapping[str, Sequence[str]],
+) -> dict[str, list[str]]:
+    """Name the dimensions of the sites of one group after their sample dimensions.
+
+    Each site is named by :func:`_site_dims`. Sites whose names would give a dimension
+    two lengths within the group keep the default names instead, so naming never fails.
+
+    Args:
+        shapes: The shape of each site after its sample dimensions.
+        dims: The dimension names by site.
+
+    Returns:
+        The dimension names by site.
+    """
+    names = {
+        site: _site_dims(site, len(shape), dims.get(site, ()))
+        for site, shape in shapes.items()
+    }
+    lengths: dict[str, int] = {}
+    clashes = set()
+    for site, shape in shapes.items():
+        for name, length in zip(names[site], shape, strict=True):
+            if lengths.setdefault(name, length) != length:
+                clashes.add(name)
+
+    return {
+        site: _site_dims(site, len(shapes[site]))
+        if clashes & set(names[site])
+        else names[site]
+        for site in shapes
+    }
+
+
 def _dict_to_datatree(
     data: Mapping[str, Array | npt.NDArray | DaskArray],
     num_chains: int,
+    dims: Mapping[str, Sequence[str]] | None = None,
 ) -> xr.DataTree:
     """Convert a dictionary of arrays to an xarray DataTree.
 
     Each key in the dictionary becomes a variable in the Dataset, and its associated
     array is wrapped as an xarray DataArray with a ``chain`` and ``draw`` dimension to
-    support MCMC-style outputs. Additional dimensions are automatically named using the
+    support MCMC-style outputs. Additional dimensions take the names in ``dims``, or the
     pattern ``<variable>_dim_<N>``. Dask arrays pass through and keep the result lazy.
 
     Args:
@@ -63,11 +122,14 @@ def _dict_to_datatree(
             represents samples or draws, stacked chain by chain.
         num_chains: Number of chains the draws are stacked from. The first dimension is
             split into ``chain`` and ``draw``.
+        dims: Names of the dimensions after ``draw``, by variable.
 
     Returns:
         All variables with added ``chain`` and ``draw`` dimensions, along with
             coordinates for each array dimension.
     """
+    names = _group_dims({site: arr.shape[1:] for site, arr in data.items()}, dims or {})
+
     return xr.DataTree(
         xr.Dataset(
             {
@@ -81,17 +143,15 @@ def _dict_to_datatree(
                         "chain": np.arange(num_chains),
                         "draw": np.arange(arr.shape[0] // num_chains),
                         **{
-                            f"{site}_dim_{i}": np.arange(arr.shape[i + 1])
-                            for i in range(arr.ndim - 1)
+                            name: np.arange(arr.shape[i + 1])
+                            for i, name in enumerate(names[site])
                         },
                     },
                     dims=(
                         # The stacked draws are split into 'chain' and 'draw'.
                         "chain",
                         "draw",
-                        # arr has shape (draw, dim_0, dim_1, ...), so arr.ndim includes
-                        # 'draw' and we subtract 1
-                        *[f"{site}_dim_{i}" for i in range(arr.ndim - 1)],
+                        *names[site],
                     ),
                     name=site,
                 )
@@ -140,6 +200,7 @@ def _build_datatree(
     group: str,
     posterior: Mapping[str, Array | npt.NDArray] | None = None,
     num_chains: int = 1,
+    dims: Mapping[str, Sequence[str]] | None = None,
 ) -> xr.DataTree:
     """Build the aimz output DataTree.
 
@@ -161,6 +222,8 @@ def _build_datatree(
             posterior subtree and ``group`` split their draws into ``chain`` and
             ``draw``, except a ``"prior_predictive"`` group, whose draws do not come
             from the posterior.
+        dims: Names of the dimensions after ``draw``, by variable. A Zarr group already
+            carries them.
 
     Returns:
         A DataTree rooted at ``"root"`` with the site data attached under ``group``
@@ -168,13 +231,17 @@ def _build_datatree(
     """
     out = xr.DataTree(name="root")
     if posterior:
-        out["posterior"] = _dict_to_datatree(posterior, num_chains=num_chains)
+        out["posterior"] = _dict_to_datatree(
+            posterior,
+            num_chains=num_chains,
+            dims=dims,
+        )
     group_chains = 1 if group == "prior_predictive" else num_chains
     if isinstance(data, Path):
         out[group] = _zarr_to_datatree(data, num_chains=group_chains)
         out[group].attrs["artifact_path"] = str(data)
         out.attrs["artifact_path"] = str(data)
     else:
-        out[group] = _dict_to_datatree(data, num_chains=group_chains)
+        out[group] = _dict_to_datatree(data, num_chains=group_chains, dims=dims)
 
     return out

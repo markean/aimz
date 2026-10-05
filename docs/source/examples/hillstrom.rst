@@ -221,7 +221,7 @@ The covariate coefficients are shared across treatment arms (no treatment x cova
 
         logit = alpha + X @ beta + tau[segment]
 
-        with plate("obs", n_obs):
+        with plate("obs", size=n_obs):
             sample("y", dist.Bernoulli(logits=logit), obs=y)
 
 \
@@ -280,7 +280,7 @@ Before estimating treatment effects, we run a posterior predictive check to veri
 
     # Overall
     obs_overall = float(y_conversion.mean())
-    pred_overall = pp_conv.mean(dim="y_dim_0").to_numpy().flatten()
+    pred_overall = pp_conv.mean(dim="obs").to_numpy().flatten()
     axes[0].hist(pred_overall, bins=20, color="C0")
     axes[0].axvline(
         obs_overall,
@@ -296,7 +296,7 @@ Before estimating treatment effects, we run a posterior predictive check to veri
     for arm_id, arm_name in enumerate(segments):
         mask = np.asarray(segment == arm_id)
         obs_arm = float(y_conversion[mask].mean())
-        pred_arm = pp_conv.isel(y_dim_0=mask).mean(dim="y_dim_0").to_numpy().flatten()
+        pred_arm = pp_conv.isel(obs=mask).mean(dim="obs").to_numpy().flatten()
         axes[arm_id + 1].hist(pred_arm, bins=20, color=f"C{arm_id + 1}")
         axes[arm_id + 1].axvline(
             obs_arm,
@@ -363,8 +363,8 @@ Averaging the per-observation differences over all customers gives the ATE poste
 
 .. jupyter-execute::
 
-    ate_conv_mens = effect_conv_mens.posterior_predictive["y"].mean(dim="y_dim_0")
-    ate_conv_womens = effect_conv_womens.posterior_predictive["y"].mean(dim="y_dim_0")
+    ate_conv_mens = effect_conv_mens.posterior_predictive["y"].mean(dim="obs")
+    ate_conv_womens = effect_conv_womens.posterior_predictive["y"].mean(dim="obs")
 
 \
 
@@ -439,7 +439,7 @@ At prediction time, we switch to the generative form: sample ``purchase`` from t
 
         if y is not None:
             is_zero = y == 0.0
-            with plate("obs", n_obs):
+            with plate("obs", size=n_obs):
                 log_lik = jnp.where(
                     is_zero,
                     jax.nn.log_sigmoid(-logit),
@@ -448,7 +448,7 @@ At prediction time, we switch to the generative form: sample ``purchase`` from t
                 )
                 factor("y", log_lik)
         else:
-            with plate("obs", n_obs):
+            with plate("obs", size=n_obs):
                 purchase = sample("purchase", dist.Bernoulli(logits=logit))
                 amount = sample("amount", dist.LogNormal(mu, sigma))
                 deterministic("y", purchase * amount)
@@ -498,7 +498,7 @@ Following the same workflow as the conversion model, we check that the predicted
 
     # Overall
     obs_overall = float(y_spend.mean())
-    pred_overall = pp_spend.mean(dim="y_dim_0").to_numpy().flatten()
+    pred_overall = pp_spend.mean(dim="obs").to_numpy().flatten()
     axes[0].hist(pred_overall, bins=20, color="C0")
     axes[0].axvline(
         obs_overall,
@@ -514,7 +514,7 @@ Following the same workflow as the conversion model, we check that the predicted
     for arm_id, arm_name in enumerate(segments):
         mask = np.asarray(segment == arm_id)
         obs_arm = float(y_spend[mask].mean())
-        pred_arm = pp_spend.isel(y_dim_0=mask).mean(dim="y_dim_0").to_numpy().flatten()
+        pred_arm = pp_spend.isel(obs=mask).mean(dim="obs").to_numpy().flatten()
         axes[arm_id + 1].hist(pred_arm, bins=20, color=f"C{arm_id + 1}")
         axes[arm_id + 1].axvline(
             obs_arm,
@@ -573,8 +573,8 @@ Averaging per-observation spend differences gives the ATE posterior in dollars.
 
 .. jupyter-execute::
 
-    ate_spend_mens = effect_spend_mens.posterior_predictive["y"].mean(dim="y_dim_0")
-    ate_spend_womens = effect_spend_womens.posterior_predictive["y"].mean(dim="y_dim_0")
+    ate_spend_mens = effect_spend_mens.posterior_predictive["y"].mean(dim="obs")
+    ate_spend_womens = effect_spend_womens.posterior_predictive["y"].mean(dim="obs")
 
 \
 

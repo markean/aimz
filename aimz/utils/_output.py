@@ -33,6 +33,8 @@ from dask.array import concatenate, from_delayed
 from zarr import open_group
 from zarr.codecs import BloscCodec
 
+from aimz.utils._format import _group_dims
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -42,6 +44,7 @@ if TYPE_CHECKING:
         Iterable,
         Mapping,
         MutableMapping,
+        Sequence,
     )
 
     import numpy as np
@@ -264,13 +267,14 @@ def _create_site_array(
     axis: int,
     total: int,
     chunk: int,
+    dims: Sequence[str],
 ) -> None:
     """Create one Zarr array for a site.
 
     The streamed ``axis`` is sized to ``total`` (``0`` for append-style growth, the
     full size for preallocated slice writing) and chunked by ``chunk``; every other
     axis is taken whole from ``arr``. The leading axis is always the draw axis, so
-    ``dimension_names`` is ``("draw", "<site>_dim_0", ...)``.
+    ``dimension_names`` is ``("draw", *dims)``.
 
     Args:
         zarr_group: The open Zarr group to create the array in.
@@ -280,6 +284,7 @@ def _create_site_array(
         axis: The streamed axis (the one filled batch by batch).
         total: Full size of the streamed axis.
         chunk: Chunk length along the streamed axis.
+        dims: The site's dimension names after the draw axis.
     """
     shape = list(arr.shape)
     shape[axis] = total
@@ -290,10 +295,7 @@ def _create_site_array(
         shape=tuple(shape),
         dtype=_site_dtype(arr),
         chunks=tuple(chunks),
-        dimension_names=(
-            "draw",
-            *tuple(f"{site}_dim_{i}" for i in range(arr.ndim - 1)),
-        ),
+        dimension_names=("draw", *dims),
         compressors=BloscCodec(cname="zstd", clevel=1, shuffle="shuffle"),
     )
 
@@ -391,6 +393,7 @@ class _AppendWriteStrategy(_WriteStrategy):
         artifact_path: Path,
         batch_size: int,
         axis: int,
+        dims: Mapping[str, Sequence[str]] | None = None,
     ) -> None:
         """Initialize the append write strategy.
 
@@ -399,11 +402,13 @@ class _AppendWriteStrategy(_WriteStrategy):
                 for writing here).
             batch_size: Chunk length along the streamed axis.
             axis: The streamed axis to grow (``0`` for draws, ``1`` for observations).
+            dims: Dimension names by site, after the draw axis.
         """
         self._artifact_path = artifact_path
         self._zarr_group = open_group(artifact_path, mode="w")
         self._chunk_size = batch_size
         self._axis = axis
+        self._dims = dims or {}
         self._seen: set[str] = set()
 
     @property
@@ -435,6 +440,10 @@ class _AppendWriteStrategy(_WriteStrategy):
             site_arrays: Mapping of site name to the (post-slice) sample array emitted
                 for the current batch.
         """
+        names = _group_dims(
+            {site: arr.shape[1:] for site, arr in site_arrays.items()},
+            self._dims,
+        )
         for site, arr in site_arrays.items():
             if site not in self._seen:
                 _create_site_array(
@@ -444,6 +453,7 @@ class _AppendWriteStrategy(_WriteStrategy):
                     axis=self._axis,
                     total=0,
                     chunk=self._chunk_size,
+                    dims=names[site],
                 )
                 self._seen.add(site)
 
@@ -465,6 +475,7 @@ class _SliceWriteStrategy(_WriteStrategy):
         total: int,
         batch_size: int,
         axis: int,
+        dims: Mapping[str, Sequence[str]] | None = None,
     ) -> None:
         """Initialize the slice write strategy.
 
@@ -474,12 +485,14 @@ class _SliceWriteStrategy(_WriteStrategy):
             total: Full size of the streamed axis (preallocated up front).
             batch_size: Chunk length along the streamed axis.
             axis: The streamed axis to fill (``0`` for draws, ``1`` for observations).
+            dims: Dimension names by site, after the draw axis.
         """
         self._artifact_path = artifact_path
         self._zarr_group = open_group(artifact_path, mode="w")
         self._total = total
         self._chunk_size = min(batch_size, total)
         self._axis = axis
+        self._dims = dims or {}
         self._seen: set[str] = set()
         self._site_offsets: dict[str, int] = {}
 
@@ -528,6 +541,10 @@ class _SliceWriteStrategy(_WriteStrategy):
             NotImplementedError: If any return site emits a streamed-axis size that does
                 not match the batch size.
         """
+        names = _group_dims(
+            {site: arr.shape[1:] for site, arr in site_arrays.items()},
+            self._dims,
+        )
         for site, arr in site_arrays.items():
             if site not in self._seen:
                 _validate_streamed_axis_size(
@@ -543,6 +560,7 @@ class _SliceWriteStrategy(_WriteStrategy):
                     axis=self._axis,
                     total=self._total,
                     chunk=self._chunk_size,
+                    dims=names[site],
                 )
                 self._seen.add(site)
                 self._site_offsets[site] = 0
@@ -644,6 +662,7 @@ def _create_slice_strategy(
     total: int,
     batch_size: int,
     axis: int,
+    dims: Mapping[str, Sequence[str]] | None = None,
 ) -> _WriteStrategy:
     """Build the slice-writing strategy for a stream with a known streamed-axis size.
 
@@ -655,6 +674,7 @@ def _create_slice_strategy(
         total: Full size of the streamed axis.
         batch_size: Chunk length along the streamed axis.
         axis: The streamed axis to fill (``0`` for draws, ``1`` for observations).
+        dims: Dimension names by site, after the draw axis, for the Zarr arrays.
 
     Returns:
         The write strategy to use.
@@ -667,6 +687,7 @@ def _create_slice_strategy(
         total=total,
         batch_size=batch_size,
         axis=axis,
+        dims=dims,
     )
 
 
@@ -675,6 +696,7 @@ def _select_write_strategy(
     *,
     total: int | None,
     batch_size: int,
+    dims: Mapping[str, Sequence[str]] | None = None,
 ) -> _WriteStrategy:
     """Build the observation writer for a regular loader or a generic stream.
 
@@ -687,6 +709,7 @@ def _select_write_strategy(
             to accumulate the results in host memory.
         total: Exact row count for regular batches, or ``None`` for generic streams.
         batch_size: Regular batch size, or the first generic batch's size.
+        dims: Dimension names by site, after the draw axis, for the Zarr arrays.
 
     Returns:
         The write strategy to use.
@@ -698,6 +721,7 @@ def _select_write_strategy(
             artifact_path=artifact_path,
             batch_size=batch_size,
             axis=1,
+            dims=dims,
         )
 
     return _SliceWriteStrategy(
@@ -705,6 +729,7 @@ def _select_write_strategy(
         total=total,
         batch_size=batch_size,
         axis=1,
+        dims=dims,
     )
 
 

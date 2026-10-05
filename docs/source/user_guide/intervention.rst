@@ -191,7 +191,7 @@ Model
         sigma = sample("sigma", dist.Exponential())
 
         # Plate over data
-        with plate("data", X.shape[0]):
+        with plate("obs", size=X.shape[0]):
             mu_z = beta_z + beta_cz * c + beta_xz * X.squeeze(axis=1)
             z = sample("z", dist.LogNormal(mu_z, sigma))
 

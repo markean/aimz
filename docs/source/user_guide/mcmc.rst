@@ -40,7 +40,7 @@ We set up a linear regression model and create synthetic data for both features 
         b = sample("b", dist.Normal())
         mu = jnp.dot(X, w) + b
         sigma = sample("sigma", dist.Exponential())
-        with plate("data", size=X.shape[0]):
+        with plate("obs", size=X.shape[0]):
             sample("y", dist.Normal(mu, sigma), obs=y)
 
 
