@@ -18,12 +18,14 @@ import warnings
 from collections.abc import Iterator
 from pathlib import Path
 
+import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
 import pytest
 from jax import Array, random
-from numpyro import sample
+from numpyro import deterministic, param, sample
 from numpyro.infer import MCMC, NUTS, SVI
+from numpyro.primitives import mutable
 
 from aimz import ImpactModel, OutputWarning, PerformanceWarning
 from aimz.model._streaming import _OutputStreamer, _RuntimeContext
@@ -167,6 +169,84 @@ def test_predict_intervention_reuses_compiled_program(
     im.predict(X, intervention={"b": 1.0}, store="memory", progress=False)
 
     assert fn._cache_size() == cache_size
+
+
+@pytest.mark.parametrize("shard_axis", ["obs", "draw"])
+def test_predict_param_site(
+    synthetic_data: tuple[Array, Array],
+    shard_axis: str,
+) -> None:
+    """Predictive methods use the `param` values and mutable state learned by SVI."""
+    X, y = synthetic_data
+
+    def kernel(X: Array, y: Array | None = None) -> None:
+        w = param("w", jnp.zeros(X.shape[1]))
+        state = mutable("state", {"b": jnp.zeros(())})
+        if y is not None:
+            state["b"] = jnp.ones(())
+        sigma = sample("sigma", dist.Exponential(1.0))
+        mu = deterministic("mu", jnp.dot(X, w) + state["b"])
+        sample("y", dist.Normal(mu, sigma), obs=y)
+
+    im = ImpactModel(kernel, rng_key=random.key(42), inference=_make_svi(kernel))
+    im.fit_on_batch(X, y, num_steps=10, num_samples=4, progress=False)
+    w = im.vi_result.params["w"]
+    assert w.any()
+    mu = np.broadcast_to(jnp.dot(X, w) + 1.0, (4, len(X)))
+
+    batch_size = 30 if shard_axis == "obs" else 4
+    on_batch = im.predict_on_batch(X, return_sites="mu", return_datatree=False)
+    np.testing.assert_allclose(on_batch["mu"], mu, rtol=1e-5)
+    dt = im.predict(
+        X,
+        return_sites="mu",
+        shard_axis=shard_axis,
+        batch_size=batch_size,
+        store="memory",
+        progress=False,
+    )
+    np.testing.assert_allclose(dt.posterior_predictive["mu"].values[0], mu, rtol=1e-5)
+    dt = im.log_likelihood(
+        X,
+        y,
+        shard_axis=shard_axis,
+        batch_size=batch_size,
+        store="memory",
+        progress=False,
+    )
+    np.testing.assert_allclose(
+        dt.log_likelihood["y"].values[0],
+        dist.Normal(mu, im.posterior["sigma"][:, None]).log_prob(y),
+        rtol=1e-4,
+    )
+
+    # A refit passes the new values to the same compiled program
+    fn = im._streamer._fn_cache["predict", shard_axis, 0, 0]
+    cache_size = fn._cache_size()
+    im.fit_on_batch(X, y, num_steps=10, num_samples=4, progress=False)
+    dt = im.predict(
+        X,
+        return_sites="mu",
+        shard_axis=shard_axis,
+        batch_size=batch_size,
+        store="memory",
+        progress=False,
+    )
+    np.testing.assert_allclose(
+        dt.posterior_predictive["mu"].values[0],
+        np.broadcast_to(jnp.dot(X, im.vi_result.params["w"]) + 1.0, (4, len(X))),
+        rtol=1e-5,
+    )
+    assert fn._cache_size() == cache_size
+
+    # Prior predictive sampling keeps the initial values
+    prior = im.sample_prior_predictive_on_batch(
+        X,
+        num_samples=2,
+        return_sites="mu",
+        return_datatree=False,
+    )
+    assert not prior["mu"].any()
 
 
 def test_predict_mcmc_keeps_chains(synthetic_data: tuple[Array, Array]) -> None:

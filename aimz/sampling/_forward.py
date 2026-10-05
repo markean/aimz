@@ -33,6 +33,7 @@ def _sample_forward(
     rng_keys: Array,
     return_sites: tuple[str, ...] | None,
     samples: dict[str, Array] | None,
+    params: Mapping[str, object] | None,
     intervention: dict | None,
     model_kwargs: Mapping[str, object] | None,
 ) -> dict[str, Array]:
@@ -59,6 +60,9 @@ def _sample_forward(
         return_sites: Names of variables (sites) to return.
         samples: A dictionary of samples to condition on, where each array has shape
             ``(num_samples, ...)``.
+        params: Values of the model's ``param`` sites and mutable state, shared by
+            all draws, such as those learned by variational inference. Passed as
+            dynamic inputs by compiled callers so a refit reuses the same program.
         intervention: A dictionary mapping sample site names to replacement values
             used during predictive sampling. Passed as dynamic inputs by compiled
             callers so repeated interventions reuse the same program.
@@ -68,6 +72,8 @@ def _sample_forward(
         A dictionary mapping each return site to an array of traced values with shape
             ``(num_samples, ...)``.
     """
+    if params:
+        model = substitute(model, data=params)
     if intervention:
         model = do(model, data=intervention)
 
