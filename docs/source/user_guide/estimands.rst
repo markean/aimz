@@ -203,16 +203,20 @@ Write the kernel so that every path an intervention should change runs through d
 Sweeping a Lever
 ----------------
 
-A response curve calls :meth:`~aimz.ImpactModel.estimate_effect` once for each value of a lever.
+A response curve compares each value of a lever with one baseline.
+Predict the baseline once, pass it as ``output_baseline``, and give every scenario the same ``rng_key``.
+Each value is then paired with the baseline and with the other values, and the baseline is not generated again for each of them.
 A Python number passed as a keyword argument is static, so each new value compiles the kernel again; pass the value as a NumPy or JAX array instead, and the whole sweep reuses one compiled program (see :ref:`streaming-keyword-arguments`).
 For a kernel that takes a ``dose`` argument:
 
 .. code-block:: python
 
+    key = random.key(2)
+    baseline = im.predict(X, dose=np.float32(0.0), rng_key=key)
     curve = {}
     for dose in (0.5, 1.0, 1.5, 2.0):
         effect = im.estimate_effect(
-            args_baseline={"X": X, "dose": np.float32(0.0)},
-            args_intervention={"X": X, "dose": np.float32(dose)},
+            output_baseline=baseline,
+            args_intervention={"X": X, "dose": np.float32(dose), "rng_key": key},
         )
         curve[dose] = effect.posterior_predictive["y"].mean("obs").load()
