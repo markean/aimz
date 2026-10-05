@@ -28,7 +28,7 @@ import pytest
 from jax import Array, random
 from numpyro.infer import MCMC, NUTS
 
-from aimz import ImpactModel
+from aimz import ImpactModel, PerformanceWarning
 from tests.conftest import _make_svi
 
 if TYPE_CHECKING:
@@ -122,7 +122,7 @@ def test_load_parallel_chains_on_fewer_devices(monkeypatch: pytest.MonkeyPatch) 
     data = cloudpickle.dumps(im)
     monkeypatch.setattr("aimz.model.impact_model.local_device_count", lambda: 1)
     with pytest.warns(
-        UserWarning,
+        PerformanceWarning,
         match=r"not enough devices to run parallel chains: expected 2 but got 1\.",
     ):
         im = cloudpickle.loads(data)

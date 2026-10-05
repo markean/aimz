@@ -17,7 +17,14 @@
 from os import sep
 from pathlib import Path
 
-__all__ = ["KernelValidationError", "NotFittedError"]
+__all__ = [
+    "AimzWarning",
+    "FitWarning",
+    "KernelValidationError",
+    "NotFittedError",
+    "OutputWarning",
+    "PerformanceWarning",
+]
 
 # Warnings skip the frames in this package to point at the caller's own line
 _SKIP_FILE_PREFIXES = (f"{Path(__file__).parent}{sep}",)
@@ -29,3 +36,19 @@ class NotFittedError(ValueError, AttributeError):
 
 class KernelValidationError(Exception):
     """Exception class to raise if kernel validation fails."""
+
+
+class AimzWarning(UserWarning):
+    """Base class for warnings issued by aimz."""
+
+
+class FitWarning(AimzWarning, RuntimeWarning):
+    """Warning class for a fit whose result may be unreliable."""
+
+
+class OutputWarning(AimzWarning):
+    """Warning class for an output that may differ from what was expected."""
+
+
+class PerformanceWarning(AimzWarning):
+    """Warning class for a call that runs correctly but by a fallback or slower path."""

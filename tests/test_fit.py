@@ -23,7 +23,7 @@ from numpyro.infer import MCMC, SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
 from numpyro.optim import Adam
 
-from aimz import ImpactModel
+from aimz import AimzWarning, FitWarning, ImpactModel
 from aimz._exceptions import KernelValidationError
 from aimz.utils.data import ArrayDataset, ArrayLoader
 from tests.conftest import lm
@@ -39,7 +39,7 @@ class TestKernelSignatureValidation:
             pass
 
         with pytest.warns(
-            UserWarning,
+            AimzWarning,
             match="Legacy `uint32` PRNGKey detected; converting to a typed key array.",
         ):
             im = ImpactModel(
@@ -199,13 +199,13 @@ def test_fit_nan_warning(synthetic_data: tuple[Array, Array]) -> None:
         ),
     )
     with (
-        pytest.warns(RuntimeWarning, match="Loss contains NaN or Inf"),
+        pytest.warns(FitWarning, match="Loss contains NaN or Inf"),
         pytest.raises(ValueError, match="invalid loc parameter"),
     ):
         im.fit(X, y, batch_size=len(X), epochs=3)
 
     with (
-        pytest.warns(RuntimeWarning, match="Loss contains NaN or Inf"),
+        pytest.warns(FitWarning, match="Loss contains NaN or Inf"),
         pytest.raises(ValueError, match="invalid loc parameter"),
     ):
         im.fit_on_batch(X, y)

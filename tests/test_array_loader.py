@@ -20,7 +20,7 @@ import pytest
 from jax import Array, random
 from numpyro.infer import SVI
 
-from aimz import ImpactModel
+from aimz import AimzWarning, ImpactModel
 from aimz.utils.data import ArrayDataset, ArrayLoader
 from tests.conftest import lm, lm_subsample
 
@@ -76,11 +76,11 @@ class TestArrayLoader:
         return np.concatenate([batch["y"] for batch in loader])
 
     def test_legacy_prng_key(self) -> None:
-        """A legacy uint32 PRNGKey raises a UserWarning."""
+        """A legacy uint32 PRNGKey raises an AimzWarning."""
         y = jnp.array([1, 2, 3])
         dataset = ArrayDataset(y=y)
         with pytest.warns(
-            UserWarning,
+            AimzWarning,
             match="Legacy `uint32` PRNGKey detected; converting to a typed key array.",
         ):
             ArrayLoader(dataset, rng_key=random.PRNGKey(42))

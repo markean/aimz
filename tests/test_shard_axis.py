@@ -21,7 +21,7 @@ import numpy as np
 import pytest
 from jax import Array, local_device_count, random
 
-from aimz import ImpactModel
+from aimz import ImpactModel, PerformanceWarning
 from aimz.utils.data import ArrayDataset, ArrayLoader
 from tests.conftest import (
     _make_svi,
@@ -67,7 +67,7 @@ def test_predict_data_reruns_draw_on_local_latent(
     """`shard_axis='obs'` warns and reruns under draw for a local-latent model."""
     X, _ = synthetic_data
     im = im_latent_var_svi_fitted
-    with pytest.warns(UserWarning, match="rerunning with"):
+    with pytest.warns(PerformanceWarning, match="rerunning with"):
         dt = im.predict(
             X,
             batch_size=len(X),
@@ -96,7 +96,7 @@ def test_predict_data_reruns_draw_on_rank3_local_latent(
     )
     im.fit(X=X, y=y, batch_size=len(X), progress=False)
     try:
-        with pytest.warns(UserWarning, match="rerunning with"):
+        with pytest.warns(PerformanceWarning, match="rerunning with"):
             dt = im.predict(
                 X,
                 batch_size=len(X),
@@ -256,7 +256,7 @@ def test_log_likelihood_data_reruns_draw_on_local_latent(
 ) -> None:
     """`shard_axis='obs'` warns and reruns under draw for a local-latent model."""
     X, y = synthetic_data
-    with pytest.warns(UserWarning, match="rerunning with"):
+    with pytest.warns(PerformanceWarning, match="rerunning with"):
         dt = im_latent_var_svi_fitted.log_likelihood(
             X,
             y,

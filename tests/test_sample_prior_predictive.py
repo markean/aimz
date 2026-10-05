@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 from jax import Array, random
 
-from aimz import ImpactModel
+from aimz import ImpactModel, PerformanceWarning
 from tests.conftest import _make_svi, latent_intervention_model, lm
 
 if TYPE_CHECKING:
@@ -42,7 +42,7 @@ def test_sample_prior_predictive_lm(
     msg = (
         r"The `batch_size` \(\d+\) is not divisible by the number of devices \(\d+\)\."
     )
-    with pytest.warns(UserWarning, match=msg):
+    with pytest.warns(PerformanceWarning, match=msg):
         samples = im.sample_prior_predictive(
             X=X,
             batch_size=len(X) // 2,
@@ -52,7 +52,7 @@ def test_sample_prior_predictive_lm(
     assert samples.prior_predictive["y"].values.shape == (1, 99, len(X))
 
     # Test with `return_sites`
-    with pytest.warns(UserWarning, match=msg):
+    with pytest.warns(PerformanceWarning, match=msg):
         assert im.sample_prior_predictive(
             X=X,
             num_samples=99,

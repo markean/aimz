@@ -26,7 +26,12 @@ import numpy as np
 from jax import Array
 from jax.typing import ArrayLike
 
-from aimz._exceptions import _SKIP_FILE_PREFIXES, KernelValidationError, NotFittedError
+from aimz._exceptions import (
+    _SKIP_FILE_PREFIXES,
+    KernelValidationError,
+    NotFittedError,
+    OutputWarning,
+)
 
 if TYPE_CHECKING:
     from collections import OrderedDict
@@ -80,7 +85,7 @@ def _validate_group(dt_baseline: xr.DataTree, dt_intervention: xr.DataTree) -> s
     Raises:
         ValueError: If ``dt_baseline`` has none of these groups, or the chosen group
             is missing from ``dt_intervention``.
-        UserWarning: If the chosen group's dimension sizes or coordinate labels
+        OutputWarning: If the chosen group's dimension sizes or coordinate labels
             differ between the two scenarios (the effect subtraction would then
             inner-join to the overlap).
     """
@@ -113,7 +118,7 @@ def _validate_group(dt_baseline: xr.DataTree, dt_intervention: xr.DataTree) -> s
             f"{group!r}: {dict(dt_baseline[group].sizes)} vs "
             f"{dict(dt_intervention[group].sizes)}."
         )
-        warn(msg, category=UserWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
+        warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
     elif unmatched := [
         dim
         for dim, index in dt_baseline[group].indexes.items()
@@ -125,7 +130,7 @@ def _validate_group(dt_baseline: xr.DataTree, dt_intervention: xr.DataTree) -> s
             f"{', '.join(map(repr, unmatched))} in group {group!r}; the effect "
             "covers only the labels present in both."
         )
-        warn(msg, category=UserWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
+        warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
 
     return group
 

@@ -27,7 +27,7 @@ import numpy as np
 from jax import Array, device_put
 from jax.typing import ArrayLike
 
-from aimz._exceptions import _SKIP_FILE_PREFIXES
+from aimz._exceptions import _SKIP_FILE_PREFIXES, OutputWarning
 from aimz.utils._kwargs import _group_kwargs
 from aimz.utils._output import _WRITER_COUNT_MAX
 from aimz.utils.data import ArrayDataset, ArrayLoader
@@ -257,7 +257,7 @@ def _setup_inputs(
                 "The data loader shuffles, so results will not follow the data order. "
                 "Create the ArrayLoader with `shuffle=False` to preserve it."
             )
-            warn(msg, category=UserWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
+            warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
         loader = X
     else:
         msg = f"`X` must be an array-like or a data loader, got {type(X).__name__!r}."
