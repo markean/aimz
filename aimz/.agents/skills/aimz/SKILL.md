@@ -70,7 +70,7 @@ Use these unless the task says otherwise.
   warnings.simplefilter("error", aimz.OutputWarning)
   ```
 
-  `FitWarning` reports a loss that is not finite. `OutputWarning` reports an output that is not what the call asked for: a requested site that is missing, scenarios that cover different rows, draws that are not paired, a baseline from before a refit. `PerformanceWarning` concerns speed only and can stay a warning.
+  `FitWarning` reports a loss that is not finite, or a minibatch fit whose kernel weighs each batch as the whole data. `OutputWarning` reports an output that is not what the call asked for: a requested site that is missing, scenarios that cover different rows, draws that are not paired, a baseline from before a refit. `PerformanceWarning` concerns speed only and can stay a warning.
 - Pass `store="memory"` to the streaming methods and in the argument dictionaries of `estimate_effect`. By default each call writes its draws to a Zarr store in a temporary directory that the model owns, and reading the result after `im.cleanup()`, or after the model is garbage-collected, raises an error. For a small input, the `*_on_batch` methods and `estimate_effect(..., on_batch=True)` also work in memory; they take neither `store` nor `progress`.
 - Pass `progress=False` to `fit`, `fit_on_batch`, and the streaming methods, which otherwise print a progress bar. An `MCMC` object prints its own unless it is created with `progress_bar=False`.
 - Pass `return_sites` with the name of the deterministic site to report. By default a call returns the output and every deterministic site, for every draw and observation.
@@ -114,7 +114,6 @@ None of these raises an error or a warning.
 |---|---|---|
 | Training `SVI` for too few steps | A narrow interval around a wrong effect. Only a loss that is not finite warns. | Check that `im.vi_result.losses` has stopped falling. Calling `fit` or `fit_on_batch` again continues the training. |
 | Calling `fit` or `fit_on_batch` again to start over | The training continues from the state it had reached. | Create a new `ImpactModel`. |
-| Fitting with `fit` a kernel that is not written for minibatches | Each minibatch is weighed as if it were the whole data, so the intervals come out too wide, by more the smaller the batch is. Training longer does not change that, and aimz does not check it. | Compare the interval with the one from a `fit_on_batch` fit of the same model. If they differ, fit with `fit_on_batch`, or write the kernel for minibatches. |
 | Computing across rows in the kernel, as in a cumulative sum, a lag, or a mean over the rows | Wrong numbers once the rows are shuffled or split, which depends on the input size, `batch_size`, and the number of devices. | Give each row what it needs as its own input, or keep the rows whole and in order: `fit_on_batch`, the `*_on_batch` methods, `shard_axis="draw"`. |
 | Intervening on a site that reaches the outcome only through another latent sample site | The effect is exactly zero, because the site downstream keeps its posterior draws. | Write the kernel so that the path runs through deterministic computations. |
 | Calling `set_posterior_sample` without one of the latent sites | The predictive methods draw the missing site from its prior. | Pass every latent site. |

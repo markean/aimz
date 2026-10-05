@@ -14,6 +14,8 @@
 
 """Tests for the `.fit()` method."""
 
+import warnings
+
 import jax.numpy as jnp
 import numpyro.distributions as dist
 import pytest
@@ -26,7 +28,7 @@ from numpyro.optim import Adam
 from aimz import AimzWarning, FitWarning, ImpactModel
 from aimz._exceptions import KernelValidationError
 from aimz.utils.data import ArrayDataset, ArrayLoader
-from tests.conftest import lm
+from tests.conftest import _make_svi, lm, lm_subsample
 
 
 class TestKernelSignatureValidation:
@@ -209,6 +211,31 @@ def test_fit_nan_warning(synthetic_data: tuple[Array, Array]) -> None:
         pytest.raises(ValueError, match="invalid loc parameter"),
     ):
         im.fit_on_batch(X, y)
+
+
+def test_fit_warns_on_unscaled_minibatches(synthetic_data: tuple[Array, Array]) -> None:
+    """Batches smaller than the data warn unless the kernel scales the output site."""
+    X, y = synthetic_data
+    im = ImpactModel(lm, rng_key=random.key(42), inference=_make_svi(lm))
+    msg = "trains on batches of 20 of 100 observations, but the kernel gives the"
+
+    # An array input and an `ArrayLoader` are checked on their first batch.
+    with pytest.warns(FitWarning, match=msg):
+        im.fit(X, y, batch_size=20, epochs=1, progress=False)
+    loader = ArrayLoader(ArrayDataset(X=X, y=y), rng_key=random.key(0), batch_size=20)
+    with pytest.warns(FitWarning, match=msg):
+        im.fit(loader, epochs=1, progress=False)
+
+    # The whole data as one batch, and a kernel that scales the batch, pass silently.
+    im_scaled = ImpactModel(
+        lm_subsample,
+        rng_key=random.key(42),
+        inference=_make_svi(lm_subsample),
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FitWarning)
+        im.fit(X, y, batch_size=len(X), epochs=1, progress=False)
+        im_scaled.fit(X, y, batch_size=20, epochs=1, progress=False)
 
 
 def test_fit_loader_with_custom_param_names(

@@ -1504,12 +1504,20 @@ class ImpactModel(BaseModel):
                 share ``X``'s leading-axis size, or a data loader yields no batches
                 in an epoch.
 
+        Warns:
+            FitWarning: If the batches are smaller than the data and the kernel gives
+                the output site no scale for a batch, so that each batch is weighed as
+                the whole data. The check runs on the first ``batch_size``
+                observations of an array input or of an
+                :class:`~aimz.utils.data.ArrayLoader`; another data loader has no size
+                to compare with and is not checked.
+
         Note:
             This method continues training from the existing SVI state if available.
-            To start training from scratch, create a new model instance. It does not
-            check whether the model or guide is written to support subsampling semantics
-            (e.g., using `NumPyro`_'s :external:func:`~numpyro.primitives.subsample` or
-            similar constructs).
+            To start training from scratch, create a new model instance. Beyond the
+            scale of the output site, it does not check whether the model or guide is
+            written to support subsampling semantics (e.g., using `NumPyro`_'s
+            :external:func:`~numpyro.primitives.subsample` or similar constructs).
         """
         _validate_aligned_inputs(X, y=y)
         if y is None and isinstance(X, ArrayLike):
@@ -1554,6 +1562,35 @@ class ImpactModel(BaseModel):
             signature(self.kernel).bind_partial(**kwargs)
         # Commit model state only once the inputs are accepted
         self._rng_key = rng_key_model
+
+        # A kernel written for the whole data weighs each batch as all of it. The
+        # scale that a batch gives the output site shows whether the kernel scales
+        # it to the full data; another loader has no size to compare with.
+        if isinstance(dataloader, ArrayLoader) and dataloader.batch_size < len(
+            dataloader.dataset,
+        ):
+            batch = {
+                k: v[: dataloader.batch_size]
+                for k, v in dataloader.dataset.arrays.items()
+            }
+            # An output site that is not an observed sample site fails validation
+            # on the first batch
+            site = (
+                trace(seed(self.kernel, rng_seed=self.rng_key))
+                .get_trace(**batch, **kwargs_extra)
+                .get(self.param_output, {})
+            )
+            if site.get("is_observed") and (
+                site.get("scale") is None or np.all(site["scale"] == 1)
+            ):
+                msg = (
+                    f"`fit` trains on batches of {dataloader.batch_size} of "
+                    f"{len(dataloader.dataset)} observations, but the kernel gives the "
+                    f"output site {self.param_output!r} no scale, so each batch is "
+                    "weighed as the whole data. Scale it in the kernel, or fit with "
+                    "`fit_on_batch`."
+                )
+                warn(msg, category=FitWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
 
         logger.info("Performing variational inference optimization")
         losses: list[npt.NDArray] = []
