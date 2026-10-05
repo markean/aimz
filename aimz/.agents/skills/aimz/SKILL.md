@@ -79,7 +79,7 @@ Use these unless the task says otherwise.
 
 ## Where the treatment lives
 
-How a scenario is expressed depends on how the kernel receives the treatment, so find that out first: `inspect.signature(im.kernel)` lists the arguments and `im.kernel_spec.sample_sites` the sample sites.
+How a scenario is expressed depends on how the kernel receives the treatment, so find that out first: `im.describe()` lists the kernel's arguments and its sites with their kinds.
 
 | The treatment is | Express a scenario by |
 |---|---|
@@ -104,7 +104,7 @@ A treatment that the kernel does not contain cannot be varied, so no scenario of
 
 - A pickled model loads with `cloudpickle.load`. A kernel defined in a module is stored by reference, so that module has to be importable. A kernel defined in `__main__` is stored with the model.
 - A model saved or logged through `aimz.mlflow` loads with `aimz.mlflow.load_model(uri)`, which returns the `ImpactModel`. `mlflow.pyfunc.load_model(uri)` only predicts, and a model saved with a signature drops what the signature does not record, such as `intervention`, so do not build scenarios on it.
-- Then `im.is_fitted()`, a method, tells whether the model holds posterior draws, and `im.kernel_spec.return_sites` lists the sites returned by default.
+- Then `im.describe()` tells whether the model holds posterior draws, and lists its arguments and its sites with their kinds and the names of their dimensions.
 
 ## Mistakes that return a number
 

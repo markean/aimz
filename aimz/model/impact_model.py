@@ -1668,6 +1668,53 @@ class ImpactModel(BaseModel):
         """
         return self._is_fitted
 
+    def describe(self) -> dict[str, object]:
+        """Describe the kernel and the posterior that the model holds.
+
+        The description is read from what the model has recorded: the kernel's
+        signature, the trace that fitting or sampling took, and the posterior samples.
+        It holds plain Python values only.
+
+        Returns:
+            A dictionary with the kernel's name and arguments, the names of the input
+            and output parameters, the inference method, whether the model is fitted,
+            the number of chains and draws, and the sites known from the trace or from
+            the posterior. Each site maps to its ``kind`` (``"latent"``,
+            ``"observed"``, or ``"deterministic"``), its ``dims`` after ``chain`` and
+            ``draw`` in the output trees where the trace named them after plates or
+            event dimensions (``None`` where the default names ``<site>_dim_<i>``
+            apply), and, for a site in the posterior, the ``draw_shape`` of one draw.
+        """
+        spec = self._kernel_spec
+        sites: dict[str, dict[str, object]] = {}
+        for name in (*spec.sample_sites, *spec.return_sites) if spec else ():
+            if name in sites:
+                continue
+            if name == self.param_output:
+                kind = "observed"
+            elif name in spec.sample_sites:
+                kind = "latent"
+            else:
+                kind = "deterministic"
+            dims = self._dims.get(name)
+            sites[name] = {"kind": kind, "dims": None if dims is None else list(dims)}
+            if self._posterior is not None and name in self._posterior:
+                sites[name]["draw_shape"] = [
+                    int(n) for n in np.shape(self._posterior[name])[1:]
+                ]
+
+        return {
+            "kernel": getattr(self.kernel, "__name__", type(self.kernel).__name__),
+            "arguments": list(signature(self.kernel).parameters),
+            "param_input": self.param_input,
+            "param_output": self.param_output,
+            "inference": type(self.inference).__name__,
+            "fitted": self._is_fitted,
+            "num_chains": self._num_chains,
+            "num_samples": self._num_samples,
+            "sites": sites,
+        }
+
     def set_posterior_sample(
         self,
         posterior_sample: dict[str, Array],
