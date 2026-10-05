@@ -2,7 +2,7 @@ User Guide
 ==========
 
 .. meta::
-   :description: Guides to fitting, sampling, streaming and sharding, interventions and effect estimands, model comparison, data loaders, MCMC, persistence, and MLflow.
+   :description: Guides to fitting, sampling, streaming and sharding, interventions and effect estimands, model comparison, data loaders, MCMC, persistence, MLflow, and coding agents.
 
 .. toctree::
    :maxdepth: 1
@@ -19,3 +19,4 @@ User Guide
    model_comparison
    dataloader
    mcmc
+   agents
