@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The warnings aimz issues now have their own categories, {class}`~aimz.AimzWarning` and its subclasses {class}`~aimz.FitWarning`, {class}`~aimz.OutputWarning`, and {class}`~aimz.PerformanceWarning`, so they can be filtered or turned into errors by category, as in `warnings.filterwarnings("error", category=aimz.OutputWarning)`. Each is a `UserWarning`, and {class}`~aimz.FitWarning` is also a `RuntimeWarning`, so existing filters still match. The non-finite loss warning, previously only a `RuntimeWarning`, is now matched by `UserWarning` filters too ([#407](https://github.com/markean/aimz/issues/407)).
 - Predictive outputs now record how their samples were drawn in the attributes of their group: the sampling key and the batching that the draws depend on ([#414](https://github.com/markean/aimz/issues/414)).
 - A skill for coding agents now ships inside the package, in `aimz/.agents/skills/aimz/`. See {doc}`user_guide/agents` for how to point an agent at it ([#416](https://github.com/markean/aimz/issues/416)).
+- {meth}`~aimz.ImpactModel.describe`, which returns the kernel's arguments, the sites known from the trace or the posterior with their kind and dimension names, and the fitted state, so that a loaded model can be read without running it ([#420](https://github.com/markean/aimz/issues/420)).
 
 ### Changed
 
