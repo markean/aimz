@@ -148,6 +148,7 @@ llms_txt_description = (
     "declarative interventions, effect estimation, and MLflow logging."
 )
 llms_txt_full_build = True
+llms_txt_build_parallel = False
 # Nodes the Markdown builder has no rendering for; their text is omitted either way
 llms_txt_suppress_unknown_node_warnings = [
     "abbreviation",
