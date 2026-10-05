@@ -44,5 +44,6 @@ Rules for working in this repository that are not enforced by tooling. For aimz 
 - Write changelog entries in terms of behavior ("now ..., instead of ..."), use MyST roles such as ``{meth}`~aimz.ImpactModel.predict` ``, end with the issue link, and avoid specific numeric values.
 - Docs-only changes do not get a changelog entry.
 - Add every new public object to `docs/source/api/*.rst`; that list also feeds `llms.txt`.
+- The skill in `aimz/.agents/skills/aimz/` ships in the wheel and tells agents how to use aimz. When a change alters behavior it describes, update it in the same change.
 - In reStructuredText, use one sentence per line.
 - Use Google-style docstrings with `Args`, `Returns`, and `Raises`; document warnings under `Warns`.

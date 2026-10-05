@@ -124,4 +124,4 @@ include = ["aimz*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-aimz = ["py.typed"]
+aimz = ["py.typed", ".agents/skills/aimz/SKILL.md"]
