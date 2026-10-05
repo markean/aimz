@@ -1,6 +1,9 @@
 MCMC Support
 ============
 
+.. meta::
+   :description: Fitting with NumPyro MCMC through the same interface, and how the chains appear in the outputs.
+
 .. image:: https://colab.research.google.com/assets/colab-badge.svg
     :target: https://colab.research.google.com/github/markean/aimz/blob/main/docs/notebooks/mcmc.ipynb
     :alt: Open In Colab

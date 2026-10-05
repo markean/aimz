@@ -5,6 +5,9 @@
 API Reference
 =============
 
+.. meta::
+   :description: The public API: ImpactModel, KernelSpec, the data utilities, the MLflow flavor, and the exceptions and warnings.
+
 .. toctree::
    :maxdepth: 1
 

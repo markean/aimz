@@ -16,6 +16,7 @@
 
 import datetime
 import inspect
+import shutil
 import sys
 from importlib import metadata
 from pathlib import Path
@@ -47,6 +48,7 @@ extensions = [
     "sphinx.ext.napoleon",
     "myst_parser",
     "jupyter_sphinx",
+    "sphinx_llm.txt",
     "sphinx_copybutton",
     "sphinx_design",
 ]
@@ -60,6 +62,9 @@ rst_epilog = """
 .. _NumPyro: https://num.pyro.ai/
 .. _Zarr: https://zarr.readthedocs.io/
 """
+# Autosummary regenerates the API stubs on every build but never removes one for a
+# member that no longer exists, so start from an empty directory.
+shutil.rmtree(Path(__file__).parent / "api" / "generated", ignore_errors=True)
 autodoc_typehints = "description"
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
@@ -133,3 +138,22 @@ html_theme_options = {
 }
 html_show_sourcelink = False
 html_show_sphinx = False
+
+# -- Options for llms.txt ------------------------------------------------------
+# https://github.com/NVIDIA/sphinx-llm#llmstxt-support
+
+llms_txt_description = (
+    "aimz wraps a user-written NumPyro model—the kernel—in a single ImpactModel class "
+    "and adds fitting, scalable predictive sampling with structured outputs, "
+    "declarative interventions, effect estimation, and MLflow logging."
+)
+llms_txt_full_build = True
+# Nodes the Markdown builder has no rendering for; their text is omitted either way
+llms_txt_suppress_unknown_node_warnings = [
+    "abbreviation",
+    "caption",
+    "JupyterWidgetStateNode",
+    "JupyterWidgetViewNode",
+    "PassthroughTextElement",
+    "meta",
+]

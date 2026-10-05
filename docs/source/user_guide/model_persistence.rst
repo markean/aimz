@@ -1,6 +1,9 @@
 Model Persistence
 =================
 
+.. meta::
+   :description: Saving a fitted model with cloudpickle and loading it later for prediction or continued training.
+
 .. image:: https://colab.research.google.com/assets/colab-badge.svg
     :target: https://colab.research.google.com/github/markean/aimz/blob/main/docs/notebooks/model_persistence.ipynb
     :alt: Open In Colab
