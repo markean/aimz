@@ -120,28 +120,32 @@ def _resolve_batch_size(
     axis_size: int,
     other_size: int,
     num_devices: int,
+    item_nbytes: int | None = None,
 ) -> int:
     """Resolve the per-step batch size along the chunked axis of a 2-axis output.
 
-    Each streamed step produces an output of ``batch_size * other_size`` elements:
-    data-parallel chunks the observation axis (``other_size`` draws per observation),
-    while draw-parallel chunks the draw axis (``other_size`` resident observations).
-    An explicit ``batch_size`` is used as given. It is the caller's contract, even when
-    it yields a single batch.
+    Each streamed step produces ``batch_size * other_size`` elements of every return
+    site: data-parallel chunks the observation axis (``other_size`` draws per
+    observation), while draw-parallel chunks the draw axis (``other_size`` resident
+    observations). An explicit ``batch_size`` is used as given. It is the caller's
+    contract, even when it yields a single batch.
 
     Automatic resolution balances three concerns: each batch stays within the
-    :data:`MAX_BYTES` memory budget; the axis is split into enough batches to keep the
-    writer-thread pool occupied (:data:`_BATCHES_PER_WRITER` per writer); and no batch
-    produces less than :data:`_BATCH_BYTES_MIN` of output, so tiny workloads (which
-    are not I/O-bound) stay whole instead of paying per-chunk overhead. The result is
-    rounded down to a multiple of ``num_devices`` (floored at ``num_devices``) and
-    clamped to ``axis_size``.
+    :data:`MAX_BYTES` memory budget, counting the ``item_nbytes`` of every return site;
+    the axis is split into enough batches to keep the writer-thread pool occupied
+    (:data:`_BATCHES_PER_WRITER` per writer); and no batch is smaller than one holding
+    :data:`_BATCH_BYTES_MIN` of a single value per element, so tiny workloads (which
+    are not I/O-bound) stay whole instead of paying per-chunk overhead. The memory
+    budget takes precedence. The result is rounded down to a multiple of
+    ``num_devices`` (floored at ``num_devices``) and clamped to ``axis_size``.
 
     Args:
         batch_size: The requested batch size, or ``None`` to resolve a default.
         axis_size: Length of the axis being chunked (observations or draws).
         other_size: Length of the axis held whole within each step.
         num_devices: Number of devices the chunked axis is sharded across.
+        item_nbytes: Bytes of output that one index along the chunked axis produces
+            across every return site, or ``None`` for a single value per element.
 
     Returns:
         The resolved batch size.
@@ -152,21 +156,20 @@ def _resolve_batch_size(
     # Output chunks hold predictive samples in JAX's default float precision; resolve
     # the element budgets against that dtype so they track precision.
     itemsize = jnp.result_type(float).itemsize
-    max_elements = MAX_BYTES // itemsize
     other_size = max(1, other_size)
 
     # Memory ceiling and pool-occupancy target per batch, and the output-size floor.
-    cap = max_elements // other_size
+    cap = MAX_BYTES // max(1, item_nbytes or itemsize * other_size)
     target_batches = _BATCHES_PER_WRITER * min(cpu_count() or 1, _WRITER_COUNT_MAX)
     target = -(-axis_size // target_batches)
     floor = _BATCH_BYTES_MIN // itemsize // other_size
 
-    resolved = max(min(cap, target), floor, num_devices)
+    resolved = max(min(max(target, floor), cap), num_devices)
 
     return min(max(resolved - resolved % num_devices, num_devices), axis_size)
 
 
-def _fits_single_batch(axis_size: int, other_size: int) -> bool:
+def _fits_single_batch(axis_size: int, item_nbytes: int) -> bool:
     """Return whether the whole axis fits the per-batch memory budget as one batch.
 
     Mirrors the memory ceiling used by :func:`_resolve_batch_size`, independent of its
@@ -176,12 +179,13 @@ def _fits_single_batch(axis_size: int, other_size: int) -> bool:
 
     Args:
         axis_size: Length of the axis that would be chunked.
-        other_size: Length of the axis held whole within each step.
+        item_nbytes: Bytes of output that one index along the axis produces across
+            every return site.
 
     Returns:
         ``True`` if a single batch covering the whole axis stays within the budget.
     """
-    return axis_size * other_size < MAX_BYTES // jnp.result_type(float).itemsize
+    return axis_size * item_nbytes < MAX_BYTES
 
 
 def _setup_inputs(
@@ -192,9 +196,7 @@ def _setup_inputs(
     param_output: str,
     rng_key: Array,
     batch_size: int | None,
-    num_samples: int,
     shuffle: bool = False,
-    device: Sharding | None = None,
     **kwargs: object,
 ) -> tuple[Iterable[Mapping[str, Array | np.ndarray]], dict]:
     """Prepare a data loader and grouped keyword arguments.
@@ -208,10 +210,9 @@ def _setup_inputs(
             each batch is keyed as the downstream lookup expects.
         param_output: Dataset key for ``y``, matching the kernel's output parameter.
         rng_key: A pseudo-random number generator key.
-        batch_size: The size of batches for data loading.
-        num_samples: Number of samples to draw, which affects the size of batches.
+        batch_size: The size of batches for data loading, or ``None`` for the whole
+            input.
         shuffle: Whether to shuffle the dataset before batching.
-        device: Sharding used to resolve an array input's batch size.
         **kwargs: Additional arguments passed to the model.
 
     Returns:
@@ -235,22 +236,8 @@ def _setup_inputs(
         if y is not None and y.ndim == 0:
             msg = "`y` must have at least 1 dimension."
             raise ValueError(msg)
-        num_devices = device.num_devices if device else 1
         if batch_size is None:
-            batch_size = _resolve_batch_size(
-                None,
-                axis_size=len(X),
-                other_size=num_samples,
-                num_devices=num_devices,
-            )
-            logger.debug("Resolved batch_size=%d automatically.", batch_size)
-        elif batch_size % num_devices != 0:
-            msg = (
-                f"The `batch_size` ({batch_size}) is not divisible by the number of "
-                f"devices ({num_devices}). Use a multiple of {num_devices} "
-                "for optimal performance."
-            )
-            warn(msg, category=UserWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
+            batch_size = len(X)
         # Key the dataset by the kernel's input/output parameter names (alongside the
         # array kwargs) so each batch is keyed as the downstream lookup expects.
         kwargs_array[param_input] = X

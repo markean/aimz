@@ -114,8 +114,9 @@ def test_predict_data_reruns_draw_on_rank3_local_latent(
         im.cleanup()
 
 
+@pytest.mark.filterwarnings("ignore:One or more posterior sample shapes")
 @pytest.mark.parametrize("n_devices", [1, 3])
-def test_plan_obs_batching_explicit_batch(
+def test_plan_execution_explicit_batch(
     synthetic_data: tuple[Array, Array],
     im_latent_var_svi_fitted: ImpactModel,
     monkeypatch: pytest.MonkeyPatch,
@@ -129,10 +130,20 @@ def test_plan_obs_batching_explicit_batch(
     X, _ = synthetic_data
     im = im_latent_var_svi_fitted
     monkeypatch.setattr(im, "_num_devices", n_devices)
-    assert im._plan_obs_batching(X, batch_size=len(X) // 4) == "fallback"
-    assert im._plan_obs_batching(X, batch_size=len(X)) == (
-        "fallback" if n_devices > 1 else "proceed"
-    )
+
+    def plan(batch_size: int) -> str:
+        shard_axis, _ = im._plan_execution(
+            X,
+            shard_axis="obs",
+            batch_size=batch_size,
+            num_samples=im._num_samples,
+            nbytes=im._output_nbytes(("y",)),
+            posterior=im.posterior,
+        )
+        return shard_axis
+
+    assert plan(len(X) // 4) == "draw"
+    assert plan(len(X)) == ("draw" if n_devices > 1 else "obs")
 
 
 def test_predict_draw_default_batch_size(
@@ -437,6 +448,7 @@ class TestValidation:
             im_lm_svi_fitted.predict(loader, progress=False, shard_axis="draw")
 
 
+@pytest.mark.filterwarnings("ignore:One or more posterior sample shapes")
 def test_aligned_posterior_pins_whole_input_on_single_device(
     synthetic_data: tuple[Array, Array],
     im_latent_var_svi_fitted: ImpactModel,
@@ -452,13 +464,23 @@ def test_aligned_posterior_pins_whole_input_on_single_device(
     im = im_latent_var_svi_fitted
     monkeypatch.setattr(im, "_num_devices", 1)
 
+    def plan(batch_size: int | None) -> tuple[str, int | None]:
+        return im._plan_execution(
+            X,
+            shard_axis="obs",
+            batch_size=batch_size,
+            num_samples=im._num_samples,
+            nbytes=im._output_nbytes(("y",)),
+            posterior=im.posterior,
+        )
+
     # Fits the budget on a single device: pin the whole input, no fallback.
-    assert im._plan_obs_batching(X, batch_size=None) == "whole"
+    assert plan(None) == ("obs", len(X))
     # An explicit smaller batch is the caller's contract and still forces the fallback.
-    assert im._plan_obs_batching(X, batch_size=max(1, len(X) // 2)) == "fallback"
+    assert plan(max(1, len(X) // 2))[0] == "draw"
     # A budget-exceeding whole batch cannot be pinned: draw-parallel fallback.
     monkeypatch.setattr(im, "_num_samples", 10**12)
-    assert im._plan_obs_batching(X, batch_size=None) == "fallback"
+    assert plan(None)[0] == "draw"
 
 
 def test_predict_obs_shards_draw_independent_noise(
