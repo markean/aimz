@@ -318,6 +318,7 @@ class _OutputStreamer:
         rng_key: Array,
         group: str,
         posterior: dict[str, Array] | None,
+        params: Mapping[str, object] | None,
         intervention: dict | None = None,
         stream: (
             tuple[
@@ -344,6 +345,8 @@ class _OutputStreamer:
             group: Output group (``"posterior_predictive"``, ``"predictions"``, or
                 ``"prior_predictive"``).
             posterior: The posterior to condition on (ignored for prior predictive).
+            params: Values of the kernel's ``param`` sites and mutable state, passed
+                dynamically to the sampler and replicated across devices.
             intervention: A dictionary mapping sample site names to replacement values
                 used during predictive sampling. Passed dynamically to the sampler
                 so the cached function keeps a stable kernel.
@@ -375,6 +378,7 @@ class _OutputStreamer:
         kwargs_const = [
             _replicate(v, sharding=self._ctx.replicated_sharding) for v in kwargs_const
         ]
+        params = device_put(params or {}, device=self._ctx.replicated_sharding)
         kind = "prior_predictive" if group == "prior_predictive" else "predict"
         fn = self._cached_fn(
             kind,
@@ -391,6 +395,7 @@ class _OutputStreamer:
                 step.keys,
                 req.return_sites,
                 step.samples,
+                params,
                 intervention,
                 self._ctx.param_input,
                 kwargs_key,
@@ -433,6 +438,7 @@ class _OutputStreamer:
                     rng_keys=rng_keys,
                     return_sites=None,
                     samples=None,
+                    params=params,
                     intervention={**intervention, **fields},
                     model_kwargs={**model_kwargs, **kwargs_extra},
                 )
@@ -470,6 +476,7 @@ class _OutputStreamer:
         *,
         kernel: Callable,
         posterior: dict[str, Array] | None,
+        params: Mapping[str, object] | None,
         y: ArrayLike | None,
     ) -> dict[str, DaskArray] | None:
         """Stream the log-likelihood to the request's destination.
@@ -482,6 +489,8 @@ class _OutputStreamer:
             kernel: Probabilistic model with `NumPyro`_ primitives, seeded by the
                 caller when tracing needs to sample latent sites (empty posterior).
             posterior: The posterior to condition on.
+            params: Values of the kernel's ``param`` sites and mutable state, passed
+                dynamically and replicated across devices.
             y: Output data.
 
         Returns:
@@ -506,6 +515,7 @@ class _OutputStreamer:
         kwargs_const = [
             _replicate(v, sharding=self._ctx.replicated_sharding) for v in kwargs_const
         ]
+        params = device_put(params or {}, device=self._ctx.replicated_sharding)
         fn = self._cached_fn(
             "log_likelihood",
             shard_axis=req.shard_axis,
@@ -519,6 +529,7 @@ class _OutputStreamer:
                 site: fn(
                     kernel,
                     step.samples,
+                    params,
                     self._ctx.param_input,
                     site,
                     kwargs_key,

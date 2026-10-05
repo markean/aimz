@@ -65,6 +65,8 @@ def _create_sharded_sampler(
                 ``(num_samples,)`` key array under ``"draw"`` sharding.
             - return_sites: Names of variables (sites) to return.
             - samples: A dictionary of samples to condition on.
+            - params: Values of the kernel's ``param`` sites and mutable state,
+                replicated across devices as dynamic inputs.
             - intervention: A dictionary mapping sample site names to replacement
                 values used during predictive sampling. Replicated across devices
                 as dynamic inputs rather than captured in a static kernel.
@@ -88,6 +90,7 @@ def _create_sharded_sampler(
         rng_key: Array,
         return_sites: tuple[str, ...],
         samples: dict[str, Array],
+        params: dict,
         intervention: dict,
         param_input: str,
         kwargs_key: tuple[str, ...],
@@ -121,6 +124,7 @@ def _create_sharded_sampler(
             rng_keys=rng_keys,
             return_sites=return_sites,
             samples=samples,
+            params=params,
             intervention={**intervention, **fields},
             model_kwargs=model_kwargs,
         )
@@ -184,6 +188,7 @@ def _create_sharded_sampler(
                 rng_spec,  # rng_key
                 None,  # return_sites
                 samples_spec,  # samples
+                PartitionSpec(),  # params
                 PartitionSpec(),  # intervention
                 None,  # param_input
                 None,  # kwargs_key
@@ -222,6 +227,8 @@ def _create_sharded_log_likelihood(
         A sharded function that takes the following arguments:
             - kernel: A probabilistic model with NumPyro primitives.
             - samples: A dictionary of posterior samples to condition on.
+            - params: Values of the kernel's ``param`` sites and mutable state,
+                replicated across devices as dynamic inputs.
             - param_input: The name of the parameter in the ``kernel`` for the input
                 data.
             - param_output: The name of the parameter in the ``kernel`` for the output
@@ -239,6 +246,7 @@ def _create_sharded_log_likelihood(
     def f(
         kernel: Callable,
         samples: dict[str, Array],
+        params: dict,
         param_input: str,
         param_output: str,
         kwargs_key: tuple[str, ...],
@@ -251,6 +259,7 @@ def _create_sharded_log_likelihood(
         out = _log_likelihood(
             kernel,
             samples=samples,
+            params=params,
             model_kwargs={
                 param_input: X,
                 param_output: y,
@@ -310,6 +319,7 @@ def _create_sharded_log_likelihood(
             in_specs=(
                 None,  # kernel
                 samples_spec,  # samples
+                PartitionSpec(),  # params
                 None,  # param_input
                 None,  # param_output
                 None,  # kwargs_key

@@ -46,7 +46,7 @@ from jax import (
 )
 from jax.sharding import AxisType, NamedSharding, PartitionSpec
 from jax.typing import ArrayLike
-from numpyro.handlers import seed, substitute, trace
+from numpyro.handlers import seed, trace
 from numpyro.infer import MCMC, SVI
 from numpyro.infer.svi import SVIRunResult, SVIState
 from tqdm.auto import tqdm
@@ -799,6 +799,7 @@ class ImpactModel(BaseModel):
                 rng_keys=random.split(rng_key, num=num_samples),
                 return_sites=self._coerce_return_sites(return_sites),
                 samples=None,
+                params=None,
                 intervention=intervention,
                 model_kwargs=args_bound,
             ),
@@ -973,6 +974,7 @@ class ImpactModel(BaseModel):
                 rng_key=rng_key,
                 group="prior_predictive",
                 posterior=self.posterior,
+                params=None,
                 intervention=intervention,
                 stream=stream,
             ),
@@ -1056,15 +1058,13 @@ class ImpactModel(BaseModel):
                 self._rng_key, rng_key = random.split(self._rng_key)
             posterior_samples = device_get(
                 _sample_forward(
-                    substitute(
-                        self.inference.guide,
-                        data=self.vi_result.params,
-                    ),
+                    self.inference.guide,
                     rng_keys=random.split(rng_key, num=num_samples),
                     return_sites=self._coerce_return_sites(return_sites)
                     if return_sites is not None
                     else None,
                     samples=None,
+                    params=self.vi_result.params,
                     intervention=None,
                     model_kwargs=None,
                 ),
@@ -1375,10 +1375,11 @@ class ImpactModel(BaseModel):
             logger.info("Drawing posterior samples (num_samples=%d)", num_samples)
             rng_key, rng_subkey = random.split(rng_key)
             self._posterior = _sample_forward(
-                substitute(self.inference.guide, data=self.vi_result.params),
+                self.inference.guide,
                 rng_keys=random.split(rng_subkey, num=num_samples),
                 return_sites=None,
                 samples=None,
+                params=self.vi_result.params,
                 intervention=None,
                 model_kwargs=None,
             )
@@ -1556,13 +1557,11 @@ class ImpactModel(BaseModel):
         logger.info("Drawing posterior samples (num_samples=%d)", num_samples)
         rng_key, rng_subkey = random.split(rng_key)
         self._posterior = _sample_forward(
-            substitute(
-                self.inference.guide,
-                data=cast("SVIRunResult", self.vi_result).params,
-            ),
+            self.inference.guide,
             rng_keys=random.split(rng_subkey, num=num_samples),
             return_sites=None,
             samples=None,
+            params=cast("SVIRunResult", self.vi_result).params,
             intervention=None,
             model_kwargs=None,
         )
@@ -1627,6 +1626,11 @@ class ImpactModel(BaseModel):
             warning, but ``deterministic`` sites must be excluded by the caller:
             if present, they override the values recomputed by
             :meth:`~aimz.ImpactModel.log_likelihood`.
+
+            If the kernel has ``param`` sites, also set
+            :attr:`~aimz.ImpactModel.vi_result`: posterior predictive sampling and
+            :meth:`~aimz.ImpactModel.log_likelihood` take the values of these sites
+            from it and use the initial values when it is not set.
         """
         if self.param_output in posterior_sample:
             posterior_sample = {
@@ -1741,6 +1745,12 @@ class ImpactModel(BaseModel):
                 rng_keys=random.split(rng_key, num=self._num_samples),
                 return_sites=self._coerce_return_sites(return_sites),
                 samples=self._streamer.place_posterior(self.posterior, sharding=None),
+                params={
+                    **self.vi_result.params,
+                    **(getattr(self.vi_result.state, "mutable_state", None) or {}),
+                }
+                if self.vi_result is not None
+                else None,
                 intervention=intervention,
                 model_kwargs=args_bound,
             ),
@@ -1894,6 +1904,12 @@ class ImpactModel(BaseModel):
                 rng_key=rng_key,
                 group=group,
                 posterior=self.posterior,
+                params={
+                    **self.vi_result.params,
+                    **(getattr(self.vi_result.state, "mutable_state", None) or {}),
+                }
+                if self.vi_result is not None
+                else None,
                 intervention=intervention,
             ),
             store=store,
@@ -2163,6 +2179,12 @@ class ImpactModel(BaseModel):
                 ),
                 kernel=kernel,
                 posterior=self.posterior,
+                params={
+                    **self.vi_result.params,
+                    **(getattr(self.vi_result.state, "mutable_state", None) or {}),
+                }
+                if self.vi_result is not None
+                else None,
                 y=y,
             ),
             store=store,

@@ -95,6 +95,7 @@ def _substitute_latent(msg: Message, sample: dict[str, Array]) -> Array | None:
 def _log_likelihood(
     model: Callable,
     samples: dict[str, Array] | None,
+    params: Mapping[str, object] | None,
     model_kwargs: Mapping[str, object] | None,
 ) -> dict[str, Array]:
     """Compute per-site log-likelihood at observed sites for each posterior draw.
@@ -109,6 +110,8 @@ def _log_likelihood(
         samples: A dictionary of posterior samples to substitute into the model, where
             each array has leading axis equal to the number of draws. ``None`` or an
             empty dict yields a single-draw result with a leading axis of size 1.
+        params: Values of the model's ``param`` sites and mutable state, shared by
+            all draws, such as those learned by variational inference.
         model_kwargs: Arguments passed to the model. Must include the input and the
             output values keyed under the model's parameter names.
 
@@ -117,6 +120,8 @@ def _log_likelihood(
         with leading axis equal to the number of posterior draws (or 1 when ``samples``
         is empty or ``None``).
     """
+    if params:
+        model = substitute(model, data=params)
 
     def _loglik_one_sample(sample: dict[str, Array]) -> dict[str, Array]:
         pinned_model = substitute(model, substitute_fn=_pin_subsample_indices)
