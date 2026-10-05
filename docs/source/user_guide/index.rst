@@ -1,6 +1,9 @@
 User Guide
 ==========
 
+.. meta::
+   :description: Guides to fitting, sampling, streaming and sharding, interventions and effect estimands, model comparison, data loaders, MCMC, persistence, and MLflow.
+
 .. toctree::
    :maxdepth: 1
 

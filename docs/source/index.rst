@@ -1,6 +1,9 @@
 aimz: Scalable probabilistic impact modeling
 ********************************************
 
+.. meta::
+   :description: Scalable probabilistic impact modeling: fit a user-written NumPyro model, run predictive sampling at scale, and estimate the effects of interventions with uncertainty.
+
 **Version**: |version|
 
 **Useful links**:
