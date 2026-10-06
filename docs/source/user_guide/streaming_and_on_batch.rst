@@ -26,7 +26,7 @@ The non-``*_on_batch`` methods default to a streaming (chunked) execution model 
   Even moderate increases in any axis (time, spatial units, parameter samples) can exceed host or accelerator RAM.
 * Using ``batch_size`` with chunked iteration limits peak memory and prevents out-of-memory errors.
 * The persistent store creates an artifact you can reopen without rerunning inference.
-  Coordinates and attributes are re-derived when the tree is rebuilt rather than stored on disk (see :ref:`reopening-persisted-outputs`).
+  The dimension names and the group's attributes are stored with the arrays; coordinates are re-derived when the tree is rebuilt (see :ref:`reopening-persisted-outputs`).
 * The :external:class:`xarray.DataTree` + Zarr_ format integrates with scientific Python tools such as Dask_ and ArviZ_.
 * Summaries (means, HDIs, residual PPC stats) can be computed lazily, chunk by chunk, without first materializing dense arrays.
 * One API works for both small experiments and large-scale use cases.
@@ -272,7 +272,7 @@ A predictive group of the returned :external:class:`xarray.DataTree` records in 
      - Number of devices and batch size under ``shard_axis="obs"``, where the draws depend on them.
        For an array, the batch size is the one the call used, given or chosen automatically; for an :class:`~aimz.utils.data.ArrayLoader`, it is the loader's own; any other data loader has none recorded.
 
-The attributes belong to the tree in memory and are not written to the Zarr_ store.
+With ``store="persistent"``, the attributes are also written to the Zarr_ store as the group's attributes, together with the number of chains the draws are stacked from, which the tree shows as the ``chain`` dimension instead.
 An effect from :meth:`~aimz.ImpactModel.estimate_effect` keeps the attributes of its two scenarios that do not conflict.
 
 
@@ -282,8 +282,8 @@ Reopening Persisted Outputs
 ---------------------------
 When you pass an explicit ``output_dir``, each persistent-store call writes one subdirectory containing a Zarr_ group with one array per return site.
 Its path is recorded in the returned tree's ``artifact_path`` attribute (the attribute is recorded for temporary-root outputs as well).
-Only the sampled arrays and their dimension names are persisted.
-Coordinates and attributes are not stored on disk.
+The sampled arrays are persisted with their dimension names, and the group with its attributes (see :ref:`output-attributes`).
+Coordinates are not stored on disk.
 
 To reconstruct the same :external:class:`xarray.DataTree` from the files alone, mirror that read-time step:
 
@@ -294,18 +294,18 @@ To reconstruct the same :external:class:`xarray.DataTree` from the files alone, 
 
     # The per-call directory written under `output_dir` (the tree's `artifact_path`)
     store = ...
-    # 1 for SVI, or the number of MCMC chains (`im.inference.num_chains`)
-    num_chains = 1
 
-    # Sort the sites by name, split the stacked draws into `chain` and `draw`, and add coordinates, as aimz does on read
+    # Sort the sites by name, split the stacked draws into `chain` and `draw` by the stored chain count, and add coordinates, as aimz does on read
     ds = xr.open_zarr(store, consolidated=False)
     ds = ds[sorted(ds.data_vars)]
-    ds = ds.coarsen(draw=ds.sizes["draw"] // num_chains).construct(draw=("chain", "draw"))
+    ds = ds.coarsen(draw=ds.sizes["draw"] // ds.attrs["num_chains"]).construct(draw=("chain", "draw"))
     ds = ds.assign_coords({dim: np.arange(ds.sizes[dim]) for dim in ds.sizes})
 
     dt = xr.DataTree(name="root")
     # Pick a group name for downstream use
     dt["posterior_predictive"] = xr.DataTree(ds)
+
+The attributes the tree carries, such as the sampling key, make a reopened scenario comparable in :meth:`~aimz.ImpactModel.estimate_effect` like a fresh one.
 
 
 The ``posterior`` subtree is likewise not stored in a predictive output: aimz attaches it from the in-memory model when it builds the tree.

@@ -37,17 +37,18 @@ def test_predict_persistent_matches_memory_obs(
     """`store` option returns the same tree (obs-parallel)."""
     X, _ = synthetic_data
     rng_key = random.key(7)
+    batch_size = 30
 
     dt_persistent = im_lm_svi_fitted.predict(
         X,
         rng_key=rng_key,
-        batch_size=30,
+        batch_size=batch_size,
         progress=False,
     )
     dt_mem = im_lm_svi_fitted.predict(
         X,
         rng_key=rng_key,
-        batch_size=30,
+        batch_size=batch_size,
         store="memory",
         progress=False,
     )
@@ -59,6 +60,11 @@ def test_predict_persistent_matches_memory_obs(
     )
     assert "artifact_path" not in dt_mem.attrs
     assert "artifact_path" not in dt_mem["posterior_predictive"].attrs
+    # The store carries the group's attributes, so the files alone rebuild the tree
+    ds = xr.open_zarr(dt_persistent.attrs["artifact_path"], consolidated=False)
+    assert ds.attrs["num_chains"] == 1
+    assert ds.attrs["batch_size"] == batch_size
+    np.testing.assert_array_equal(ds.attrs["rng_key"], random.key_data(rng_key))
 
 
 def test_predict_persistent_matches_memory_draw(

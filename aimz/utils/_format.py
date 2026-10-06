@@ -19,12 +19,13 @@ from __future__ import annotations
 import datetime
 from importlib.metadata import version
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import xarray as xr
 from xarray import open_zarr
 from zarr import config as zarr_config
+from zarr import open_group
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -161,17 +162,17 @@ def _dict_to_datatree(
     )
 
 
-def _zarr_to_datatree(artifact_path: Path, num_chains: int = 1) -> xr.DataTree:
+def _zarr_to_datatree(artifact_path: Path) -> xr.DataTree:
     """Load a Zarr group as an xarray DataTree.
 
     Reads the store with :external:func:`~xarray.open_zarr`, sorts its sites by name,
-    and splits its ``draw`` dimension into ``chain`` and ``draw``, along with
-    coordinates for each dimension, matching the structure produced by
-    :func:`_dict_to_datatree`.
+    and splits its ``draw`` dimension into ``chain`` and ``draw`` by the
+    ``num_chains`` attribute of the group, along with coordinates for each dimension,
+    matching the structure produced by :func:`_dict_to_datatree`. The group's other
+    attributes are kept.
 
     Args:
         artifact_path: Path holding the Zarr group.
-        num_chains: Number of chains the stored draws are stacked from.
 
     Returns:
         The loaded dataset with ``chain`` and ``draw`` dimensions, along with
@@ -179,6 +180,8 @@ def _zarr_to_datatree(artifact_path: Path, num_chains: int = 1) -> xr.DataTree:
     """
     with zarr_config.set({"array.read_missing_chunks": False}):
         ds = open_zarr(artifact_path, consolidated=False)
+    # The tree shows the chains as a dimension
+    num_chains = ds.attrs.pop("num_chains", 1)
     ds = ds[sorted(ds.data_vars)]
     # An empty result (no return sites) has no draw axis to split into chains
     ds = (
@@ -207,9 +210,11 @@ def _build_datatree(
 
     The ``group`` node is loaded via :func:`_zarr_to_datatree` when ``data`` is a
     path, or built via :func:`_dict_to_datatree` when it is a mapping of in-memory
-    arrays. Only the Zarr-backed tree records the path (as ``str``) in the
-    ``artifact_path`` attribute on both the root tree and the ``group`` node; the
-    in-memory tree has no artifact.
+    arrays. ``attrs`` become the attributes of the ``group`` node. A Zarr group is
+    first given them as its attributes, with its chain count, so the tree can be
+    rebuilt from the files alone. Only the Zarr-backed tree records the path (as
+    ``str``) in the ``artifact_path`` attribute on both the root tree and the
+    ``group`` node; the in-memory tree has no artifact.
 
     Args:
         data: Source of the site data to attach under ``group``: a call-specific path
@@ -241,11 +246,18 @@ def _build_datatree(
         )
     group_chains = 1 if group == "prior_predictive" else num_chains
     if isinstance(data, Path):
-        out[group] = _zarr_to_datatree(data, num_chains=group_chains)
+        # String, integer and list values only, so the store keeps them as they are
+        stored: dict[str, Any] = {
+            **_make_attrs(),
+            "num_chains": group_chains,
+            **(attrs or {}),
+        }
+        open_group(data, mode="r+").attrs.update(stored)
+        out[group] = _zarr_to_datatree(data)
         out[group].attrs["artifact_path"] = str(data)
         out.attrs["artifact_path"] = str(data)
     else:
         out[group] = _dict_to_datatree(data, num_chains=group_chains, dims=dims)
-    out[group].attrs.update(attrs or {})
+        out[group].attrs.update(attrs or {})
 
     return out

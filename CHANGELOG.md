@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Predictive outputs now record how their samples were drawn in the attributes of their group: the sampling key and the batching that the draws depend on ([#414](https://github.com/markean/aimz/issues/414)).
 - A skill for coding agents now ships inside the package, in `aimz/.agents/skills/aimz/`. See {doc}`user_guide/agents` for how to point an agent at it ([#416](https://github.com/markean/aimz/issues/416)).
 - {meth}`~aimz.ImpactModel.describe`, which returns the kernel's arguments, the sites known from the trace or the posterior with their kind and dimension names, and the fitted state, so that a loaded model can be read without running it ([#420](https://github.com/markean/aimz/issues/420)).
+- Outputs with `store="persistent"` now record in the Zarr group's attributes the number of chains and the attributes that describe how the draws were made, so an artifact reopened from its files alone splits its chains correctly and a reopened scenario is checked for pairing by {meth}`~aimz.ImpactModel.estimate_effect` like a fresh one ([#424](https://github.com/markean/aimz/issues/424)).
 
 ### Changed
 
