@@ -1760,6 +1760,11 @@ class ImpactModel(BaseModel):
             ValueError: If ``posterior_sample`` is empty, a value is 0-D, or the batch
                 shapes in ``posterior_sample`` are inconsistent.
 
+        Warns:
+            OutputWarning: If the kernel has been traced and ``posterior_sample`` has
+                no draws for one of its latent sample sites, which the predictive
+                methods then draw from the prior.
+
         Note:
             The kernel is not traced when samples are set this way, so ``deterministic``
             sites are not discovered; predictive methods return only the output site by
@@ -1805,6 +1810,20 @@ class ImpactModel(BaseModel):
             )
             raise ValueError(msg)
         (self._num_samples,) = batch_shapes.pop()
+        spec = self._kernel_spec
+        if spec is not None and spec.traced:
+            latent = set(spec.sample_sites) - self._observed_sites - {self.param_output}
+            if missing := sorted(latent - posterior_sample.keys()):
+                msg = (
+                    "`posterior_sample` has no draws for the latent site(s) "
+                    f"{', '.join(map(repr, missing))}; the predictive methods draw "
+                    "them from the prior."
+                )
+                warn(
+                    msg,
+                    category=OutputWarning,
+                    skip_file_prefixes=_SKIP_FILE_PREFIXES,
+                )
         self._posterior = posterior_sample
         self._num_chains = num_chains
         if self._kernel_spec is None:
