@@ -77,7 +77,7 @@ For larger additions:
 
 Linting & Pre-commit Hooks
 --------------------------
-We use `Ruff <https://docs.astral.sh/ruff>`_ (linting and formatting) and `pre-commit <https://pre-commit.com/>`_ hooks to keep diffs clean and reviews focused on design, not style nits.
+We use `Ruff <https://docs.astral.sh/ruff>`_ (linting and formatting), `ty <https://docs.astral.sh/ty>`_ (type checking of the package) and `pre-commit <https://pre-commit.com/>`_ hooks to keep diffs clean and reviews focused on design, not style nits.
 
 One-time setup::
 
@@ -87,6 +87,7 @@ Fast local checks (iterate frequently)::
 
     ruff check .
     ruff format --check .
+    ty check aimz
 
 Auto-fix what can be fixed::
 
@@ -105,5 +106,5 @@ When opening a PR, reference the relevant issue number (if any) in the title or 
 Checklist:
 
 * [ ] Tests pass locally and CI is green.
-* [ ] Linting and formatting pass (``ruff check .``, ``ruff format --check .``, and ``pre-commit run --all-files``).
+* [ ] Linting, formatting and type checking pass (``ruff check .``, ``ruff format --check .``, ``ty check aimz``, and ``pre-commit run --all-files``).
 * [ ] Documentation updated or not required.

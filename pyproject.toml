@@ -40,6 +40,7 @@ dev = [
     "pytest>=9.1",
     "pytest-cov>=7.1",
     "ruff>=0.16",
+    "ty>=0.0.84",
 ]
 gpu = ["jax[cuda13]>=0.10"]
 mlflow = ["mlflow>=3.10"]
