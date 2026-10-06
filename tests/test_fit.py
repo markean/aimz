@@ -155,7 +155,7 @@ class TestKernelBodyValidation:
             ),
         )
         with pytest.raises(KernelValidationError):
-            im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)), batch_size=3)
+            im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)))
 
     def test_kernel_with_invalid_site_name(self) -> None:
         """Kernel with site names incompatible with xarray.DataTree raises an error."""
@@ -176,7 +176,7 @@ class TestKernelBodyValidation:
             ),
         )
         with pytest.raises(KernelValidationError):
-            im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)), batch_size=3)
+            im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)))
 
 
 @pytest.mark.parametrize("mcmc", [lm], indirect=True)

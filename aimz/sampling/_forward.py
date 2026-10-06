@@ -33,7 +33,7 @@ def _sample_forward(
     rng_keys: Array,
     return_sites: tuple[str, ...] | None,
     samples: dict[str, Array] | None,
-    params: Mapping[str, object] | None,
+    params: dict[str, Array] | None,
     intervention: dict | None,
     model_kwargs: Mapping[str, object] | None,
 ) -> dict[str, Array]:

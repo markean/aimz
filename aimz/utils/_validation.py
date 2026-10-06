@@ -141,7 +141,9 @@ def _validate_group(dt_baseline: xr.DataTree, dt_intervention: xr.DataTree) -> s
         group != "prior_predictive"
         and "posterior" in dt_baseline.children
         and "posterior" in dt_intervention.children
-        and not dt_baseline["posterior"].equals(dt_intervention["posterior"])
+        and not dt_baseline.children["posterior"].equals(
+            dt_intervention.children["posterior"],
+        )
     ):
         msg = "Baseline and intervention have different posterior samples."
         warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
