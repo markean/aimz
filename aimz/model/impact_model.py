@@ -158,6 +158,7 @@ class ImpactModel(BaseModel):
         self._kernel_spec: KernelSpec | None = None
         self._dims: dict[str, tuple[str, ...]] = {}
         self._site_sizes: dict[str, tuple[int, int]] = {}
+        self._observed_sites: set[str] = set()
         if isinstance(rng_key, Array) and rng_key.dtype == jnp.uint32:
             msg = "Legacy `uint32` PRNGKey detected; converting to a typed key array."
             warn(msg, category=AimzWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
@@ -293,6 +294,8 @@ class ImpactModel(BaseModel):
         self.__dict__.setdefault("_dims", {})
         # Models pickled before site sizes were recorded count one value per observation
         self.__dict__.setdefault("_site_sizes", {})
+        # Models pickled before observed sites were recorded observe only the output
+        self.__dict__.setdefault("_observed_sites", set())
         self._init_runtime_attrs()
         # A sampler pickled with parallel chains may be loaded on fewer devices
         inference = self._inference
@@ -463,7 +466,8 @@ class ImpactModel(BaseModel):
         # strings or outnumber its dimensions, or whose leading axes do not follow its
         # plates (a global quantity computed inside a plate, a site inside `scan`),
         # keeps the default names. The values a site holds per draw, per observation
-        # when its leading axis follows the input's rows, size the streaming batches.
+        # when its leading axis follows the input's rows, size the streaming batches. A
+        # site the trace observes is described as observed.
         rows = getattr(args_bound[self.param_input], "shape", ())[:1]
         for k, v in model_trace.items():
             if v["type"] not in {"sample", "deterministic"}:
@@ -484,6 +488,8 @@ class ImpactModel(BaseModel):
                     if shape[:1] == rows
                     else (0, math.prod(shape))
                 )
+            if v.get("is_observed"):
+                self._observed_sites.add(k)
         prev = self._kernel_spec
         if prev is not None and prev.traced:
             sample_sites = tuple(dict.fromkeys(prev.sample_sites + sample_sites))
@@ -1690,7 +1696,7 @@ class ImpactModel(BaseModel):
         for name in (*spec.sample_sites, *spec.return_sites) if spec else ():
             if name in sites:
                 continue
-            if name == self.param_output:
+            if name == self.param_output or name in self._observed_sites:
                 kind = "observed"
             elif name in spec.sample_sites:
                 kind = "latent"

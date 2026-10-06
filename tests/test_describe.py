@@ -17,7 +17,9 @@
 import json
 
 import jax.numpy as jnp
+import numpyro.distributions as dist
 from jax import Array, random
+from numpyro import plate, sample
 
 from aimz import ImpactModel
 from tests.conftest import _make_svi, latent_intervention_model, lm, mlm
@@ -61,6 +63,29 @@ def test_describe_workflow(synthetic_data: tuple[Array, Array]) -> None:
         X, jnp.stack([y, y], axis=1), num_steps=10, num_samples=20, progress=False
     )
     assert im_plate.describe()["sites"]["y"]["dims"] == ["data"]
+
+    # A sample site observed through a keyword argument is observed, not latent
+    def two_observed(X: Array, t: Array | None = None, y: Array | None = None) -> None:
+        p = sample("p", dist.Beta(1.0, 1.0))
+        with plate("obs", X.shape[0]):
+            treat = sample("treat", dist.Bernoulli(p), obs=t)
+            sample("y", dist.Normal(treat + X[:, 0], 1.0), obs=y)
+
+    im_two = ImpactModel(
+        two_observed,
+        rng_key=random.key(0),
+        inference=_make_svi(two_observed),
+    )
+    im_two.fit_on_batch(
+        X, y, t=jnp.ones(len(X)), num_steps=10, num_samples=20, progress=False
+    )
+    assert {
+        name: site["kind"] for name, site in im_two.describe()["sites"].items()
+    } == {
+        "p": "latent",
+        "treat": "observed",
+        "y": "observed",
+    }
 
     # Samples set by hand on a model that was never traced: the sites come from them
     im_set = ImpactModel(lm, rng_key=random.key(0), inference=_make_svi(lm))
