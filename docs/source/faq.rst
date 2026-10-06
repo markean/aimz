@@ -140,7 +140,7 @@ After initializing an :class:`~aimz.ImpactModel` with your model, call :meth:`~a
 Each array must share the same leading dimension (number of draws), and the dictionary must not be empty.
 For draws from several chains, pass ``num_chains`` as well, so the output trees keep the chains.
 Once injected, the model is treated as fitted, and the prediction, log-likelihood, and posterior predictive methods will use the supplied samples.
-For :meth:`~aimz.ImpactModel.log_likelihood`, the samples must cover every latent site of the kernel (a partial posterior raises an error), whereas the predictive methods draw any missing sites fresh.
+For :meth:`~aimz.ImpactModel.log_likelihood`, the samples must cover every latent site of the kernel (a partial posterior raises an error), whereas the predictive methods draw any missing sites fresh, which :meth:`~aimz.ImpactModel.set_posterior_sample` warns about once the kernel has been traced.
 
 
 When should I use the ``*_on_batch`` variants?

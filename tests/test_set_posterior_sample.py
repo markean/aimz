@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING
 
 import pytest
@@ -24,7 +25,7 @@ from jax import numpy as jnp
 from numpyro.infer import Predictive
 from numpyro.infer.svi import SVIRunResult
 
-from aimz import ImpactModel
+from aimz import ImpactModel, OutputWarning
 from tests.conftest import lm
 
 if TYPE_CHECKING:
@@ -106,3 +107,15 @@ def test_chain_layout(
     im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
     im.set_posterior_sample(im_lm_svi_fitted.posterior, num_chains=num_chains)
     assert im.predict_on_batch(X).posterior_predictive.sizes["chain"] == num_chains
+
+    # Once the kernel is traced, a posterior without one of its latent sites warns; an
+    # untraced model has nothing to compare it with
+    partial = {k: v for k, v in im_lm_svi_fitted.posterior.items() if k != "sigma"}
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        ImpactModel(lm, rng_key=random.key(0), inference=vi).set_posterior_sample(
+            partial,
+        )
+    im.sample_prior_predictive_on_batch(X, num_samples=2)
+    with pytest.warns(OutputWarning, match="no draws for the latent site"):
+        im.set_posterior_sample(partial)
