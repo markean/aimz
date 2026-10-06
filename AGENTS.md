@@ -11,13 +11,14 @@ Rules for working in this repository that are not enforced by tooling. For aimz 
 
 - Tests: `pytest tests`. The suite runs on three host CPU devices, configured in `tests/conftest.py`. To run one method's tests: `pytest tests/test_<method>.py`.
 - Lint and format: `ruff check .` and `ruff format --check .`; Ruff selects all rules.
-- Docs: `make -C docs html` with the `docs` extra. `.. jupyter-execute::` cells run at build time, so keep them small and offline. Docs are not built in CI.
+- Types: `ty check aimz`; keep it clean. Tests and notebooks are not checked.
+- Docs: `make -C docs html` with the `docs` extra. `.. jupyter-execute::` cells run at build time, so keep them small and offline.
 
 ## Git and releases
 
 - Branch from `dev`; pull requests target `dev`. `main` is release-only.
 - Do not commit or push unless asked; leave changes in the working tree.
-- Do not run `uv lock`, `uv sync`, or `uv run`, and do not edit `uv.lock`, unless the task is a dependency change.
+- Do not run `uv lock` or `uv sync`, and do not edit `uv.lock`, unless the task is a dependency change.
 - Do not bump the version. The release commit sets it in `pyproject.toml` and `uv.lock` and dates the changelog entry.
 
 ## Code

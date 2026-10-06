@@ -1,6 +1,5 @@
 # aimz: Scalable probabilistic impact modeling
 
-[![Project Status: Active – The project has reached a stable, usable state and is being actively developed.](https://www.repostatus.org/badges/latest/active.svg)](https://www.repostatus.org/#active)
 ![Run Pytest](https://github.com/markean/aimz/actions/workflows/ci.yaml/badge.svg)
 [![PyPI](https://img.shields.io/pypi/v/aimz)](https://pypi.org/project/aimz/)
 [![Conda](https://img.shields.io/conda/vn/conda-forge/aimz.svg)](https://anaconda.org/conda-forge/aimz)
