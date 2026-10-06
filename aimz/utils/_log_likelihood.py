@@ -95,7 +95,7 @@ def _substitute_latent(msg: Message, sample: dict[str, Array]) -> Array | None:
 def _log_likelihood(
     model: Callable,
     samples: dict[str, Array] | None,
-    params: Mapping[str, object] | None,
+    params: dict[str, Array] | None,
     model_kwargs: Mapping[str, object] | None,
 ) -> dict[str, Array]:
     """Compute per-site log-likelihood at observed sites for each posterior draw.

@@ -1692,13 +1692,15 @@ class ImpactModel(BaseModel):
             apply), and, for a site in the posterior, the ``draw_shape`` of one draw.
         """
         spec = self._kernel_spec
+        sample_sites = spec.sample_sites if spec else ()
+        return_sites = spec.return_sites if spec else ()
         sites: dict[str, dict[str, object]] = {}
-        for name in (*spec.sample_sites, *spec.return_sites) if spec else ():
+        for name in (*sample_sites, *return_sites):
             if name in sites:
                 continue
             if name == self.param_output or name in self._observed_sites:
                 kind = "observed"
-            elif name in spec.sample_sites:
+            elif name in sample_sites:
                 kind = "latent"
             else:
                 kind = "deterministic"
@@ -2193,7 +2195,8 @@ class ImpactModel(BaseModel):
             name
             for name in ("rng_key", "shard_axis", "num_devices", "batch_size")
             if not np.array_equal(
-                attrs_baseline.get(name), attrs_intervention.get(name)
+                np.asarray(attrs_baseline.get(name)),
+                np.asarray(attrs_intervention.get(name)),
             )
         ]
         unpaired = [
