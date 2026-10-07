@@ -196,6 +196,7 @@ Both kernels fit the same data, and each estimates the effect of setting ``z`` t
         print(f"{name}: {ate_z.mean().item():.2f}")
 
 In the centered kernel the effect is exactly zero, because ``m`` keeps its posterior draws.
+:meth:`~aimz.ImpactModel.predict` and :meth:`~aimz.ImpactModel.predict_on_batch` warn with :class:`~aimz.OutputWarning` when an intervened site reaches the output only through such sites.
 In the non-centered kernel the intervention changes ``m``, while each draw keeps its posterior value of ``m_noise``.
 Write the kernel so that every path an intervention should change runs through deterministic computations rather than through latent sample sites.
 

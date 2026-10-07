@@ -23,7 +23,7 @@ import numpy as np
 import numpyro.distributions as dist
 import pytest
 from jax import Array, random
-from numpyro import deterministic, param, sample
+from numpyro import deterministic, param, plate, sample
 from numpyro.infer import MCMC, NUTS, SVI
 from numpyro.primitives import mutable
 
@@ -325,3 +325,35 @@ def test_predict_loader_batch_contract(
     """A loader yielding non-mappings, nothing, or inconsistent batches raises."""
     with pytest.raises(exc, match=match):
         im_lm_svi_fitted.predict(iter(batches), store="memory", progress=False)
+
+
+def test_predict_blocked_intervention() -> None:
+    """An intervention that the posterior draws of a latent site block warns."""
+
+    def centered(X: Array, y: Array | None = None) -> None:
+        z = sample("z", dist.Normal(0.0, 1.0))
+        m = sample("m", dist.Normal(3.0 * z, 0.1))
+        with plate("obs", size=X.shape[0]):
+            mu = deterministic("mu", m + X[:, 0])
+            sample("y", dist.Normal(mu, 0.1), obs=y)
+
+    X = np.linspace(-1.0, 1.0, 20).reshape(20, 1)
+    y = 3.0 + X[:, 0]
+    im = ImpactModel(centered, rng_key=random.key(0), inference=_make_svi(centered))
+    im.fit_on_batch(X, y, num_steps=10, num_samples=5, progress=False)
+    # `z` reaches `y` only through `m`, whose posterior draws do not respond to it,
+    # while an intervention on `m` itself takes effect
+    msg = "reach the output site 'y' only through"
+    with pytest.warns(OutputWarning, match=msg):
+        im.predict(X, intervention={"z": 0.0}, store="memory", progress=False)
+    with pytest.warns(OutputWarning, match=msg):
+        im.predict_on_batch(X, intervention={"z": 0.0})
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        im.predict_on_batch(X, intervention={"m": 0.0})
+    # Once `m` is drawn from the prior instead of the posterior, `z` passes through
+    with pytest.warns(OutputWarning, match="no draws for the latent site"):
+        im.set_posterior_sample({"z": np.zeros(5)})
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        im.predict_on_batch(X, intervention={"z": 0.0})

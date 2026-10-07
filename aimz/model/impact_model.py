@@ -48,6 +48,7 @@ from jax.sharding import AxisType, NamedSharding, PartitionSpec
 from jax.typing import ArrayLike
 from numpyro.handlers import seed, trace
 from numpyro.infer import MCMC, SVI
+from numpyro.infer.inspect import get_dependencies
 from numpyro.infer.svi import SVIRunResult, SVIState
 from tqdm.auto import tqdm
 
@@ -82,6 +83,7 @@ from aimz.utils._validation import (
     _validate_shard_axis,
     _validate_store,
     _validate_X_y_to_jax,
+    _warn_unreachable_intervention,
 )
 from aimz.utils.data import ArrayLoader
 from aimz.utils.data._input_setup import (
@@ -159,6 +161,7 @@ class ImpactModel(BaseModel):
         self._dims: dict[str, tuple[str, ...]] = {}
         self._site_sizes: dict[str, tuple[int, int]] = {}
         self._observed_sites: set[str] = set()
+        self._site_parents: dict[str, set[str]] = {}
         if isinstance(rng_key, Array) and rng_key.dtype == jnp.uint32:
             msg = "Legacy `uint32` PRNGKey detected; converting to a typed key array."
             warn(msg, category=AimzWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
@@ -296,6 +299,9 @@ class ImpactModel(BaseModel):
         self.__dict__.setdefault("_site_sizes", {})
         # Models pickled before observed sites were recorded observe only the output
         self.__dict__.setdefault("_observed_sites", set())
+        # Models pickled before site dependencies were recorded check no intervention
+        # against them
+        self.__dict__.setdefault("_site_parents", {})
         self._init_runtime_attrs()
         # A sampler pickled with parallel chains may be loaded on fewer devices
         inference = self._inference
@@ -490,6 +496,11 @@ class ImpactModel(BaseModel):
                 )
             if v.get("is_observed"):
                 self._observed_sites.add(k)
+        # The sample sites each site depends on, read from an abstract pass over the
+        # kernel, tell whether an intervention can reach the output.
+        deps = get_dependencies(self.kernel, model_kwargs=dict(args_bound))
+        for k, v in cast("Mapping[str, Mapping]", deps["prior_dependencies"]).items():
+            self._site_parents[k] = set(v) - {k}
         prev = self._kernel_spec
         if prev is not None and prev.traced:
             sample_sites = tuple(dict.fromkeys(prev.sample_sites + sample_sites))
@@ -1891,9 +1902,20 @@ class ImpactModel(BaseModel):
                 :attr:`~aimz.ImpactModel.param_output` is passed as an argument.
             ValueError: If ``intervention`` names a site that is not a sample site of
                 the kernel.
+
+        Warns:
+            OutputWarning: If an intervened site reaches the output only through sites
+                whose values are taken from the posterior or intervened on, so that
+                the draws do not respond to it.
         """
         _check_is_fitted(self)
         _validate_intervention(intervention, kernel_spec=self._kernel_spec)
+        _warn_unreachable_intervention(
+            intervention,
+            output=self.param_output,
+            parents=self._site_parents,
+            fixed=(self._posterior or {}).keys(),
+        )
 
         X = cast("Array", _validate_X_y_to_jax(X))
 
@@ -2017,12 +2039,23 @@ class ImpactModel(BaseModel):
             NotImplementedError: If a return site's axis-1 size does not match the
                 input batch size (``shard_axis="obs"`` only).
 
+        Warns:
+            OutputWarning: If an intervened site reaches the output only through sites
+                whose values are taken from the posterior or intervened on, so that
+                the draws do not respond to it.
+
         See Also:
             :meth:`~aimz.ImpactModel.cleanup` to remove the temporary directory if
             created.
         """
         _check_is_fitted(self)
         _validate_intervention(intervention, kernel_spec=self._kernel_spec)
+        _warn_unreachable_intervention(
+            intervention,
+            output=self.param_output,
+            parents=self._site_parents,
+            fixed=(self._posterior or {}).keys(),
+        )
         _validate_shard_axis(shard_axis, X=X)
         _validate_batch_size(batch_size, X=X)
         _validate_store(store, output_dir=output_dir)
