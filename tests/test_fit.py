@@ -271,3 +271,5 @@ def test_fit_loader_with_custom_param_names(
     assert dt_ll.log_likelihood["obs"].shape == (1, 10, len(X))
     with pytest.raises(ValueError, match="no field named 'obs'"):
         im.fit(ArrayLoader(ArrayDataset(x=X), rng_key=random.key(0)), progress=False)
+    with pytest.raises(ValueError, match="no field named 'obs'"):
+        im.fit([{"x": X}], progress=False)

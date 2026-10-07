@@ -79,6 +79,7 @@ per-file-ignores = { "aimz/model/_core.py" = [
     "ANN003", # missing-type-kwargs
 ], "aimz/model/impact_model.py" = [
     "C901",    # complex-structure
+    "PLR0912", # too-many-branches
     "PLR0915", # too-many-statements
     "SLF001",  # private-member-access
 ], "aimz/mlflow*" = [
