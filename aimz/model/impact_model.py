@@ -474,11 +474,12 @@ class ImpactModel(BaseModel):
         )
         # Name the dimensions of each site after its plates, outermost first, then the
         # event dimensions named in its `infer` dictionary. A site whose names are not
-        # strings or outnumber its dimensions, or whose leading axes do not follow its
-        # plates (a global quantity computed inside a plate, a site inside `scan`),
-        # keeps the default names. The values a site holds per draw, per observation
-        # when its leading axis follows the input's rows, size the streaming batches. A
-        # site the trace observes is described as observed.
+        # distinct strings other than `chain` and `draw`, or outnumber its dimensions,
+        # or whose leading axes do not follow its plates (a global quantity computed
+        # inside a plate, a site inside `scan`), keeps the default names, with a
+        # warning when the kernel named event dimensions. The values a site holds per
+        # draw, per observation when its leading axis follows the input's rows, size
+        # the streaming batches. A site the trace observes is described as observed.
         rows = getattr(args_bound[self.param_input], "shape", ())[:1]
         for k, v in model_trace.items():
             if v["type"] not in {"sample", "deterministic"}:
@@ -490,9 +491,21 @@ class ImpactModel(BaseModel):
             if (
                 0 < len(names) <= len(shape)
                 and all(isinstance(name, str) for name in names)
+                and len(set(names)) == len(names)
+                and not {"chain", "draw"} & set(names)
                 and shape[: len(frames)] == tuple(f.size for f in frames)
             ):
                 self._dims[k] = names
+            elif event_dims:
+                msg = (
+                    f"The event dimension names {tuple(event_dims)!r} of site {k!r} "
+                    "cannot apply, so the site keeps the default dimension names."
+                )
+                warn(
+                    msg,
+                    category=OutputWarning,
+                    skip_file_prefixes=_SKIP_FILE_PREFIXES,
+                )
             if hasattr(v["value"], "shape"):
                 self._site_sizes[k] = (
                     (math.prod(shape[1:]), 0)

@@ -20,12 +20,15 @@ import datetime
 from importlib.metadata import version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+from warnings import warn
 
 import numpy as np
 import xarray as xr
 from xarray import open_zarr
 from zarr import config as zarr_config
 from zarr import open_group
+
+from aimz._exceptions import _SKIP_FILE_PREFIXES, OutputWarning
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -85,6 +88,10 @@ def _group_dims(
 
     Returns:
         The dimension names by site.
+
+    Warns:
+        OutputWarning: If sites keep the default names because a name would have two
+            lengths within the group.
     """
     names = {
         site: _site_dims(site, len(shape), dims.get(site, ()))
@@ -96,6 +103,14 @@ def _group_dims(
         for name, length in zip(names[site], shape, strict=True):
             if lengths.setdefault(name, length) != length:
                 clashes.add(name)
+    if clashes:
+        kept = [site for site in shapes if clashes & set(names[site])]
+        msg = (
+            f"The sites {', '.join(map(repr, kept))} keep the default dimension names: "
+            f"{', '.join(map(repr, sorted(clashes)))} would have two lengths in one "
+            "group."
+        )
+        warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
 
     return {
         site: _site_dims(site, len(shapes[site]))
