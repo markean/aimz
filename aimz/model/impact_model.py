@@ -1634,6 +1634,9 @@ class ImpactModel(BaseModel):
             )
             for batch in pbar:
                 fields = dict(batch)
+                if missing := names - fields.keys():
+                    msg = f"The data loader has no field named {min(missing)!r}."
+                    raise ValueError(msg)
                 _, loss = self.train_on_batch(
                     fields.pop(self.param_input),
                     fields.pop(self.param_output),
