@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - {meth}`~aimz.ImpactModel.set_posterior_sample` now warns with {class}`~aimz.OutputWarning` when the kernel has been traced and the posterior has no draws for one of its latent sample sites ([#426](https://github.com/markean/aimz/issues/426)).
 - {meth}`~aimz.ImpactModel.predict` and {meth}`~aimz.ImpactModel.predict_on_batch` now warn when an intervened site reaches the output only through sites whose values the posterior supplies, so that the draws cannot respond to it, instead of returning them without notice ([#428](https://github.com/markean/aimz/issues/428)).
 - The streaming methods now count the batches that `store="memory"` keeps on the host when they plan the writer queue, and warn with {class}`~aimz.PerformanceWarning` when the whole output exceeds the memory available, instead of planning as if every batch left memory once written ([#435](https://github.com/markean/aimz/issues/435)).
+- Output dimension names that cannot apply, such as event dimension names that outnumber a site's dimensions or one name with two lengths in a group, now warn with {class}`~aimz.OutputWarning` as they give way to the default names, instead of falling back to them silently ([#437](https://github.com/markean/aimz/issues/437)).
 
 ### Fixed
 
