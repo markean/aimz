@@ -27,6 +27,8 @@ Treatment is passed as an input feature, and the :class:`~aimz.ImpactModel` API 
 
     from aimz import ImpactModel
 
+    import arviz_stats as azs
+
     logging.basicConfig(level=logging.INFO, force=True)
 
     # Configure the inline backend for high-resolution figures
@@ -198,16 +200,16 @@ We use 100 samples here for illustration; more samples would tighten the posteri
 .. code-block:: text
 
     INFO:aimz.model.impact_model:Performing variational inference optimization
-    Epoch 1/10 - Average loss: 2310007.0000
-    Epoch 2/10 - Average loss: 1790094.3750
-    Epoch 3/10 - Average loss: 1716746.8750
-    Epoch 4/10 - Average loss: 1672026.3750
-    Epoch 5/10 - Average loss: 1647541.8750
-    Epoch 6/10 - Average loss: 1631482.8750
-    Epoch 7/10 - Average loss: 1617123.1250
-    Epoch 8/10 - Average loss: 1603617.7500
-    Epoch 9/10 - Average loss: 1590345.8750
-    Epoch 10/10 - Average loss: 1579658.5000
+    Epoch 1/10 - Average loss: 2313711.0000
+    Epoch 2/10 - Average loss: 1791049.6250
+    Epoch 3/10 - Average loss: 1716191.8750
+    Epoch 4/10 - Average loss: 1671568.1250
+    Epoch 5/10 - Average loss: 1646976.6250
+    Epoch 6/10 - Average loss: 1630548.8750
+    Epoch 7/10 - Average loss: 1616295.6250
+    Epoch 8/10 - Average loss: 1601412.0000
+    Epoch 9/10 - Average loss: 1585631.6250
+    Epoch 10/10 - Average loss: 1575656.8750
     INFO:aimz.model.impact_model:Drawing posterior samples (num_samples=100)
 
 The ELBO loss history is stored in ``im.vi_result.losses``.
@@ -221,6 +223,58 @@ The ELBO loss history is stored in ``im.vi_result.losses``.
 
 .. image:: ../_static/criteo_elbo_loss.png
    :align: center
+
+
+Treatment Effect Estimation
+---------------------------
+
+Because treatment was randomized within each test and the model conditions on the features, the average treatment effect on visit probability can be estimated by predicting under both treatment scenarios and averaging the difference.
+The ``treatment`` column indicates eligibility for ad targeting rather than guaranteed ad exposure, so the estimated effect is an intention-to-treat (ITT) effect: the impact of allowing users to enter the ad auction, not the causal effect of actually viewing an ad.
+Treatment is a function argument (not a ``sample`` site), so :meth:`~aimz.ImpactModel.estimate_effect` runs :meth:`~aimz.ImpactModel.predict` twice with different treatment values, streaming each scenario to Zarr_ as the next section describes.
+Alternatively, precomputed prediction outputs can be passed directly to avoid computation internally.
+
+.. code-block:: python
+
+    effect = im.estimate_effect(
+        args_baseline={
+            "X": X,
+            "treatment": jnp.zeros(n_obs, dtype=jnp.float32),
+        },
+        args_intervention={
+            "X": X,
+            "treatment": jnp.ones(n_obs, dtype=jnp.float32),
+        },
+    )
+
+    ate = effect.posterior_predictive["p"].mean(dim="obs").load()
+    lower, upper = azs.hdi(ate, prob=0.95).values
+    print(f"Posterior mean ATE: {ate.mean().item():.4f}")
+    print(f"95% HDI: [{lower:.4f}, {upper:.4f}]")
+
+.. code-block:: text
+
+    Posterior mean ATE: 0.0069
+    95% HDI: [0.0061, 0.0074]
+
+The effect tree holds the per-observation differences for every draw, and the averages above are the only values loaded into memory.
+For comparison, the difference-in-means ignores the features:
+
+.. code-block:: python
+
+    naive_ate = (
+        df.loc[df["treatment"] == 1, "visit"].mean()
+        - df.loc[df["treatment"] == 0, "visit"].mean()
+    )
+    print(f"Difference-in-means: {naive_ate:.4f}")
+    print(f"Model:               {ate.mean().item():.4f}")
+
+.. code-block:: text
+
+    Difference-in-means: 0.0103
+    Model:               0.0069
+
+The difference-in-means is not a reliable benchmark here, because the share of treated users varies with the features, which also predict visits.
+The model conditions on the features, so its estimate does not attribute these differences to treatment.
 
 
 Streaming Prediction
@@ -284,70 +338,6 @@ We verify the model fit by comparing the observed visit rate against the posteri
 \
 
 The observed visit rate falls within the posterior predictive distribution in all three panels, and the model captures the gap between the control and treated groups.
-
-
-Treatment Effect Estimation
----------------------------
-
-Because treatment was randomized within each test and the model conditions on the features, the average treatment effect on visit probability can be estimated by predicting under both treatment scenarios and averaging the difference.
-The ``treatment`` column indicates eligibility for ad targeting rather than guaranteed ad exposure, so the estimated effect is an intention-to-treat (ITT) effect: the impact of allowing users to enter the ad auction, not the causal effect of actually viewing an ad.
-Treatment is a function argument (not a ``sample`` site), so :meth:`~aimz.ImpactModel.estimate_effect` runs :meth:`~aimz.ImpactModel.predict` twice with different treatment values.
-Alternatively, precomputed prediction outputs can be passed directly to avoid computation internally.
-
-.. code-block:: python
-
-    effect = im.estimate_effect(
-        args_baseline={
-            "X": X,
-            "treatment": jnp.zeros(n_obs, dtype=jnp.float32),
-        },
-        args_intervention={
-            "X": X,
-            "treatment": jnp.ones(n_obs, dtype=jnp.float32),
-        },
-    )
-
-    ate = effect.posterior_predictive["p"].mean(dim="obs")
-
-.. code-block:: python
-
-    fig, ax = plt.subplots(figsize=(8, 4))
-    pp_ate = ate.to_numpy().flatten()
-    ax.hist(pp_ate, bins=20)
-    ax.axvline(
-        pp_ate.mean(),
-        color="red",
-        linestyle="--",
-        linewidth=2,
-        label=f"Mean: {pp_ate.mean():.4f}",
-    )
-    ax.set(xlabel="ATE (Visit Probability)", ylabel="Frequency")
-    ax.legend()
-    ax.set_title("Average Treatment Effect on Visit", fontweight="bold");
-
-.. image:: ../_static/criteo_ate.png
-   :align: center
-
-\
-
-For comparison, the difference-in-means ignores the features:
-
-.. code-block:: python
-
-    naive_ate = (
-        df.loc[df["treatment"] == 1, "visit"].mean()
-        - df.loc[df["treatment"] == 0, "visit"].mean()
-    )
-    print(f"Difference-in-means: {naive_ate:.4f}")
-    print(f"Model:               {pp_ate.mean():.4f}")
-
-.. code-block:: text
-
-    Difference-in-means: 0.0103
-    Model:               0.0073
-
-The difference-in-means is not a reliable benchmark here, because the share of treated users varies with the features, which also predict visits.
-The model conditions on the features, so its estimate does not attribute these differences to treatment.
 
 
 Cleanup

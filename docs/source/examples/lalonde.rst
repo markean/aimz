@@ -16,6 +16,7 @@ The model includes a treatment x covariate interaction, decomposing the overall 
     import numpy as np
     import numpyro.distributions as dist
     import pandas as pd
+    import xarray as xr
     from jax import Array, random
     from numpyro import deterministic, plate, sample
     from numpyro.infer import MCMC, NUTS
@@ -102,20 +103,11 @@ The dataset contains the following columns:
 
 - **Outcome**: ``re78``, earnings in 1978 (dollars, scaled to $k above).
 
-
-The naive difference in mean earnings between the treated and control groups:
+The naive difference in mean earnings between the treated and control groups is negative, as if the program *reduced* earnings:
 
 .. jupyter-execute::
 
-    covariates = [
-        "educ",
-        "age",
-        "re75",
-        "black",
-        "hispan",
-        "married",
-        "nodegree",
-    ]
+    covariates = ["educ", "age", "re75", "black", "hispan", "married", "nodegree"]
     naive_ate = (
         df.loc[df["treat"] == 1, "re78"].mean() - df.loc[df["treat"] == 0, "re78"].mean()
     )
@@ -123,7 +115,6 @@ The naive difference in mean earnings between the treated and control groups:
 
 \
 
-The naive estimate is negative, suggesting the program *reduced* earnings.
 This is due to confounding: the treated group had lower prior earnings, less education, and other systematic differences.
 
 .. jupyter-execute::
@@ -132,34 +123,12 @@ This is due to confounding: the treated group had lower prior earnings, less edu
 
 \
 
-.. jupyter-execute::
-
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-
-    for treat_val, color, label in [(0, "C0", "Control"), (1, "C1", "Treated")]:
-        subset = df.loc[df["treat"] == treat_val, "re78"]
-        axes[0].hist(
-            subset,
-            alpha=0.5,
-            color=color,
-            label=label,
-            density=True,
-        )
-    axes[0].set(xlabel="Earnings 1978 ($k)", ylabel="Density")
-    axes[0].legend()
-
-    # Breakdown by nodegree x treatment
-    for (nd, treat), grp in df.groupby(["nodegree", "treat"]):
-        label = f"{'No Degree' if nd else 'Degree'}, {'Treated' if treat else 'Control'}"
-        axes[1].hist(grp["re78"], alpha=0.5, label=label, density=True)
-    axes[1].set(xlabel="Earnings 1978 ($k)", ylabel="Density")
-    axes[1].legend();
-
-\
-
-The right panel hints at heterogeneity: the earnings distributions differ more across treatment status for those without a degree than for those with one.
+We standardize the continuous covariates for better sampling and pack the covariates, the treatment, and the outcome into JAX arrays.
+The education indicator is kept as a plain array to label the subgroups later.
 
 .. jupyter-execute::
+
+    nodegree = df["nodegree"].to_numpy()
 
     # Standardize continuous covariates for better sampling
     cols_to_standardize = ["educ", "age", "re75"]
@@ -244,58 +213,6 @@ We fit using MCMC with the No-U-Turn Sampler.
 
     im.fit_on_batch(X, y_earnings, y_treat=y_treat)
 
-\
-
-MCMC diagnostics:
-
-.. jupyter-execute::
-
-    summary = azs.summary(az.from_numpyro(im.inference))
-    summary.loc[~summary.index.str.startswith("mu_earnings")]
-
-
-Posterior Predictive Check
---------------------------
-
-The posterior predictive check below compares the observed and predicted mean earnings overall and by treatment arm.
-
-.. jupyter-execute::
-
-    dt = im.predict_on_batch(X, y_treat=y_treat)
-    pp_earn = dt.posterior_predictive["y"]
-
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-
-    # Overall
-    obs_mean = float(y_earnings.mean())
-    pred_means = pp_earn.mean(dim="obs").to_numpy().flatten()
-    axes[0].hist(pred_means, bins=30, color="C0")
-    axes[0].axvline(
-        obs_mean,
-        color="red",
-        linestyle="--",
-        linewidth=2,
-        label=f"Obs: {obs_mean:.2f}",
-    )
-    axes[0].set(xlabel="Mean Predicted Earnings ($k)", title="All")
-    axes[0].legend()
-
-    # Per treatment arm
-    for arm, color in [(0, "C0"), (1, "C1")]:
-        mask = np.asarray(y_treat == arm)
-        obs_arm = float(y_earnings[mask].mean())
-        pred_arm = pp_earn.isel(obs=mask).mean(dim="obs").to_numpy().flatten()
-        axes[1].hist(
-            pred_arm,
-            bins=30,
-            color=color,
-            alpha=0.5,
-            label=f"{'Treated' if arm else 'Control'}",
-        )
-        axes[1].axvline(obs_arm, color=color, linestyle="--", linewidth=2)
-    axes[1].set(xlabel="Mean Predicted Earnings ($k)", title="By Treatment")
-    axes[1].legend();
-
 
 Estimating Treatment Effects via ``intervention``
 -------------------------------------------------
@@ -320,109 +237,40 @@ This triggers `NumPyro`_'s :external:class:`~numpyro.handlers.do` handler, which
 \
 
 The result contains individual-level differences (intervention − baseline) for ``mu_earnings``.
-Averaging over all observations gives the overall ATE.
+Averaging over all observations in every draw gives the overall ATE.
+Because the model includes a treatment x ``nodegree`` interaction, the individual-level effects also vary by education, and averaging within each group gives the CATEs.
+A coordinate on ``obs`` labels every observation with its group, so one ``groupby`` yields both.
 
 .. jupyter-execute::
 
     ite = effect.posterior_predictive["mu_earnings"]
-    ate = ite.mean(dim="obs")
-
-
-Overall ATE
-~~~~~~~~~~~
-
-.. jupyter-execute::
-
-    fig, ax = plt.subplots(figsize=(8, 4))
-
-    pp_ate = ate.to_numpy().flatten()
-    ax.hist(pp_ate, bins=30, color="C0")
-    ax.axvline(
-        pp_ate.mean(),
-        color="red",
-        linestyle="--",
-        linewidth=2,
-        label=f"Mean: {pp_ate.mean():.2f}",
-    )
-    ax.axvline(0, color="gray", linestyle=":")
-    ax.set(xlabel="ATE ($k)", ylabel="Frequency")
-    ax.legend()
-    fig.suptitle("Overall Average Treatment Effect", fontweight="bold");
+    cate = ite.assign_coords(nodegree=("obs", nodegree)).groupby("nodegree").mean("obs")
+    estimands = xr.Dataset({"ATE": ite.mean("obs"), "CATE": cate})
+    azs.summary(estimands, kind="stats", ci_prob=0.95, ci_kind="hdi", round_to=2)
 
 \
 
-The posterior mean is positive, indicating that the training program increased earnings on average.
-The interval is wide and includes zero, reflecting the small sample size, high variance of individual earnings, and imbalanced treatment groups.
-
-
-Subgroup CATEs
-~~~~~~~~~~~~~~
-
-Because the model includes a treatment x ``nodegree`` interaction, the individual-level treatment effects vary by subgroup.
-We partition the observations and average each subset.
-
-.. jupyter-execute::
-
-    nodegree_mask = np.asarray(df["nodegree"] == 1)
-
-    cate_no_degree = ite.isel(obs=nodegree_mask).mean(dim="obs")
-    cate_degree = ite.isel(obs=~nodegree_mask).mean(dim="obs")
-
-.. jupyter-execute::
-
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4), layout="constrained")
-
-    for i, (ax, draws, label) in enumerate(zip(
-        axes,
-        [cate_no_degree, cate_degree],
-        ["No Degree (nodegree = 1)", "Degree (nodegree = 0)"],
-        strict=True,
-    )):
-        pp = draws.to_numpy().flatten()
-        ax.hist(pp, bins=30, color=f"C{i}")
-        mean = pp.mean()
-        ax.axvline(
-            mean, color="red", linestyle="--", linewidth=2,
-            label=f"Mean: {mean:.2f}",
-        )
-        ax.axvline(0, color="gray", linestyle=":")
-        ax.set_title(label)
-        ax.set_xlabel("CATE ($k)")
-        ax.set_ylabel("Frequency")
-        ax.legend()
-
-    fig.suptitle(
-        "Conditional Average Treatment Effects by Education",
-        fontsize=18,
-        fontweight="bold",
-        y=1.1,
-    );
+The posterior mean ATE is positive, indicating that the training program increased earnings on average.
+Its interval is wide and includes zero, reflecting the small sample size, high variance of individual earnings, and imbalanced treatment groups.
 
 .. jupyter-execute::
 
     fig, ax = plt.subplots(figsize=(8, 4))
 
-    labels = []
-    for i, (draws, label) in enumerate(
-        zip(
-            [ate, cate_no_degree, cate_degree],
-            ["Overall ATE", "CATE: No Degree", "CATE: Degree"],
-            strict=True,
-        ),
-    ):
-        pp = draws.to_numpy().flatten()
-        mean = pp.mean()
-        hdi = azs.hdi(pp)
+    labels = ["Overall ATE", "CATE: Degree", "CATE: No Degree"]
+    draws = [estimands["ATE"], cate.sel(nodegree=0), cate.sel(nodegree=1)]
+    for i, (da, label) in enumerate(zip(draws, labels, strict=True)):
+        mean = da.mean().item()
+        lower, upper = azs.hdi(da, prob=0.95).values
         ax.errorbar(
             mean,
             i,
-            xerr=[[mean - hdi[0]], [hdi[1] - mean]],
+            xerr=[[mean - lower], [upper - mean]],
             fmt="o",
             capsize=5,
             color=f"C{i}",
             markersize=8,
         )
-        labels.append(label)
     ax.set_yticks(range(len(labels)))
     ax.set_yticklabels(labels)
     ax.axvline(0, color="gray", linestyle=":")
@@ -431,8 +279,8 @@ We partition the observations and average each subset.
 
 \
 
-The plot compares the overall ATE with subgroup CATEs.
-This decomposition is a direct consequence of the interaction term; the same ``estimate_effect`` call produces both through post-processing.
+The plot compares the overall ATE with the subgroup CATEs.
+This decomposition is a direct consequence of the interaction term; the same :meth:`~aimz.ImpactModel.estimate_effect` call produces both through post-processing.
 For this linear model, the subgroup CATEs could also be read directly from the coefficients, but the workflow shown here generalizes to models where the treatment effect has no closed-form expression.
 
 All three intervals include zero, so the data do not provide strong evidence that the program increased earnings for either subgroup.
@@ -441,6 +289,77 @@ The two CATEs overlap substantially, meaning the data do not support a confident
 
 The subgroup CATEs are determined by the interaction structure in the model, not discovered from the data nonparametrically.
 A richer model with additional interactions or flexible components could reveal different patterns of heterogeneity.
+The raw earnings distributions below hint at the heterogeneity the interaction term is meant to capture: they differ more across treatment status for those without a degree than for those with one.
+
+.. jupyter-execute::
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+
+    for treat_val, color, label in [(0, "C0", "Control"), (1, "C1", "Treated")]:
+        subset = df.loc[df["treat"] == treat_val, "re78"]
+        axes[0].hist(subset, alpha=0.5, color=color, label=label, density=True)
+    axes[0].set(xlabel="Earnings 1978 ($k)", ylabel="Density")
+    axes[0].legend()
+
+    # Breakdown by nodegree x treatment
+    for (nd, treat), grp in df.groupby(["nodegree", "treat"]):
+        label = f"{'No Degree' if nd else 'Degree'}, {'Treated' if treat else 'Control'}"
+        axes[1].hist(grp["re78"], alpha=0.5, label=label, density=True)
+    axes[1].set(xlabel="Earnings 1978 ($k)", ylabel="Density")
+    axes[1].legend();
+
+
+Model Checks
+------------
+
+MCMC diagnostics:
+
+.. jupyter-execute::
+
+    summary = azs.summary(az.from_numpyro(im.inference))
+    summary.loc[~summary.index.str.startswith("mu_earnings")]
+
+\
+
+The posterior predictive check below compares the observed and predicted mean earnings overall and by treatment arm.
+The same coordinate idiom groups the predictions by arm.
+
+.. jupyter-execute::
+
+    dt = im.predict_on_batch(X, y_treat=y_treat)
+    pp_earn = dt.posterior_predictive["y"]
+    pred_arm = (
+        pp_earn.assign_coords(treat=("obs", np.asarray(y_treat))).groupby("treat").mean("obs")
+    )
+    obs_arm = df.groupby("treat")["re78"].mean()
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+
+    # Overall
+    obs_mean = float(y_earnings.mean())
+    axes[0].hist(pp_earn.mean("obs").to_numpy().flatten(), bins=30, color="C0")
+    axes[0].axvline(
+        obs_mean,
+        color="red",
+        linestyle="--",
+        linewidth=2,
+        label=f"Obs: {obs_mean:.2f}",
+    )
+    axes[0].set(xlabel="Mean Predicted Earnings ($k)", title="All")
+    axes[0].legend()
+
+    # Per treatment arm
+    for arm, color in [(0, "C0"), (1, "C1")]:
+        axes[1].hist(
+            pred_arm.sel(treat=arm).to_numpy().flatten(),
+            bins=30,
+            color=color,
+            alpha=0.5,
+            label="Treated" if arm else "Control",
+        )
+        axes[1].axvline(obs_arm[arm], color=color, linestyle="--", linewidth=2)
+    axes[1].set(xlabel="Mean Predicted Earnings ($k)", title="By Treatment")
+    axes[1].legend();
 
 
 References
