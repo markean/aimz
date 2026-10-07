@@ -1645,6 +1645,7 @@ class ImpactModel(BaseModel):
                 disable=not progress,
                 dynamic_ncols=True,
             )
+            pending: Array | None = None
             for batch in pbar:
                 fields = dict(batch)
                 if missing := names - fields.keys():
@@ -1657,9 +1658,13 @@ class ImpactModel(BaseModel):
                     **kwargs_extra,
                     rng_key=rng_subkey,
                 )
-                loss_batch = device_get(loss)
-                losses_epoch.append(loss_batch)
-                pbar.set_postfix({"loss": f"{float(loss_batch):.4f}"})
+                if pending is not None:
+                    loss_batch = device_get(pending)
+                    losses_epoch.append(loss_batch)
+                    pbar.set_postfix({"loss": f"{float(loss_batch):.4f}"})
+                pending = loss
+            if pending is not None:
+                losses_epoch.append(device_get(pending))
             if not losses_epoch:
                 # An exhausted one-shot iterator would otherwise skip the epoch silently
                 msg = (
