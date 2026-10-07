@@ -12,17 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The ``aimz.mlflow`` module provides an API for logging and loading aimz models.
+"""The ``aimz.mlflow`` module logs and loads aimz models.
 
-This module exports aimz models with the following flavors:
+Models are exported with two flavors:
 
 aimz (native) format
-    This is the main flavor that can be loaded back into aimz.
+    The main flavor, loaded back into aimz.
 :py:mod:`mlflow.pyfunc`
-    Produced for generic pyfunc-based batch inference in Python. Predictions are
-    returned as an :py:class:`xarray.DataTree`, which MLflow does not serialize, so
-    neither REST serving (e.g. ``mlflow models serve``) nor
-    :py:func:`mlflow.models.predict` is supported.
+    For generic pyfunc inference. Predictions are an :py:class:`xarray.DataTree`, or
+    with ``return_datatree=False`` in ``params`` a dictionary of arrays, which a
+    scoring server serializes.
 """
 
 from __future__ import annotations
@@ -121,16 +120,13 @@ _logger = logging.getLogger("mlflow.aimz")
 
 
 def get_default_pip_requirements(*, include_cloudpickle: bool = False) -> list[str]:
-    """Return the default pip requirements for MLflow Models produced by this flavor.
+    """Return the pip requirements that :func:`save_model` and :func:`log_model` record.
 
     Args:
-        include_cloudpickle: If ``True``, include ``cloudpickle`` in the requirements
-            list.
+        include_cloudpickle: Whether to include ``cloudpickle``.
 
     Returns:
-        A list of default pip requirements for MLflow Models produced by this flavor.
-        Calls to :func:`save_model()` and :func:`log_model()` produce a pip environment
-        that, at minimum, contains these requirements.
+        The pinned requirements of ``aimz``, ``jax``, and ``numpyro``.
     """
     pip_deps = [
         _get_pinned_requirement("aimz"),
@@ -144,14 +140,13 @@ def get_default_pip_requirements(*, include_cloudpickle: bool = False) -> list[s
 
 
 def get_default_conda_env(*, include_cloudpickle: bool = False) -> dict[str, object]:
-    """Return the default Conda environment for MLflow Models produced by this flavor.
+    """Return the Conda environment :func:`save_model` and :func:`log_model` record.
 
     Args:
-        include_cloudpickle: If ``True``, include ``cloudpickle`` in the environment.
+        include_cloudpickle: Whether to include ``cloudpickle``.
 
     Returns:
-        The default Conda environment for MLflow Models produced by calls to
-        :func:`save_model()` and :func:`log_model()`.
+        The environment built on :func:`get_default_pip_requirements`.
     """
     return _mlflow_conda_env(
         additional_pip_deps=get_default_pip_requirements(
@@ -221,8 +216,7 @@ def save_model(
     saved_example = _save_example(mlflow_model, input_example, str(path))
 
     if signature is None and saved_example is not None:
-        # Signature inference runs a real prediction; restore the rng key so that
-        # saving does not change the model's future prediction stream.
+        # Signature inference runs a prediction; the model's key stays unchanged
         rng_key = model.rng_key
         try:
             signature = _infer_signature_from_input_example(
@@ -239,7 +233,6 @@ def save_model(
     if metadata is not None:
         mlflow_model.metadata = metadata
 
-    # Save an aimz model
     _save_model(model, model_data_path, SERIALIZATION_FORMAT_CLOUDPICKLE)
 
     model_class = _get_fully_qualified_class_name(model)
@@ -270,9 +263,7 @@ def save_model(
     if conda_env is None:
         if pip_requirements is None:
             default_reqs = get_default_pip_requirements(include_cloudpickle=True)
-            # To ensure `_load_pyfunc` can successfully load the model during the
-            # dependency inference, `mlflow_model.save` must be called beforehand to
-            # save an MLmodel file.
+            # The inference loads the model, so the MLmodel file must exist already
             inferred_reqs = mlflow.models.infer_pip_requirements(
                 path,
                 FLAVOR_NAME,
@@ -292,20 +283,15 @@ def save_model(
     with (path / _CONDA_ENV_FILE_NAME).open("w") as f:
         yaml.safe_dump(conda_env, stream=f, default_flow_style=False)
 
-    # Save `constraints.txt` if necessary
     if pip_constraints:
         write_to(path / _CONSTRAINTS_FILE_NAME, "\n".join(pip_constraints))
-
-    # Save `requirements.txt`
     write_to(path / _REQUIREMENTS_FILE_NAME, "\n".join(pip_requirements))
 
     _PythonEnv.current().to_yaml(path / _PYTHON_ENV_FILE_NAME)
 
 
 def _dump_model(pickle_lib: ModuleType, model: ImpactModel, out: IO[bytes]) -> None:
-    # Using python's default protocol to optimize compatibility.
-    # Otherwise cloudpickle uses latest protocol leading to incompatibilities.
-    # See https://github.com/mlflow/mlflow/issues/5419
+    # The default protocol, for compatibility (mlflow/mlflow#5419)
     pickle_lib.dump(model, out, protocol=pickle.DEFAULT_PROTOCOL)
 
 
@@ -314,14 +300,10 @@ def _save_model(
     output_path: Path,
     serialization_format: str,
 ) -> None:
-    """Serialize an aimz model to the specified output path.
+    """Pickle the model to ``output_path`` in the given serialization format.
 
-    Args:
-        model: The aimz model to serialize.
-        output_path: The file path to which to write the serialized model.
-        serialization_format: The format in which to serialize the model. This should
-            be one of the following:
-            ``aimz.mlflow.SERIALIZATION_FORMAT_CLOUDPICKLE``.
+    Raises:
+        MlflowException: If the serialization format is unknown.
     """
     with output_path.open("wb") as out:
         if serialization_format == SERIALIZATION_FORMAT_CLOUDPICKLE:
@@ -445,13 +427,11 @@ def _load_model_from_local_file(
     path: str | Path,
     serialization_format: str,
 ) -> ImpactModel:
-    """Load an aimz model saved as an MLflow artifact on the local file system.
+    """Unpickle a model saved with the ``aimz`` flavor.
 
-    Args:
-        path: Local filesystem path to the MLflow Model saved with the ``aimz`` flavor
-        serialization_format: The format in which the model was serialized. This should
-            be one of the following:
-            ``aimz.mlflow.SERIALIZATION_FORMAT_CLOUDPICKLE``.
+    Raises:
+        MlflowException: If the serialization format is unknown, or pickle
+            deserialization is disabled through ``MLFLOW_ALLOW_PICKLE_DESERIALIZATION``.
     """
     if serialization_format not in SUPPORTED_SERIALIZATION_FORMATS:
         msg = (
@@ -480,13 +460,7 @@ def _load_model_from_local_file(
 
 
 def _load_model(path: str | Path) -> ImpactModel:
-    """Load Model Implementation.
-
-    Args:
-        path: Local filesystem path to
-            the MLflow Model's ``model.pkl`` artifact or
-            the top-level MLflow Model directory.
-    """
+    """Load the model of an MLflow Model directory, or of its ``model.pkl``."""
     path = Path(path)
     model_dir = path.parent if path.is_file() else path
     flavor_conf = _get_flavor_configuration(
@@ -504,33 +478,18 @@ def _load_model(path: str | Path) -> ImpactModel:
 
 
 def _load_pyfunc(path: str) -> _AimzModelWrapper:
-    """Load PyFunc implementation. Called by ``pyfunc.load_model``.
-
-    Args:
-        path: Local filesystem path to the MLflow Model with the ``aimz`` flavor.
-    """
+    """Load the pyfunc wrapper; called by :func:`mlflow.pyfunc.load_model`."""
     return _AimzModelWrapper(_load_model(path))
 
 
 def load_model(model_uri: str | Path, dst_path: str | None = None) -> ImpactModel:
-    """Load an aimz model from a local file or a run.
+    """Load an aimz model from a local path, a run, or the model registry.
 
     Args:
-        model_uri: The location, in URI format, of the MLflow model. For example:
-
-            - ``/Users/me/path/to/local/model``
-            - ``relative/path/to/local/model``
-            - ``s3://my_bucket/path/to/model``
-            - ``runs:/<mlflow_run_id>/run-relative/path/to/model``
-            - ``models:/<model_name>/<model_version>``
-            - ``models:/<model_name>/<stage>``
-
-            For more information about supported URI schemes, see
-            `Referencing Artifacts <https://www.mlflow.org/docs/latest/tracking.html#
-            artifact-locations>`_.
-        dst_path: The local filesystem path to which to download the model artifact.
-            This directory must already exist. If unspecified, a local output
-            path will be created.
+        model_uri: The URI of the MLflow model, such as a local path,
+            ``runs:/<run_id>/<path>``, or ``models:/<name>/<version>``.
+        dst_path: An existing local directory to download the model artifact to; by
+            default a local output path is created.
 
     Returns:
         An aimz model (an instance of :class:`~aimz.ImpactModel`).
@@ -568,20 +527,18 @@ class _AimzModelWrapper:
         data: object,
         params: dict[str, Any] | None = None,
     ) -> xr.DataTree | dict[str, np.ndarray]:
-        """Run predictions using the wrapped ImpactModel.
+        """Predict with the wrapped model.
 
         Args:
-            data: Model input data. A mapping is unpacked into keyword arguments, so
-                prediction keyword arguments pass through the pyfunc boundary.
-            params: Additional parameters to pass to the model for inference. With
-                ``return_datatree=False``, the predictive group is returned as a
-                dictionary of arrays, which a scoring server can serialize. An integer
-                ``seed`` sets the sampling key of the call.
+            data: The input, or a mapping of keyword arguments of
+                :meth:`~aimz.ImpactModel.predict`.
+            params: Further keyword arguments. ``return_datatree=False`` returns the
+                predictive group as a dictionary of arrays, which a scoring server
+                serializes, and an integer ``seed`` sets the sampling key.
 
         Returns:
-            Model predictions.
+            The predictions.
         """
-        # Results default to the in-memory store, without progress bars
         kwargs: dict[str, Any] = {
             "store": "memory",
             "progress": False,
@@ -602,11 +559,7 @@ class _AimzModelWrapper:
 
 
 def _log_kernel_source(model: ImpactModel) -> None:
-    """Log the source code of the model's kernel function as an artifact.
-
-    Args:
-        model: The model instance being fitted.
-    """
+    """Log the kernel's source code as an artifact."""
     try:
         mlflow.log_text(getsource(model.kernel), artifact_file="model.py")
     except Exception:
@@ -617,13 +570,7 @@ def _log_kernel_source(model: ImpactModel) -> None:
 
 
 def _log_elbo_losses(model: ImpactModel, run_id: str, model_id: str | None) -> None:
-    """Log the ELBO losses of the latest optimization as step-aware metrics.
-
-    Args:
-        model: The model instance being fitted.
-        run_id: The ID of the run to log the losses to.
-        model_id: The ID of the logged model to link the losses to, if any.
-    """
+    """Log the ELBO losses of the latest optimization as metrics by step."""
     try:
         with batch_metrics_logger(run_id, model_id=model_id) as metrics_logger:
             losses = np.asarray(cast("SVIRunResult", model.vi_result).losses)
@@ -642,18 +589,7 @@ def _run_params(
     args: tuple,
     kwargs: dict,
 ) -> dict[str, object]:
-    """Collect the parameters to log for a fitting-method call.
-
-    Args:
-        model: The model instance being fitted.
-        original: The original fitting method.
-        args: Positional arguments passed to the fitting method.
-        kwargs: Keyword arguments passed to the fitting method.
-
-    Returns:
-        The model attributes and explicitly passed fitting-method arguments to log as
-        parameters.
-    """
+    """Return the model attributes and fitting arguments to log as parameters."""
     from aimz.utils.data import ArrayLoader
 
     params = {
@@ -691,18 +627,7 @@ def _get_input_example(
     args: tuple,
     kwargs: dict,
 ) -> dict[str, np.ndarray] | np.ndarray:
-    """Copy an input example from the first several rows of the training data.
-
-    The example is copied so that it does not include any mutations from model
-    training.
-
-    Args:
-        model: The model instance being fitted.
-        args: Positional arguments passed to the fitting method.
-        kwargs: Keyword arguments passed to the fitting method.
-
-    Returns:
-        A copy of the first few rows of the training data.
+    """Copy the first rows of the training data as an input example.
 
     Raises:
         TypeError: If the training data is a data loader other than an
@@ -726,8 +651,7 @@ def _get_input_example(
     n_obs = len(np.asarray(X))
     input_example = {
         "X": np.array(np.asarray(X)[:INPUT_EXAMPLE_SAMPLE_ROWS]),
-        # Arrays aligned with `X` are sliced with it; other arrays are call constants
-        # and stay whole.
+        # Arrays aligned with `X` are sliced with it; the others are call constants
         **{
             k: np.array(
                 np.asarray(v)[:INPUT_EXAMPLE_SAMPLE_ROWS]
@@ -754,19 +678,9 @@ def _log_model_with_signature(
     log_input_examples: bool,
     log_model_signatures: bool,
 ) -> None:
-    """Log the fitted model, resolving its input example and signature.
+    """Log the fitted model with its input example and signature, when asked for.
 
-    Args:
-        model: The fitted model to log.
-        model_id: The ID of the logged model to which the artifacts belong.
-        input_example: An input example copied from the training data prior to
-            training, or ``None`` if collecting it failed.
-        input_example_exc: The exception raised while collecting the input example,
-            if any.
-        params: Prediction parameters to record in the signature, with their values
-            as defaults.
-        log_input_examples: Whether to log the input example along with the model.
-        log_model_signatures: Whether to log the model signature along with the model.
+    ``params`` are recorded in the signature with their values as defaults.
     """
 
     def get_input_example() -> dict[str, np.ndarray] | np.ndarray | None:
@@ -775,11 +689,8 @@ def _log_model_with_signature(
         return input_example
 
     def infer_model_signature(input_example: object) -> ModelSignature | None:
-        # `ImpactModel.predict` returns an `xarray.DataTree`, which schema inference
-        # does not support, so the signature is inferred through the same helper used
-        # at save time, with `params` recorded in the signature.
-        # Signature inference runs a real prediction; restore the rng key so that
-        # autologging does not change the model's future prediction stream.
+        # Schema inference does not support a DataTree, so the signature is inferred as
+        # at save time, with the model's key kept unchanged
         rng_key = model.rng_key
         try:
             signature = _infer_signature_from_input_example(
@@ -789,15 +700,13 @@ def _log_model_with_signature(
         finally:
             model._rng_key = rng_key
         if signature is not None and signature.params is not None:
-            # Inference records a value for every parameter, so the seed, which has
-            # none unless a call sets it, is added here.
+            # The seed has no default: a call sets it or the draws stay unseeded
             signature.params = ParamSchema(
                 [*signature.params.params, ParamSpec("seed", "long", default=None)],
             )
 
         return signature
 
-    # Will only resolve `input_example` and `signature` if `log_models` is `True`.
     input_example, signature = resolve_input_example_and_signature(
         get_input_example,
         infer_model_signature,
@@ -830,17 +739,7 @@ def _log_aimz_dataset(
     model_id: str | None,
     name: str | None = None,
 ) -> None:
-    """Log the dataset information to MLflow.
-
-    Args:
-        aimz_model: The model instance being fitted.
-        args: Positional arguments passed to the fitting method.
-        kwargs: Keyword arguments passed to the fitting method.
-        source: The dataset source to record.
-        context: The context tag of the dataset (e.g. ``"train"``).
-        model_id: The ID of the logged model to link the dataset to, if any.
-        name: The name of the dataset, if any.
-    """
+    """Log the training data as a run input, when it holds arrays."""
     from aimz.utils.data import ArrayLoader
 
     X = kwargs["X"] if "X" in kwargs else args[0]
@@ -899,62 +798,31 @@ def autolog(
     registered_model_name: str | None = None,
     extra_tags: dict[str, str] | None = None,
 ) -> None:
-    """Enable (or disable) and configure autologging from aimz to MLflow.
+    """Enable, configure, or disable autologging from aimz to MLflow.
 
-    Logs the following:
-
-        - parameters specified in :meth:`~aimz.ImpactModel.fit` and
-          :meth:`~aimz.ImpactModel.fit_on_batch`, together with ``param_input``,
-          ``param_output``, ``inference_method``, and, for ``SVI`` inference,
-          ``optimizer`` or, for ``MCMC`` inference, ``num_chains`` and
-          ``num_warmup``.
-        - the evidence lower bound (ELBO) loss on each optimization step
-          (``SVI`` inference only).
-        - the source code of the kernel function used by the model.
-        - the training dataset as a run input, if applicable.
-        - trained model, including:
-            - an example of valid input.
-            - inferred signature of the inputs and outputs of the model.
-
-    Autologging is performed when you call :meth:`~aimz.ImpactModel.fit` or
-    :meth:`~aimz.ImpactModel.fit_on_batch`.
+    Each call to :meth:`~aimz.ImpactModel.fit` or :meth:`~aimz.ImpactModel.fit_on_batch`
+    logs its arguments with ``param_input``, ``param_output``, ``inference_method``,
+    and the ``optimizer`` of an SVI or the ``num_chains`` and ``num_warmup`` of an
+    MCMC; the ELBO loss of each SVI step; the kernel's source code; the training data
+    as a run input, when it holds arrays; and the fitted model, with an input example
+    and an inferred signature.
 
     Args:
-        log_input_examples: If ``True``, input examples from training datasets are
-            collected and logged along with aimz model artifacts during training. If
-            ``False``, input examples are not logged.
-            Note: Input examples are MLflow model attributes
-            and are only collected if ``log_models`` is also ``True``.
-        log_model_signatures: If ``True``,
-            :py:class:`ModelSignatures <mlflow.models.ModelSignature>`
-            describing model inputs and outputs are collected and logged along
-            with aimz model artifacts during training. If ``False``,
-            signatures are not logged.
-            Note: Model signatures are MLflow model attributes
-            and are only collected if ``log_models`` is also ``True``.
-        log_models: If ``True``, trained models are logged as MLflow model artifacts.
-            If ``False``, trained models are not logged.
-            Input examples and model signatures, which are attributes of MLflow models,
-            are also omitted when ``log_models`` is ``False``.
-        log_datasets: If ``True``, train dataset information is logged to MLflow
-            Tracking if applicable. If ``False``, dataset information is not logged.
-        disable: If ``True``, disables the aimz autologging integration. If ``False``,
-            enables the aimz autologging integration.
-        exclusive: If ``True``, autologged content is not logged to user-created fluent
-            runs. If ``False``, autologged content is logged to the active fluent run,
-            which may be user-created.
-        disable_for_unsupported_versions: Accepted for parity with MLflow's built-in
-            autologging integrations. MLflow's version-compatibility gate only
-            applies to flavors shipped with MLflow, so this flag currently has no
-            effect for aimz.
-        silent: If ``True``, suppress all event logs and warnings from MLflow during
-            aimz autologging. If ``False``, show all events and warnings during aimz
+        log_input_examples: Whether to log an input example with the model.
+        log_model_signatures: Whether to log a
+            :py:class:`ModelSignature <mlflow.models.ModelSignature>` with the model.
+        log_models: Whether to log the fitted model, with its input example and
+            signature.
+        log_datasets: Whether to log the training data as a run input.
+        disable: Whether to disable the integration.
+        exclusive: Whether to keep autologged content out of user-created runs.
+        disable_for_unsupported_versions: Accepted for parity with MLflow's own
+            integrations; MLflow's version gate does not cover aimz.
+        silent: Whether to suppress MLflow's event logs and warnings during
             autologging.
-        registered_model_name: If given, each time a model is trained, it is registered
-            as a new model version of the registered model with this name.
-            The registered model is created if it does not already exist.
-        extra_tags: A dictionary of extra tags to set on each managed run created by
-            autologging.
+        registered_model_name: A registered model to add each fitted model to as a
+            new version, created if it does not exist.
+        extra_tags: Tags to set on each run that autologging creates.
     """
     from aimz.model.impact_model import ImpactModel
 
@@ -964,21 +832,9 @@ def autolog(
         *args: object,
         **kwargs: object,
     ) -> ImpactModel:
-        """Patch for the fitting method to log information.
-
-        Args:
-            original: The original method.
-            self: The instance being fitted.
-            *args: Positional arguments for the method.
-            **kwargs: Keyword arguments for the method.
-
-        Returns:
-            The fitted model returned by the original fitting method.
-        """
+        """Log the call, the losses, the data, and the model around ``original``."""
         autologging_client = MlflowAutologgingQueueingClient()
         run_id = cast("ActiveRun", mlflow.active_run()).info.run_id
-
-        # Log the source code of the kernel function as an artifact
         _log_kernel_source(self)
 
         params = _run_params(self, original, args, kwargs)
@@ -986,10 +842,7 @@ def autolog(
 
         param_logging_operations = autologging_client.flush(synchronous=False)
 
-        # Obtain a copy of a model input example from the training dataset prior to
-        # model training for subsequent use during model logging, ensuring that the
-        # input example and inferred model signature to not include any mutations from
-        # model training.
+        # Copied before training, so the example and the signature see no mutation
         input_example = None
         input_example_exc = None
         try:
@@ -1005,7 +858,6 @@ def autolog(
                 flavor=FLAVOR_NAME,
             ).model_id
 
-        # Whether to automatically log the training dataset as a dataset artifact.
         if log_datasets:
             try:
                 context_tags = context_registry.resolve_tags()
@@ -1017,18 +869,16 @@ def autolog(
                     e,
                 )
 
-        # aimz does not expose training callbacks, so the per-step ELBO losses are
-        # recorded from the fit result once training ends. A fit can raise after the
-        # optimization, e.g. on diverged parameters, so they are recorded either way.
+        # The losses are read from the fit result once it ends, also when the fit
+        # raises after the optimization
         vi_result = self.vi_result
         try:
-            # training model
             model = original(self, *args, **kwargs)
         finally:
             if self.vi_result is not vi_result:
                 _log_elbo_losses(self, run_id, model_id)
 
-        # `num_samples` is only known after training completes.
+        # `num_samples` is known only after training
         autologging_client.log_params(
             run_id=run_id,
             params={"num_samples": self._num_samples},
@@ -1040,15 +890,13 @@ def autolog(
                 {"num_samples": str(self._num_samples)},
             )
 
-        # Whether to automatically log the trained model based on boolean flag.
         if log_models:
             _log_model_with_signature(
                 model,
                 model_id,
                 input_example,
                 input_example_exc,
-                # Kernel keywords a signature can hold keep their training values as
-                # defaults, so pyfunc predictions do not fall back to the kernel's
+                # Scalar kernel keywords keep their training values as the defaults
                 {
                     "progress": False,
                     "return_datatree": True,

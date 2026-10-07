@@ -57,11 +57,7 @@ def test_save_load(
     synthetic_data: tuple[Array, Array],
     tmp_path: Path,
 ) -> None:
-    """A pickled model round-trips its posterior and predictions without a refit.
-
-    The posterior samples survive the round trip unchanged, and the loaded model
-    predicts draw-for-draw identically under the same explicit PRNG key.
-    """
+    """A pickled model keeps its posterior and predicts identically under one key."""
     X, _ = synthetic_data
     p = tmp_path / "model.pkl"
     with p.open("wb") as f:
@@ -93,11 +89,7 @@ def test_load_poisson_new_process(
     synthetic_data: tuple[Array, Array],
     tmp_path: Path,
 ) -> None:
-    """A pickled model with a Poisson likelihood trains and predicts in a new process.
-
-    After a training step, the loaded model predicts with its internal PRNG key
-    draw-for-draw identically to the original, instead of rejecting the unpickled keys.
-    """
+    """A pickled model trains and predicts in a new process with its unpickled keys."""
     X, _ = synthetic_data
     y = random.poisson(random.key(1), 1.0, (len(X),))
     im = ImpactModel(poisson, rng_key=random.key(42), inference=make_svi(poisson))

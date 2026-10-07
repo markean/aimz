@@ -32,8 +32,7 @@ def test_cleanup_models_reaches_every_instance(
     ]
     for im in models:
         im.fit_on_batch(X=X, y=y, num_steps=10, num_samples=10, progress=False)
-    # cloudpickle bypasses `__init__` (only `__setstate__` runs), so the restored
-    # instance must re-register itself in `_models`
+    # A cloudpickle-restored model must register itself again
     models.append(cloudpickle.loads(cloudpickle.dumps(models[0])))
     assert models[-1] in ImpactModel._models
 

@@ -103,15 +103,9 @@ logger = logging.getLogger(__name__)
 def _reduce_key(key: Array) -> str | tuple[Any, ...]:
     """Reduce a typed PRNG key for pickling.
 
-    A typed key pickles a copy of its PRNG implementation, which some samplers reject
-    in a new process, so a key of a registered implementation is rebuilt from its raw
-    data and the implementation's name instead.
-
-    Args:
-        key: The typed PRNG key to pickle.
-
-    Returns:
-        The callable and arguments that rebuild the key.
+    A pickled typed key carries a copy of its PRNG implementation, which some samplers
+    reject in a new process, so a key of a registered implementation is rebuilt from
+    its raw data and the implementation's name.
     """
     impl = random.key_impl(key)
     if isinstance(impl, str):
@@ -138,23 +132,20 @@ class ImpactModel(BaseModel):
 
         Args:
             kernel: A probabilistic model with `NumPyro`_ primitives.
-            rng_key: A pseudo-random number generator key.
-            inference: An inference method supported by `NumPyro`_, such as an instance
-                of :external:class:`~numpyro.infer.svi.SVI` or
-                :external:class:`~numpyro.infer.mcmc.MCMC`.
-            param_input: Name of the parameter in the ``kernel`` for the main input
-                data.
-            param_output: Name of the parameter in the ``kernel`` for the output data.
+            rng_key: A typed key array from :external:func:`jax.random.key`.
+            inference: An :external:class:`~numpyro.infer.svi.SVI` or
+                :external:class:`~numpyro.infer.mcmc.MCMC` instance.
+            param_input: Name of the ``kernel`` parameter for the input data.
+            param_output: Name of the ``kernel`` parameter for the output data.
 
         Raises:
             KernelValidationError: If the kernel signature does not meet the required
                 constraints.
             TypeError: If ``inference`` is neither SVI nor MCMC.
 
-        Warning:
-            The ``rng_key`` parameter should be provided as a **typed key array**
-            created with :external:func:`jax.random.key`, rather than a legacy
-            ``uint32`` key created with :external:func:`jax.random.PRNGKey`.
+        Warns:
+            AimzWarning: If ``rng_key`` is a legacy ``uint32`` key, which is converted
+                to a typed key array.
         """
         super().__init__(kernel, param_input, param_output)
         self._kernel_spec: KernelSpec | None = None
@@ -197,7 +188,6 @@ class ImpactModel(BaseModel):
             replicated = NamedSharding(mesh, spec=PartitionSpec())
         else:
             mesh = partitioned = replicated = None
-        # The streaming engine owns the sharded-callable and posterior placement caches
         self._streamer = _OutputStreamer(
             _RuntimeContext(
                 self.param_input,
@@ -260,13 +250,7 @@ class ImpactModel(BaseModel):
             return
 
     def __getstate__(self) -> dict:
-        """Return the state of the object excluding runtime attributes.
-
-        Returns:
-            The state of the object, excluding runtime attributes.
-        """
-        # Typed keys anywhere in the state, including those nested in the inference
-        # state, are pickled through `_reduce_key`.
+        """Return the state without the runtime attributes."""
         copyreg.pickle(type(random.key(0)), _reduce_key)
         return {
             k: v
@@ -283,27 +267,16 @@ class ImpactModel(BaseModel):
         }
 
     def __setstate__(self, state: dict[str, object]) -> None:
-        """Restore the state and reinitialize runtime attributes.
-
-        Args:
-            state: The state to restore, excluding the runtime attributes.
-        """
+        """Restore the state and reinitialize the runtime attributes."""
         self.__dict__.update(state)
-        # Models pickled before `_is_fitted` was initialized eagerly may lack it
+        # Attributes that models pickled by earlier versions lack
         self.__dict__.setdefault("_is_fitted", False)
-        # Models pickled before chains were kept stacked their draws as one chain
         self.__dict__.setdefault("_num_chains", 1)
-        # Models pickled before dimension names were recorded keep the default names
         self.__dict__.setdefault("_dims", {})
-        # Models pickled before site sizes were recorded count one value per observation
         self.__dict__.setdefault("_site_sizes", {})
-        # Models pickled before observed sites were recorded observe only the output
         self.__dict__.setdefault("_observed_sites", set())
-        # Models pickled before site dependencies were recorded check no intervention
-        # against them
         self.__dict__.setdefault("_site_parents", {})
         self._init_runtime_attrs()
-        # A sampler pickled with parallel chains may be loaded on fewer devices
         inference = self._inference
         if (
             isinstance(inference, MCMC)
@@ -347,11 +320,10 @@ class ImpactModel(BaseModel):
 
     @property
     def posterior(self) -> dict[str, Array] | None:
-        """Posterior samples by variable name, or ``None`` if not set.
+        """Posterior samples by site name, or ``None`` if not set.
 
-        Read-only by contract: mutating it in place is unsupported and desynchronizes
-        the internal device-placement cache. Use
-        :meth:`~aimz.ImpactModel.set_posterior_sample` or refit the model to change it.
+        Replace them through :meth:`~aimz.ImpactModel.set_posterior_sample` or a refit;
+        a change in place desynchronizes the device-placement cache.
         """
         return self._posterior
 
@@ -369,36 +341,27 @@ class ImpactModel(BaseModel):
     def vi_result(self) -> SVIRunResult | None:
         """Variational inference result, or ``None`` if not set.
 
-        :setter: This sets :external:data:`~numpyro.infer.svi.SVIRunResult` without
-            marking the model fitted. It does not perform posterior sampling; use
-            :meth:`~aimz.ImpactModel.sample` separately to obtain samples. Training
-            with :meth:`~aimz.ImpactModel.fit` or
-            :meth:`~aimz.ImpactModel.fit_on_batch` continues from its state.
+        :setter: Sets the :external:data:`~numpyro.infer.svi.SVIRunResult` without
+            marking the model fitted or drawing samples; :meth:`~aimz.ImpactModel.fit`
+            and :meth:`~aimz.ImpactModel.fit_on_batch` continue from its state.
         """
         return self._vi_result
 
     @vi_result.setter
     def vi_result(self, vi_result: SVIRunResult) -> None:
-        """Set the variational inference result manually.
+        """Set the variational inference result.
 
         Args:
-            vi_result: The result from a prior variational inference run.
-                It must be a NamedTuple or similar object with the following fields:
-                - params: Learned parameters from inference.
-                - state: Internal SVI state object.
-                - losses: Loss values recorded during optimization.
+            vi_result: The result of an SVI run, with ``params``, ``state``, and
+                ``losses``.
 
-        Note:
-            This stores the result but does not mark the model fitted or draw
-            posterior samples. Draw them with :meth:`~aimz.ImpactModel.sample` and
-            register them via :meth:`~aimz.ImpactModel.set_posterior_sample`.
-            Training with :meth:`~aimz.ImpactModel.fit` or
-            :meth:`~aimz.ImpactModel.fit_on_batch` continues from its state.
+        Warns:
+            FitWarning: If the losses contain NaN or Inf.
         """
         if not np.all(np.isfinite(vi_result.losses)):
             msg = "Loss contains NaN or Inf, indicating numerical instability."
-            # A fixed stacklevel: skipping aimz frames would attribute this to MLflow's
-            # autolog wrapper when it runs inside fit, and MLflow then hides it.
+            # Not `skip_file_prefixes`: skipping the aimz frames would blame MLflow's
+            # autolog wrapper, which then hides the warning
             warn(msg, category=FitWarning, stacklevel=2)
         self._vi_result = vi_result
         self._vi_state = vi_result.state
@@ -408,14 +371,7 @@ class ImpactModel(BaseModel):
         X: ArrayLike,
         kwargs: Mapping[str, object],
     ) -> dict[str, object]:
-        """Bind the input and extra arguments to the kernel signature.
-
-        Args:
-            X: Input data, bound to :attr:`~aimz.ImpactModel.param_input`.
-            kwargs: Additional arguments passed to the model.
-
-        Returns:
-            Mapping of fully bound keyword arguments to invoke the kernel.
+        """Bind the input and the extra arguments to the kernel signature.
 
         Raises:
             TypeError: If :attr:`~aimz.ImpactModel.param_input` or
@@ -431,22 +387,10 @@ class ImpactModel(BaseModel):
         *,
         with_output: bool,
     ) -> None:
-        """Trace the kernel (if needed) and cache default return sites.
+        """Trace the kernel and record its sites, unless a sufficient spec exists.
 
-        This method is idempotent: if a compatible spec already exists it is a no-op.
-        A compatible spec means: ``with_output`` is ``False`` and we already traced
-        once, or ``with_output`` is ``True`` and the existing spec was built with an
-        observed output (``output_observed=True``). An upgrade re-trace merges the
-        newly discovered sites with the existing spec, since a kernel may define
-        different sites depending on whether data are supplied.
-
-        Args:
-            args_bound: Mapping of fully bound keyword arguments to invoke the kernel
-                (includes the input and, when ``with_output`` is ``True``, the observed
-                output variable).
-            with_output: If ``True`` the trace is validated expecting the output site to
-                be observed. If ``False`` the trace may omit an observed output (e.g.,
-                prior predictive).
+        A spec traced without an observed output is upgraded by a trace with one,
+        merging the sites, since a kernel may define sites only when data are supplied.
         """
         if self._kernel_spec:
             if with_output:
@@ -472,14 +416,8 @@ class ImpactModel(BaseModel):
                 if v["type"] == "deterministic" and k != self.param_output
             ),
         )
-        # Name the dimensions of each site after its plates, outermost first, then the
-        # event dimensions named in its `infer` dictionary. A site whose names are not
-        # distinct strings other than `chain` and `draw`, or outnumber its dimensions,
-        # or whose leading axes do not follow its plates (a global quantity computed
-        # inside a plate, a site inside `scan`), keeps the default names, with a
-        # warning when the kernel named event dimensions. The values a site holds per
-        # draw, per observation when its leading axis follows the input's rows, size
-        # the streaming batches. A site the trace observes is described as observed.
+        # Dimension names: the plates, outermost first, then the event dimensions named
+        # in the site's `infer` dictionary
         rows = getattr(args_bound[self.param_input], "shape", ())[:1]
         for k, v in model_trace.items():
             if v["type"] not in {"sample", "deterministic"}:
@@ -488,13 +426,14 @@ class ImpactModel(BaseModel):
             event_dims = (v.get("infer") or {}).get("event_dims", ())
             names = (*(f.name for f in frames), *event_dims)
             shape = getattr(v["value"], "shape", ())
-            if (
+            names_apply = (
                 0 < len(names) <= len(shape)
                 and all(isinstance(name, str) for name in names)
                 and len(set(names)) == len(names)
                 and not {"chain", "draw"} & set(names)
                 and shape[: len(frames)] == tuple(f.size for f in frames)
-            ):
+            )
+            if names_apply:
                 self._dims[k] = names
             elif event_dims:
                 msg = (
@@ -506,6 +445,8 @@ class ImpactModel(BaseModel):
                     category=OutputWarning,
                     skip_file_prefixes=_SKIP_FILE_PREFIXES,
                 )
+            # Values per draw: per observation when the leading axis follows the input
+            # rows, else whole
             if hasattr(v["value"], "shape"):
                 self._site_sizes[k] = (
                     (math.prod(shape[1:]), 0)
@@ -514,8 +455,6 @@ class ImpactModel(BaseModel):
                 )
             if v.get("is_observed"):
                 self._observed_sites.add(k)
-        # The sample sites each site depends on, read from an abstract pass over the
-        # kernel, tell whether an intervention can reach the output.
         deps = get_dependencies(self.kernel, model_kwargs=dict(args_bound))
         for k, v in cast("Mapping[str, Mapping]", deps["prior_dependencies"]).items():
             self._site_parents[k] = set(v) - {k}
@@ -535,18 +474,12 @@ class ImpactModel(BaseModel):
         self,
         return_sites: str | Iterable[str] | None,
     ) -> tuple[str, ...]:
-        """Return a normalized tuple of site names.
-
-        Args:
-            return_sites: User-provided site name(s) or ``None``.
-
-        Returns:
-            A tuple of site names.
+        """Return the requested site names as a tuple, or the default return sites.
 
         Warns:
-            OutputWarning: If a requested site was not seen in any trace so far. The
+            OutputWarning: If a requested site was not seen in any trace so far; the
                 name is passed through, since a kernel may define it only at sampling
-                time. A name absent from the forward trace is dropped from the output.
+                time.
         """
         spec = self._kernel_spec
         if return_sites is None:
@@ -576,18 +509,10 @@ class ImpactModel(BaseModel):
         self,
         output_dir: str | Path | None,
     ) -> Path:
-        """Create the artifact path for one disk-backed call.
+        """Create a ``<UTC timestamp>_<caller>`` directory for one disk-backed call.
 
-        This function is called for its side effect: it creates a timestamped
-        subdirectory within the specified output directory.
-
-        Args:
-            output_dir: Base directory where the output subdirectory will be created.
-
-        Returns:
-            The created call-specific artifact path (``<UTC-timestamp>_<caller>``
-            under the resolved base directory); recorded on returned trees as the
-            ``artifact_path`` attribute.
+        Without an ``output_dir``, it goes under the model's temporary directory, which
+        is created on first use.
         """
         if output_dir is None:
             if self._temp_dir is None:
@@ -614,19 +539,11 @@ class ImpactModel(BaseModel):
         return artifact_path
 
     def _output_nbytes(self, return_sites: tuple[str, ...]) -> tuple[int, int]:
-        """Return the bytes of output that the return sites hold in each draw.
+        """Return the output bytes per draw, per observation and for the other sites.
 
-        The value counts come from the kernel's trace, and each value counts at the
-        width of the default float type, as the trace holds the observed data, whose
-        type the predictive output need not share. A site the trace did not record
-        counts as one value per observation.
-
-        Args:
-            return_sites: Names of the return sites.
-
-        Returns:
-            The bytes per observation, and those of the sites without an observation
-            axis.
+        Each value counts at the width of the default float type, since the trace holds
+        the observed data, whose type the output need not share. A site the trace did
+        not record counts as one value per observation.
         """
         itemsize = jnp.result_type(float).itemsize
         sizes = [self._site_sizes.get(site, (1, 0)) for site in return_sites]
@@ -645,27 +562,20 @@ class ImpactModel(BaseModel):
     ) -> tuple[Literal["obs", "draw"], int | None]:
         """Choose the sharding strategy and the batch size of a streamed call.
 
-        A posterior site shaped ``(num_samples, n_obs, ...)`` indexes the observation
-        axis of ``X``; data-parallel streaming splits that axis across devices or into
-        batches, which would sever such a site from the observations it indexes. Only
-        a single whole-input batch on a single device keeps it intact, so the call
-        otherwise runs draw-parallel, with a warning. A requested observation batch that
-        does not divide among the devices also warns. An automatic batch size keeps the
-        output of each batch, counted over every return site, within the memory budget.
+        A posterior site shaped ``(num_samples, n_obs, ...)`` cannot be split with the
+        observation axis: only a whole-input batch on a single device keeps it intact,
+        so the call otherwise runs draw-parallel, with a warning.
 
         Args:
-            X: Input array with observations on the leading axis, or a data loader
-                yielding batch mappings keyed by kernel parameter names.
+            X: Input array, or a data loader, which batches itself.
             shard_axis: The requested sharding strategy.
             batch_size: The requested batch size, or ``None`` to choose it.
             num_samples: Number of draws the call produces.
-            nbytes: Bytes of output in each draw, per observation and for the sites
-                without an observation axis, as :meth:`_output_nbytes` returns them.
+            nbytes: Output bytes per draw, as :meth:`_output_nbytes` returns them.
             posterior: The posterior samples the call conditions on, if any.
 
         Returns:
-            The sharding strategy and the batch size, which is ``None`` for a data
-            loader, as it batches itself.
+            The sharding strategy and the batch size, ``None`` for a data loader.
         """
         if not isinstance(X, ArrayLike):
             return shard_axis, None
@@ -741,30 +651,16 @@ class ImpactModel(BaseModel):
     ) -> dict[str, object]:
         """Describe what the draws of a predictive call depend on.
 
-        Besides the posterior samples and the arguments of the call, the draws depend
-        on the sampling key and, under ``shard_axis="obs"``, where each batch is drawn
-        with a key of its own, on the number of devices and the batch size.
-        :meth:`~aimz.ImpactModel.estimate_effect` compares the attributes between two
-        scenarios to tell whether their draws are paired. Every value is a string, an
-        integer, or a list of integers, so a tree written to a file keeps them.
-
-        Args:
-            rng_key: The sampling key of the call.
-            X: The input of a streamed call.
-            shard_axis: The sharding strategy of a streamed call.
-            batch_size: The batch size of a streamed call, or ``None`` for a data
-                loader.
-
-        Returns:
-            The attributes of the predictive group.
+        :meth:`~aimz.ImpactModel.estimate_effect` compares these attributes between two
+        scenarios to tell whether their draws are paired. The values are strings,
+        integers, or lists of integers, so a tree written to a file keeps them.
         """
         attrs: dict[str, object] = {"rng_key": random.key_data(rng_key).tolist()}
         if shard_axis is not None:
             attrs["shard_axis"] = shard_axis
         if shard_axis == "obs":
             attrs["num_devices"] = self._num_devices
-            # The built-in loader batches by its own size; any other loader may vary
-            # its batches freely, so it has no size to record.
+            # Another loader than `ArrayLoader` has no fixed batch size to record
             if isinstance(X, ArrayLoader):
                 batch_size = X.batch_size
             if batch_size is not None:
@@ -783,24 +679,9 @@ class ImpactModel(BaseModel):
     ) -> xr.DataTree:
         """Run one streamed write and assemble its output tree.
 
-        The single place where the result store forks: ``store="persistent"`` creates
-        the call-specific artifact path, streams into it (removing it again if the
-        stream fails), and reads it back lazily; ``store="memory"`` retains the
-        streamed batches in host memory and assembles the tree over them directly.
-
-        Args:
-            write: Runs the streamed write against the given artifact path (``None``
-                for in-memory accumulation) and returns the accumulated site arrays,
-                if any.
-            store: The result store, ``"persistent"`` or ``"memory"``.
-            output_dir: Base directory for disk-backed outputs.
-            group: Output group name for the resulting tree.
-            attrs: Attributes describing how the call draws its samples, as
-                :meth:`_draw_attrs` returns them.
-
-        Returns:
-            The output tree: lazy in both modes, Dask-backed by the Zarr store for
-            ``"persistent"`` and by the retained in-memory batches for ``"memory"``.
+        ``write`` streams into the artifact path, or into host memory for ``None``, and
+        returns the retained site arrays, if any. A failed persistent write removes its
+        artifact path.
         """
         artifact_path = (
             self._create_artifact_path(output_dir) if store == "persistent" else None
@@ -841,15 +722,15 @@ class ImpactModel(BaseModel):
 
         Args:
             X: Input array with observations on the leading axis.
-            intervention: A dictionary mapping sample site names to replacement values
-                used during predictive sampling. No intervention is applied if ``None``.
+            intervention: Replacement values by sample site name, applied while
+                sampling.
             num_samples: The number of samples to draw.
-            rng_key: A pseudo-random number generator key. By default, an internal key
-                is used and split as needed.
-            return_sites: Names of variables (sites) to return. If ``None``, samples
-                :attr:`~aimz.ImpactModel.param_output` and deterministic sites.
-            return_datatree: If ``True``, return a :external:class:`~xarray.DataTree`;
-                otherwise return a :class:`dict`.
+            rng_key: A pseudo-random number generator key, split from an internal key by
+                default.
+            return_sites: Names of the sites to return; by default the output and the
+                deterministic sites.
+            return_datatree: Return an :external:class:`~xarray.DataTree`, or a
+                :class:`dict` if ``False``.
             **kwargs: Additional arguments passed to the model.
 
         Returns:
@@ -914,43 +795,34 @@ class ImpactModel(BaseModel):
     ) -> xr.DataTree:
         """Draw samples from the prior predictive distribution.
 
-        Results are written to disk in the Zarr format, with computing and file writing
-        decoupled and executed concurrently. Pass ``store="memory"`` to accumulate the
-        results in host memory instead.
+        The batches are computed and written to a Zarr store concurrently, or kept in
+        host memory with ``store="memory"``.
 
         Args:
             X: Input array with observations on the leading axis, or a data loader
                 yielding batch mappings keyed by kernel parameter names.
-            intervention: A dictionary mapping sample site names to replacement values
-                used during predictive sampling. No intervention is applied if ``None``.
+            intervention: Replacement values by sample site name, applied while
+                sampling.
             num_samples: The number of samples to draw.
-            rng_key: A pseudo-random number generator key. By default, an internal key
-                is used and split as needed.
-            return_sites: Names of variables (sites) to return. If ``None``, samples
-                :attr:`~aimz.ImpactModel.param_output` and deterministic sites.
-            shard_axis: Multi-device sharding strategy. ``"obs"`` (default) shards the
-                input across devices and replicates the drawn samples. ``"draw"`` shards
-                the drawn samples across devices and replicates the input, which must be
-                an array, not a data loader.
-            batch_size: Size of each batch, taken from the input under
-                ``shard_axis="obs"`` and from the draws under ``shard_axis="draw"``.
-                Also used as the chunk size when storing results. If ``None``, it is
-                chosen automatically. Ignored for an existing data loader.
-            store: Where results accumulate. ``"persistent"`` (default) streams
-                batches to a
-                Zarr store under ``output_dir`` and returns a lazy, Dask-backed tree
-                recording its ``artifact_path`` attribute. ``"memory"`` retains the
-                batches in host memory as the returned tree's chunks.
-            output_dir: The directory where the outputs will be saved. If the specified
-                directory does not exist, it will be created automatically. If ``None``,
-                a model-owned temporary directory is used. A subdirectory is generated
-                within this directory to store the outputs; its path is recorded in
-                the returned tree's ``artifact_path`` attribute (on the root and the
-                group node). The temporary directory is removed by
+            rng_key: A pseudo-random number generator key, split from an internal key by
+                default.
+            return_sites: Names of the sites to return; by default the output and the
+                deterministic sites.
+            shard_axis: ``"obs"`` shards the input across devices and replicates the
+                draws; ``"draw"`` shards the draws and replicates the input, which must
+                then be an array.
+            batch_size: Observations per batch under ``"obs"``, draws per batch under
+                ``"draw"``, and the chunk size of the stored results. Chosen
+                automatically if ``None``; ignored for a data loader.
+            store: ``"persistent"`` streams the batches to a Zarr store under
+                ``output_dir`` and returns a lazy tree recording its ``artifact_path``;
+                ``"memory"`` keeps the batches in host memory.
+            output_dir: Directory for the Zarr store, created if needed; by default a
+                temporary directory of the model, removed by
                 :meth:`~aimz.ImpactModel.cleanup`,
-                :meth:`~aimz.ImpactModel.cleanup_models`, or when the model is
-                garbage-collected. Pass an explicit ``output_dir`` to keep results
-                beyond the model's lifetime.
+                :meth:`~aimz.ImpactModel.cleanup_models`, or garbage collection. Each
+                call writes its own subdirectory, recorded as the tree's
+                ``artifact_path`` attribute.
             progress: Whether to display a progress bar.
             **kwargs: Additional arguments passed to the model. Arrays aligned with
                 ``X`` are batched with it; other values are passed whole, arrays
@@ -973,9 +845,6 @@ class ImpactModel(BaseModel):
         See Also:
             :meth:`~aimz.ImpactModel.sample_prior_predictive_on_batch` for a
             single-batch, in-memory alternative.
-
-            :meth:`~aimz.ImpactModel.cleanup` to remove the temporary directory if
-            created.
         """
         _validate_shard_axis(shard_axis, X=X)
         _validate_batch_size(batch_size, X=X)
@@ -1012,11 +881,8 @@ class ImpactModel(BaseModel):
             )
             obs_names = {self.param_input, *batch}
 
-        # Build the kernel spec from a single-row slice so the trace runs on a tiny
-        # input. Only when the spec is not already cached (fitted models keep theirs),
-        # and before the return-site defaults resolve so they work even before fitting.
+        # Trace a one-row probe of the per-observation arguments
         if not (self._kernel_spec and self._kernel_spec.traced):
-            # Slice only the per-observation arguments; call constants stay whole
             probe = {
                 k: (cast("Any", v)[:1] if k in obs_names else v)
                 for k, v in args_bound.items()
@@ -1083,16 +949,13 @@ class ImpactModel(BaseModel):
 
         Args:
             num_samples: The number of posterior samples to draw.
-            rng_key: A pseudo-random number generator key. By default, an internal key
-                is used and split as needed. Ignored if the inference method is MCMC,
-                where the ``post_warmup_state`` property will be used to continue
-                sampling.
-            return_sites: Names of variables (sites) to return. If ``None``, samples
-                all latent sites. Ignored if the inference method is MCMC.
-            return_datatree: If ``True``, return a :external:class:`~xarray.DataTree`;
-                otherwise return a :class:`dict`.
-            **kwargs: Additional arguments passed to the model. Only relevant when the
-                inference method is MCMC.
+            rng_key: A pseudo-random number generator key, split from an internal key by
+                default. Ignored for MCMC, which continues its chain.
+            return_sites: Names of the sites to return; by default all latent sites.
+                Ignored for MCMC.
+            return_datatree: Return an :external:class:`~xarray.DataTree`, or a
+                :class:`dict` if ``False``.
+            **kwargs: Additional arguments passed to the model. Only used for MCMC.
 
         Returns:
             Posterior samples.
@@ -1112,13 +975,11 @@ class ImpactModel(BaseModel):
                     "`.sample()`."
                 )
                 raise NotFittedError(msg)
-            # Validate the provided parameters against the kernel's signature
             args_bound = signature(self.kernel).bind(**kwargs).arguments
             if self.param_output not in args_bound:
                 msg = f"{self.param_output!r} must be provided in `.sample()`."
                 raise TypeError(msg)
-            # Continue the chain for this call only, so later fits keep their own warmup
-            # and number of samples
+            # Continue the chain for this call only; later fits keep their own settings
             saved = self.inference.post_warmup_state, self.inference.num_samples
             self.inference.post_warmup_state = self.inference.last_state
             self.inference.num_samples = num_samples
@@ -1129,8 +990,7 @@ class ImpactModel(BaseModel):
                 )
             finally:
                 self.inference.post_warmup_state, self.inference.num_samples = saved
-                # Recompute the collection bounds from the restored number of samples,
-                # as each run does at its end
+                # The collection bounds follow the restored number of samples
                 self.inference._set_collection_params()
             posterior_samples = device_get(self.inference.get_samples())
         else:
@@ -1181,35 +1041,8 @@ class ImpactModel(BaseModel):
     ) -> xr.DataTree | dict[str, npt.NDArray]:
         """Draw samples from the posterior predictive distribution.
 
-        This method is a convenience alias for
-        :meth:`~aimz.ImpactModel.predict_on_batch`, with ``in_sample`` automatically
-        set to ``True``.
-
-        Args:
-            X: Input array with observations on the leading axis.
-            intervention: A dictionary mapping sample site names to replacement values
-                used during predictive sampling. No intervention is applied if ``None``.
-            rng_key: A pseudo-random number generator key. By default, an internal key
-                is used and split as needed.
-            return_sites: Names of variables (sites) to return. If ``None``, samples
-                :attr:`~aimz.ImpactModel.param_output` and deterministic sites.
-            return_datatree: If ``True``, return a :external:class:`~xarray.DataTree`;
-                otherwise return a :class:`dict`.
-            **kwargs: Additional arguments passed to the model.
-
-        Returns:
-            Posterior predictive samples. Posterior samples are included if available
-            when a :external:class:`~xarray.DataTree` is returned.
-
-        Raises:
-            NotFittedError: If the model is not fitted.
-            TypeError: If :attr:`~aimz.ImpactModel.param_input` or
-                :attr:`~aimz.ImpactModel.param_output` is passed as an argument.
-            ValueError: If ``intervention`` names a site that is not a sample site of
-                the kernel.
-
-        See Also:
-            :meth:`~aimz.ImpactModel.predict_on_batch`.
+        An alias of :meth:`~aimz.ImpactModel.predict_on_batch` with ``in_sample=True``;
+        see it for the arguments, errors, and warnings.
         """
         return self.predict_on_batch(
             X,
@@ -1237,67 +1070,8 @@ class ImpactModel(BaseModel):
     ) -> xr.DataTree:
         """Draw samples from the posterior predictive distribution.
 
-        This method is a convenience alias for :meth:`~aimz.ImpactModel.predict`, with
-        ``in_sample`` automatically set to ``True``.
-
-        Args:
-            X: Input array with observations on the leading axis, or a data loader
-                yielding batch mappings keyed by kernel parameter names.
-            intervention: A dictionary mapping sample site names to replacement values
-                used during predictive sampling. No intervention is applied if ``None``.
-            rng_key: A pseudo-random number generator key. By default, an internal key
-                is used and split as needed.
-            return_sites: Names of variables (sites) to return. If ``None``, samples
-                :attr:`~aimz.ImpactModel.param_output` and deterministic sites.
-            shard_axis: Multi-device sharding strategy.
-                ``"obs"`` (default) shards the input across devices and replicates the
-                posterior. ``"draw"`` shards the posterior across devices and replicates
-                the input, which must be an array, not a data loader. If the model has
-                no posterior samples, the data path is used regardless of
-                ``shard_axis``.
-            batch_size: Size of each batch, taken from the input under
-                ``shard_axis="obs"`` and from the draws under ``shard_axis="draw"``.
-                Also used as the chunk size when storing results. If ``None``, it is
-                chosen automatically.
-                Ignored if ``X`` is a data loader, in which case the data loader is
-                expected to handle batching internally.
-            store: Where results accumulate. ``"persistent"`` (default) streams
-                batches to a
-                Zarr store under ``output_dir`` and returns a lazy, Dask-backed tree
-                recording its ``artifact_path`` attribute. ``"memory"`` retains the
-                batches in host memory as the returned tree's chunks.
-            output_dir: The directory where the outputs will be saved. If the specified
-                directory does not exist, it will be created automatically. If ``None``,
-                a model-owned temporary directory is used. A subdirectory is generated
-                within this directory to store the outputs; its path is recorded in
-                the returned tree's ``artifact_path`` attribute (on the root and the
-                group node). The temporary directory is removed by
-                :meth:`~aimz.ImpactModel.cleanup`,
-                :meth:`~aimz.ImpactModel.cleanup_models`, or when the model is
-                garbage-collected. Pass an explicit ``output_dir`` to keep results
-                beyond the model's lifetime.
-            progress: Whether to display a progress bar.
-            **kwargs: Additional arguments passed to the model. Arrays aligned with
-                ``X`` are batched with it; other values are passed whole, arrays
-                traced and the rest static.
-
-        Returns:
-            Posterior predictive samples. Posterior samples are included if available.
-
-        Raises:
-            NotFittedError: If the model is not fitted.
-            TypeError: If :attr:`~aimz.ImpactModel.param_input` or
-                :attr:`~aimz.ImpactModel.param_output` is passed as an argument, or
-                ``shard_axis="draw"`` is used with a data loader ``X``.
-            ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``, ``store`` is
-                not ``"persistent"`` or ``"memory"``, ``output_dir`` is passed with
-                ``store="memory"``, ``X`` is 0-D or empty, or ``intervention`` names
-                a site that is not a sample site of the kernel.
-            NotImplementedError: If a return site's axis-1 size does not match the
-                input batch size (``shard_axis="obs"`` only).
-
-        See Also:
-            :meth:`~aimz.ImpactModel.predict()`.
+        An alias of :meth:`~aimz.ImpactModel.predict` with ``in_sample=True``; see it
+        for the arguments, errors, and warnings.
         """
         return self.predict(
             X,
@@ -1321,29 +1095,21 @@ class ImpactModel(BaseModel):
         rng_key: Array | None = None,
         **kwargs: object,
     ) -> tuple[SVIState, Array]:
-        """Run a single VI step on the given batch of data.
+        """Run one SVI step on a batch, keeping the state internally.
 
         Args:
             X: Input array with observations on the leading axis.
             y: Output array with observations on the leading axis.
-            rng_key: A pseudo-random number generator key. By default, an internal key
-                is used and split as needed. The key is only used for initialization if
-                the internal SVI state is not yet set.
+            rng_key: A pseudo-random number generator key, used only to initialize the
+                SVI state when it is not set yet; by default an internal key is split.
             **kwargs: Additional arguments passed to the model.
 
         Returns:
-            - Updated SVI state after the training step.
-
-            - Loss value as a scalar array.
+            The updated SVI state and the loss.
 
         Raises:
             TypeError: If :attr:`~aimz.ImpactModel.param_input` or
                 :attr:`~aimz.ImpactModel.param_output` is passed as an argument.
-
-        Note:
-            This method updates the internal SVI state on every call, so it is not
-            necessary to capture the returned state externally unless explicitly needed.
-            However, the returned loss value can be used for monitoring or logging.
         """
         _group_kwargs(kwargs, forbid=(self.param_input, self.param_output))
         batch = {self.param_input: X, self.param_output: y, **kwargs}
@@ -1358,8 +1124,7 @@ class ImpactModel(BaseModel):
                 self._rng_key, rng_key = random.split(self._rng_key)
             state = svi.init(rng_key, **batch)
             self._vi_state = state if self._vi_state is None else self._vi_state
-        # Trace the array leaves and hold every other value static, so arguments such
-        # as integers and strings can set shapes or drive control flow in the kernel.
+        # Array leaves are traced; every other value is static
         if self._fn_vi_update is None:
             svi = cast("SVI", self.inference)
 
@@ -1387,51 +1152,33 @@ class ImpactModel(BaseModel):
         progress: bool = True,
         **kwargs: object,
     ) -> Self:
-        """Fit the impact model to the provided batch of data.
+        """Fit the model to one batch of data.
 
-        This method behaves differently depending on the inference method specified at
-        initialization:
-
-        - SVI
-            Runs variational inference on the provided batch by invoking the
-            :external:meth:`~numpyro.infer.svi.SVI.run` method of the
-            :external:class:`~numpyro.infer.svi.SVI` instance from `NumPyro`_ to
-            estimate the posterior distribution, then draws samples from it.
-
-        - MCMC
-            Runs posterior sampling by invoking the
-            :external:meth:`~numpyro.infer.mcmc.MCMC.run` method of the
-            :external:class:`~numpyro.infer.mcmc.MCMC` instance from `NumPyro`_.
+        With SVI, runs the optimization on the batch and draws posterior samples from
+        the guide; with MCMC, runs the sampler. Training continues from an existing SVI
+        state; create a new model to start over.
 
         Args:
             X: Input array with observations on the leading axis.
             y: Output array with observations on the leading axis.
-            num_steps: Number of steps for variational inference optimization. Ignored
-                if the inference method is MCMC.
-            num_samples: The number of posterior samples to draw. Ignored if the
-                inference method is MCMC.
-            rng_key: A pseudo-random number generator key. By default, an internal key
-                is used and split as needed.
-            progress: Whether to display a progress bar. Ignored if the inference method
-                is MCMC.
+            num_steps: Number of optimization steps. Ignored for MCMC.
+            num_samples: The number of posterior samples to draw. Ignored for MCMC.
+            rng_key: A pseudo-random number generator key, split from an internal key by
+                default.
+            progress: Whether to display a progress bar. Ignored for MCMC.
             **kwargs: Additional arguments passed to the model.
 
         Returns:
-            The fitted model instance, enabling method chaining.
+            The fitted model instance.
 
         Raises:
             TypeError: If :attr:`~aimz.ImpactModel.param_input` or
                 :attr:`~aimz.ImpactModel.param_output` is passed as an argument.
             ValueError: If ``y`` does not share ``X``'s leading-axis size.
-
-        Note:
-            This method continues training from the existing SVI state if available. To
-            start training from scratch, create a new model instance.
         """
         X, y = _validate_X_y_to_jax(X, y=y)
 
         _group_kwargs(kwargs, forbid=(self.param_input, self.param_output))
-        # Validate the provided parameters against the kernel's signature
         args_bound = (
             signature(self.kernel)
             .bind(**{self.param_input: X, self.param_output: y, **kwargs})
@@ -1460,8 +1207,7 @@ class ImpactModel(BaseModel):
             )
             self._vi_state = self.vi_result.state
 
-            # The draw below rejects diverged guide parameters; clear the previous
-            # fit first so a failed refit does not keep a stale posterior.
+            # Clear the previous fit first: the draw below rejects diverged parameters
             self._is_fitted = False
             self._posterior = None
             logger.info("Drawing posterior samples (num_samples=%d)", num_samples)
@@ -1504,12 +1250,11 @@ class ImpactModel(BaseModel):
         shuffle: bool = True,
         **kwargs: object,
     ) -> Self:
-        """Fit the impact model to the provided data using epoch-based training.
+        """Fit the model with variational inference over minibatches.
 
-        This method implements an epoch-based training loop, where the data is iterated
-        over in minibatches for a specified number of epochs. Variational inference is
-        performed by repeatedly updating the model parameters on each minibatch, and
-        then posterior samples are drawn from the fitted model.
+        The data is iterated in minibatches for a number of epochs, then posterior
+        samples are drawn from the guide. Training continues from an existing SVI
+        state; create a new model to start over.
 
         Args:
             X: Input array with observations on the leading axis, or a data loader
@@ -1518,23 +1263,21 @@ class ImpactModel(BaseModel):
             y: Output array with observations on the leading axis. Must be ``None``
                 if ``X`` is a data loader.
             num_samples: The number of posterior samples to draw.
-            rng_key: A pseudo-random number generator key. By default, an internal key
-                is used and split as needed.
+            rng_key: A pseudo-random number generator key, split from an internal key by
+                default.
             progress: Whether to display a progress bar and the average loss of each
                 epoch.
-            batch_size: The number of data points processed at each step of variational
-                inference. If ``None``, the entire dataset is used as a single batch in
-                each epoch. Ignored if ``X`` is a data loader, in which case the data
-                loader is expected to handle batching internally.
-            epochs: The number of epochs for variational inference optimization.
-            shuffle: Whether to shuffle the data at each epoch. Ignored if ``X`` is a
-                data loader.
+            batch_size: Observations per optimization step; the whole data if ``None``.
+                Ignored for a data loader, which batches itself.
+            epochs: The number of passes over the data.
+            shuffle: Whether to shuffle the data at each epoch. Ignored for a data
+                loader.
             **kwargs: Additional arguments passed to the model. Arrays aligned with
                 ``X`` are batched with it; other values are passed whole, arrays
                 traced and the rest static.
 
         Returns:
-            The fitted model instance, enabling method chaining.
+            The fitted model instance.
 
         Raises:
             TypeError: If :attr:`~aimz.ImpactModel.param_input` or
@@ -1550,14 +1293,8 @@ class ImpactModel(BaseModel):
                 the whole data. The check runs on the first ``batch_size``
                 observations of an array input or of an
                 :class:`~aimz.utils.data.ArrayLoader`; another data loader has no size
-                to compare with and is not checked.
-
-        Note:
-            This method continues training from the existing SVI state if available.
-            To start training from scratch, create a new model instance. Beyond the
-            scale of the output site, it does not check whether the model or guide is
-            written to support subsampling semantics (e.g., using `NumPyro`_'s
-            :external:func:`~numpyro.primitives.subsample` or similar constructs).
+                to compare with. Nothing else about the kernel's support for
+                subsampling is checked.
         """
         _validate_aligned_inputs(X, y=y)
         if y is None and isinstance(X, ArrayLike):
@@ -1588,8 +1325,7 @@ class ImpactModel(BaseModel):
             shuffle=shuffle,
             **kwargs,
         )
-        # Validate the provided parameters against the kernel's signature; the fields
-        # of a data loader may supply the remaining ones
+        # A loader's fields may supply the arguments `bind_partial` leaves open
         names = {self.param_input, self.param_output}
         if isinstance(X, ArrayLoader) and (missing := names - X.dataset.arrays.keys()):
             msg = f"The data loader has no field named {min(missing)!r}."
@@ -1603,9 +1339,8 @@ class ImpactModel(BaseModel):
         # Commit model state only once the inputs are accepted
         self._rng_key = rng_key_model
 
-        # A kernel written for the whole data weighs each batch as all of it. The
-        # scale that a batch gives the output site shows whether the kernel scales
-        # it to the full data; another loader has no size to compare with.
+        # The scale a batch gives the output site tells whether the kernel scales it to
+        # the whole data
         if isinstance(dataloader, ArrayLoader) and dataloader.batch_size < len(
             dataloader.dataset,
         ):
@@ -1613,8 +1348,7 @@ class ImpactModel(BaseModel):
                 k: v[: dataloader.batch_size]
                 for k, v in dataloader.dataset.arrays.items()
             }
-            # An output site that is not an observed sample site fails validation
-            # on the first batch
+            # The first batch already rejected an output site that is not observed
             site = (
                 trace(seed(self.kernel, rng_seed=self.rng_key))
                 .get_trace(**batch, **kwargs_extra)
@@ -1640,7 +1374,6 @@ class ImpactModel(BaseModel):
             pbar = tqdm(
                 dataloader,
                 desc=f"Epoch {epoch + 1}/{epochs}",
-                # Other loaders need not define a length
                 total=len(dataloader) if isinstance(dataloader, ArrayLoader) else None,
                 disable=not progress,
                 dynamic_ncols=True,
@@ -1666,15 +1399,11 @@ class ImpactModel(BaseModel):
             if pending is not None:
                 losses_epoch.append(device_get(pending))
             if not losses_epoch:
-                # An exhausted one-shot iterator would otherwise skip the epoch silently
                 msg = (
                     f"The data loader yielded no batches in epoch {epoch + 1}; pass a "
                     "loader that can be iterated once per epoch."
                 )
                 raise ValueError(msg)
-            # Host-side bookkeeping: the per-step losses are already on the host, so
-            # stacking or accumulating them as device arrays would only add
-            # host-to-device round trips and retain one device scalar per step.
             losses.extend(losses_epoch)
             if progress:
                 tqdm.write(
@@ -1687,8 +1416,7 @@ class ImpactModel(BaseModel):
             losses=np.asarray(losses),
         )
 
-        # The draw below rejects diverged guide parameters; clear the previous
-        # fit first so a failed refit does not keep a stale posterior.
+        # Clear the previous fit first: the draw below rejects diverged parameters
         self._is_fitted = False
         self._posterior = None
         logger.info("Drawing posterior samples (num_samples=%d)", num_samples)
@@ -1708,30 +1436,20 @@ class ImpactModel(BaseModel):
         return self
 
     def is_fitted(self) -> bool:
-        """Check fitted status.
-
-        Returns:
-            ``True`` if the model is fitted, ``False`` otherwise.
-
-        """
+        """Return whether the model holds posterior samples."""
         return self._is_fitted
 
     def describe(self) -> dict[str, object]:
-        """Describe the kernel and the posterior that the model holds.
-
-        The description is read from what the model has recorded: the kernel's
-        signature, the trace that fitting or sampling took, and the posterior samples.
-        It holds plain Python values only.
+        """Describe the kernel and the posterior the model holds.
 
         Returns:
-            A dictionary with the kernel's name and arguments, the names of the input
-            and output parameters, the inference method, whether the model is fitted,
-            the number of chains and draws, and the sites known from the trace or from
-            the posterior. Each site maps to its ``kind`` (``"latent"``,
-            ``"observed"``, or ``"deterministic"``), its ``dims`` after ``chain`` and
-            ``draw`` in the output trees where the trace named them after plates or
-            event dimensions (``None`` where the default names ``<site>_dim_<i>``
-            apply), and, for a site in the posterior, the ``draw_shape`` of one draw.
+            Plain Python values: the kernel's name and arguments, the input and output
+            parameter names, the inference method, the fitted state with the number of
+            chains and draws, and the sites known from the trace or the posterior. Each
+            site maps to its ``kind`` (``"latent"``, ``"observed"``, or
+            ``"deterministic"``), its ``dims`` after ``chain`` and ``draw`` where the
+            trace named them (``None`` for the default ``<site>_dim_<i>`` names), and,
+            for a site in the posterior, the ``draw_shape`` of one draw.
         """
         spec = self._kernel_spec
         sample_sites = spec.sample_sites if spec else ()
@@ -1771,57 +1489,34 @@ class ImpactModel(BaseModel):
         *,
         num_chains: int = 1,
     ) -> Self:
-        """Set posterior samples for the model.
-
-        This method sets externally obtained posterior samples on the model instance,
-        enabling downstream analysis without requiring a call to
-        :meth:`~aimz.ImpactModel.fit` or :meth:`~aimz.ImpactModel.fit_on_batch`.
-
-        It is primarily intended for workflows where posterior sampling is performed
-        manually, for example, using `NumPyro`_'s
-        :external:class:`~numpyro.infer.svi.SVI` (or
-        :external:class:`~numpyro.infer.mcmc.MCMC`) with the
-        :external:class:`~numpyro.infer.util.Predictive` API, and the resulting
-        posterior samples are injected into the model for further use.
-
-        Internally, ``batch_ndims`` is set to ``1`` by default to correctly handle the
-        batch dimensions of the posterior samples. For more information, refer to the
-        `NumPyro documentation <https://num.pyro.ai/en/stable/utilities.html#predictive>`__.
+        """Set posterior samples drawn elsewhere, in place of a fit.
 
         Args:
-            posterior_sample: Posterior samples to set for the model, with the draws
-                along the leading axis of each array.
+            posterior_sample: Posterior samples by site name, with the draws along the
+                leading axis of each array. Include only latent sample sites: the
+                output site is removed with a warning, and a deterministic site would
+                override the values :meth:`~aimz.ImpactModel.log_likelihood` recomputes.
             num_chains: Number of chains the draws are stacked from, chain by chain.
                 Output trees then keep the chains along their ``chain`` dimension.
 
         Returns:
-            The model instance, treated as fitted with posterior samples set, enabling
-            method chaining.
+            The model instance, treated as fitted.
 
         Raises:
             ValueError: If ``posterior_sample`` is empty, a value is 0-D, or the batch
                 shapes in ``posterior_sample`` are inconsistent.
 
         Warns:
+            AimzWarning: If the output site is in ``posterior_sample``; it is removed.
             OutputWarning: If the kernel has been traced and ``posterior_sample`` has
                 no draws for one of its latent sample sites, which the predictive
                 methods then draw from the prior.
 
         Note:
-            The kernel is not traced when samples are set this way, so ``deterministic``
-            sites are not discovered; predictive methods return only the output site by
-            default. Request ``deterministic`` (or other) sites explicitly via
-            ``return_sites``.
-
-            Include only latent sample sites. The output site is removed with a
-            warning, but ``deterministic`` sites must be excluded by the caller:
-            if present, they override the values recomputed by
-            :meth:`~aimz.ImpactModel.log_likelihood`.
-
-            If the kernel has ``param`` sites, also set
-            :attr:`~aimz.ImpactModel.vi_result`: posterior predictive sampling and
-            :meth:`~aimz.ImpactModel.log_likelihood` take the values of these sites
-            from it and use the initial values when it is not set.
+            The kernel is not traced here, so deterministic sites are not discovered
+            and must be requested through ``return_sites``. If the kernel has ``param``
+            sites, also set :attr:`~aimz.ImpactModel.vi_result`, or the predictive
+            methods use their initial values.
         """
         if self.param_output in posterior_sample:
             posterior_sample = {
@@ -1890,36 +1585,23 @@ class ImpactModel(BaseModel):
         return_datatree: bool = True,
         **kwargs: object,
     ) -> xr.DataTree | dict[str, npt.NDArray]:
-        """Predict the output based on the fitted model.
+        """Predict the output based on the fitted model, for one in-memory batch.
 
-        This method returns predictions for a single batch of input data and is better
-        suited for:
-
-            1) Models incompatible with :meth:`~aimz.ImpactModel.predict` due to their
-            posterior sample shapes.
-
-            2) Scenarios where writing results to files (e.g., disk, cloud storage)
-            is not desired.
-
-            3) Smaller datasets, as this method may be slower due to limited
-            parallelism.
+        Suited to small inputs, to models whose posterior samples cannot stream, and to
+        callers that want no files written.
 
         Args:
             X: Input array with observations on the leading axis.
-            intervention: A dictionary mapping sample site names to replacement values
-                used during predictive sampling. No intervention is applied if ``None``.
-            rng_key: A pseudo-random number generator key. By default, an internal key
-                is used and split as needed.
-            in_sample: Specifies the group where posterior predictive samples are stored
-                in the returned output. If ``True``, samples are stored in the
-                ``posterior_predictive`` group, indicating they were generated based on
-                data used during model fitting. If ``False``, samples are stored in the
-                ``predictions`` group, indicating they were generated based on
-                out-of-sample data.
-            return_sites: Names of variables (sites) to return. If ``None``, samples
-                :attr:`~aimz.ImpactModel.param_output` and deterministic sites.
-            return_datatree: If ``True``, return a :external:class:`~xarray.DataTree`;
-                otherwise return a :class:`dict`.
+            intervention: Replacement values by sample site name, applied while
+                sampling.
+            rng_key: A pseudo-random number generator key, split from an internal key by
+                default.
+            in_sample: Put the samples in the ``posterior_predictive`` group, or in
+                ``predictions`` if ``False``.
+            return_sites: Names of the sites to return; by default the output and the
+                deterministic sites.
+            return_datatree: Return an :external:class:`~xarray.DataTree`, or a
+                :class:`dict` if ``False``.
             **kwargs: Additional arguments passed to the model.
 
         Returns:
@@ -2001,55 +1683,36 @@ class ImpactModel(BaseModel):
     ) -> xr.DataTree:
         """Predict the output based on the fitted model.
 
-        This method performs posterior predictive sampling to generate model-based
-        predictions. It is optimized for batch processing of large input data and is not
-        recommended for use in loops that process only a few inputs at a time. Results
-        are written to disk in the Zarr format, with sampling and file writing decoupled
-        and executed concurrently. Pass ``store="memory"`` to accumulate the results in
-        host memory instead.
+        The batches are sampled and written to a Zarr store concurrently, or kept in
+        host memory with ``store="memory"``.
 
         Args:
             X: Input array with observations on the leading axis, or a data loader
                 yielding batch mappings keyed by kernel parameter names.
-            intervention: A dictionary mapping sample site names to replacement values
-                used during predictive sampling. No intervention is applied if ``None``.
-            rng_key: A pseudo-random number generator key. By default, an internal key
-                is used and split as needed.
-            in_sample: Specifies the group where posterior predictive samples are stored
-                in the returned output. If ``True``, samples are stored in the
-                ``posterior_predictive`` group, indicating they were generated based on
-                data used during model fitting. If ``False``, samples are stored in the
-                ``predictions`` group, indicating they were generated based on
-                out-of-sample data.
-            return_sites: Names of variables (sites) to return. If ``None``, samples
-                :attr:`~aimz.ImpactModel.param_output` and deterministic sites.
-            shard_axis: Multi-device sharding strategy.
-                ``"obs"`` (default) shards the input across devices and replicates the
-                posterior. ``"draw"`` shards the posterior across devices and replicates
-                the input, which must be an array, not a data loader. If the model has
-                no posterior samples, the data path is used regardless of
-                ``shard_axis``.
-            batch_size: Size of each batch, taken from the input under
-                ``shard_axis="obs"`` and from the draws under ``shard_axis="draw"``.
-                Also used as the chunk size when storing results. If ``None``, it is
-                chosen automatically.
-                Ignored if ``X`` is a data loader, in which case the data loader is
-                expected to handle batching internally.
-            store: Where results accumulate. ``"persistent"`` (default) streams
-                batches to a
-                Zarr store under ``output_dir`` and returns a lazy, Dask-backed tree
-                recording its ``artifact_path`` attribute. ``"memory"`` retains the
-                batches in host memory as the returned tree's chunks.
-            output_dir: The directory where the outputs will be saved. If the specified
-                directory does not exist, it will be created automatically. If ``None``,
-                a model-owned temporary directory is used. A subdirectory is generated
-                within this directory to store the outputs; its path is recorded in
-                the returned tree's ``artifact_path`` attribute (on the root and the
-                group node). The temporary directory is removed
-                by :meth:`~aimz.ImpactModel.cleanup`,
-                :meth:`~aimz.ImpactModel.cleanup_models`, or when the model is
-                garbage-collected. Pass an explicit ``output_dir`` to keep results
-                beyond the model's lifetime.
+            intervention: Replacement values by sample site name, applied while
+                sampling.
+            rng_key: A pseudo-random number generator key, split from an internal key by
+                default.
+            in_sample: Put the samples in the ``posterior_predictive`` group, or in
+                ``predictions`` if ``False``.
+            return_sites: Names of the sites to return; by default the output and the
+                deterministic sites.
+            shard_axis: ``"obs"`` shards the input across devices and replicates the
+                posterior; ``"draw"`` shards the posterior and replicates the input,
+                which must then be an array. Without posterior samples, ``"obs"`` is
+                used.
+            batch_size: Observations per batch under ``"obs"``, draws per batch under
+                ``"draw"``, and the chunk size of the stored results. Chosen
+                automatically if ``None``; ignored for a data loader.
+            store: ``"persistent"`` streams the batches to a Zarr store under
+                ``output_dir`` and returns a lazy tree recording its ``artifact_path``;
+                ``"memory"`` keeps the batches in host memory.
+            output_dir: Directory for the Zarr store, created if needed; by default a
+                temporary directory of the model, removed by
+                :meth:`~aimz.ImpactModel.cleanup`,
+                :meth:`~aimz.ImpactModel.cleanup_models`, or garbage collection. Each
+                call writes its own subdirectory, recorded as the tree's
+                ``artifact_path`` attribute.
             progress: Whether to display a progress bar.
             **kwargs: Additional arguments passed to the model. Arrays aligned with
                 ``X`` are batched with it; other values are passed whole, arrays
@@ -2074,10 +1737,6 @@ class ImpactModel(BaseModel):
             OutputWarning: If an intervened site reaches the output only through sites
                 whose values are taken from the posterior or intervened on, so that
                 the draws do not respond to it.
-
-        See Also:
-            :meth:`~aimz.ImpactModel.cleanup` to remove the temporary directory if
-            created.
         """
         _check_is_fitted(self)
         _validate_intervention(intervention, kernel_spec=self._kernel_spec)
@@ -2091,8 +1750,7 @@ class ImpactModel(BaseModel):
         _validate_batch_size(batch_size, X=X)
         _validate_store(store, output_dir=output_dir)
         _validate_aligned_inputs(X, y=None)
-        # No posterior to shard means draw-parallel has nothing to chunk, so it behaves
-        # identically to the data-parallel path.
+        # Without a posterior there is nothing to shard by draw
         if not self.posterior:
             shard_axis = "obs"
 
@@ -2162,35 +1820,28 @@ class ImpactModel(BaseModel):
     ) -> xr.DataTree:
         """Estimate the effect of an intervention.
 
-        This computes (intervention - baseline) for every variable in the shared
-        predictive group, preserving sampling (chain/draw) dimensions. Precomputed
-        outputs of :meth:`~aimz.ImpactModel.sample_prior_predictive` give the effect
-        under the prior, also for an unfitted model; pass the same ``rng_key`` to both
-        calls so the scenarios share their prior draws.
+        The effect is intervention minus baseline for every site of the shared
+        predictive group, draw by draw. Precomputed outputs of
+        :meth:`~aimz.ImpactModel.sample_prior_predictive` give the effect under the
+        prior, also for an unfitted model; pass the same ``rng_key`` to both calls so
+        the scenarios share their draws.
 
         Args:
             output_baseline: Precomputed output for the baseline scenario.
             output_intervention: Precomputed output for the intervention scenario.
-            args_baseline: Input arguments for the baseline scenario. Passed to the
-                prediction method to compute predictions if ``output_baseline`` is not
-                provided. Ignored if ``output_baseline`` is already given.
-            args_intervention: Input arguments for the intervention scenario. Passed to
-                the prediction method to compute predictions if
-                ``output_intervention`` is not provided. Ignored if
-                ``output_intervention`` is already given.
-            on_batch: If ``True``, use
+            args_baseline: Arguments of the prediction method for the baseline
+                scenario, used when ``output_baseline`` is not given.
+            args_intervention: Arguments of the prediction method for the intervention
+                scenario, used when ``output_intervention`` is not given.
+            on_batch: Compute the scenarios with
                 :meth:`~aimz.ImpactModel.predict_on_batch` instead of
-                :meth:`~aimz.ImpactModel.predict` when computing predictions from
-                ``args_baseline`` or ``args_intervention``. Ignored when precomputed
-                outputs are provided.
+                :meth:`~aimz.ImpactModel.predict`.
 
         Returns:
-            The estimated impact of an intervention. Posterior samples are included if
-            available, except in an effect under the prior. When a scenario's output
-            was streamed to disk, the effect tree records that scenario's
-            call-specific artifact path in an ``artifact_path_baseline`` /
-            ``artifact_path_intervention`` root attribute; in-memory results set
-            neither.
+            The effect of the intervention, with the posterior samples unless the
+            effect is under the prior. A scenario streamed to disk records its
+            artifact path in the ``artifact_path_baseline`` or
+            ``artifact_path_intervention`` attribute.
 
         Raises:
             NotFittedError: If the model is not fitted and ``output_baseline`` or
@@ -2207,10 +1858,6 @@ class ImpactModel(BaseModel):
                 labels, if they hold different posterior samples, or if the output,
                 or any site under the prior, was not drawn in both with the same key,
                 sharding strategy, and batching.
-
-        See Also:
-            :meth:`~aimz.ImpactModel.cleanup` to remove the temporary directory if
-            created.
         """
         if output_baseline is None or output_intervention is None:
             _check_is_fitted(self)
@@ -2233,15 +1880,13 @@ class ImpactModel(BaseModel):
             )
             raise ValueError(msg)
 
-        # Ask predict_on_batch for a tree, which names its own predictive group
         _predict = cast(
             "Callable[..., xr.DataTree]",
             self.predict_on_batch if on_batch else self.predict,
         )
         overrides = {"return_datatree": True} if on_batch else {}
 
-        # Lazily generated scenarios share one sampling key, so their contrast carries
-        # only the intervention.
+        # Lazily generated scenarios share one sampling key
         if (
             output_baseline is None
             and output_intervention is None
@@ -2270,8 +1915,7 @@ class ImpactModel(BaseModel):
         out = xr.DataTree(name="root")
         out[group] = dt_intervention[group] - dt_baseline[group]
         # The key and the batching decide the draws of the sites a call samples anew:
-        # every site under the prior, and the output otherwise. Attributes read back
-        # from a file may be arrays, hence the array comparison.
+        # every site under the prior, and the output otherwise
         attrs_baseline = dt_baseline[group].attrs
         attrs_intervention = dt_intervention[group].attrs
         unmatched = [
@@ -2305,9 +1949,6 @@ class ImpactModel(BaseModel):
                 num_chains=self._num_chains,
                 dims=self._dims,
             )
-        # Record each scenario's artifact path when the scenario was computed by a
-        # disk-backed method. In-memory (on_batch / *_on_batch / store="memory")
-        # results carry no artifact attrs.
         out.attrs.update(
             {
                 f"artifact_path_{suffix}": path
@@ -2335,9 +1976,8 @@ class ImpactModel(BaseModel):
     ) -> xr.DataTree:
         """Compute the log-likelihood of the data under the given model.
 
-        Results are written to disk in the Zarr format, with computing and file writing
-        decoupled and executed concurrently. Pass ``store="memory"`` to accumulate the
-        results in host memory instead.
+        The batches are computed and written to a Zarr store concurrently, or kept in
+        host memory with ``store="memory"``.
 
         Args:
             X: Input array with observations on the leading axis, or a data loader
@@ -2345,33 +1985,22 @@ class ImpactModel(BaseModel):
                 observed output.
             y: Output array with observations on the leading axis. Must be ``None``
                 if ``X`` is a data loader.
-            shard_axis: Multi-device sharding strategy.
-                ``"obs"`` (default) shards the input across devices and replicates the
-                posterior. ``"draw"`` shards the posterior across devices and replicates
-                the input, which must be an array, not a data loader. If the model has
-                no posterior samples, the data path is used regardless of
-                ``shard_axis``.
-            batch_size: Size of each batch, taken from the input under
-                ``shard_axis="obs"`` and from the draws under ``shard_axis="draw"``.
-                Also used as the chunk size when storing results. If ``None``, it is
-                chosen automatically.
-                Ignored if ``X`` is a data loader, in which case the data loader is
-                expected to handle batching internally.
-            store: Where results accumulate. ``"persistent"`` (default) streams
-                batches to a
-                Zarr store under ``output_dir`` and returns a lazy, Dask-backed tree
-                recording its ``artifact_path`` attribute. ``"memory"`` retains the
-                batches in host memory as the returned tree's chunks.
-            output_dir: The directory where the outputs will be saved. If the specified
-                directory does not exist, it will be created automatically. If ``None``,
-                a model-owned temporary directory is used. A subdirectory is generated
-                within this directory to store the outputs; its path is recorded in
-                the returned tree's ``artifact_path`` attribute (on the root and the
-                group node). The temporary directory is removed
-                by :meth:`~aimz.ImpactModel.cleanup`,
-                :meth:`~aimz.ImpactModel.cleanup_models`, or when the model is
-                garbage-collected. Pass an explicit ``output_dir`` to keep results
-                beyond the model's lifetime.
+            shard_axis: ``"obs"`` shards the input across devices and replicates the
+                posterior; ``"draw"`` shards the posterior and replicates the input,
+                which must then be an array. Without posterior samples, ``"obs"`` is
+                used.
+            batch_size: Observations per batch under ``"obs"``, draws per batch under
+                ``"draw"``, and the chunk size of the stored results. Chosen
+                automatically if ``None``; ignored for a data loader.
+            store: ``"persistent"`` streams the batches to a Zarr store under
+                ``output_dir`` and returns a lazy tree recording its ``artifact_path``;
+                ``"memory"`` keeps the batches in host memory.
+            output_dir: Directory for the Zarr store, created if needed; by default a
+                temporary directory of the model, removed by
+                :meth:`~aimz.ImpactModel.cleanup`,
+                :meth:`~aimz.ImpactModel.cleanup_models`, or garbage collection. Each
+                call writes its own subdirectory, recorded as the tree's
+                ``artifact_path`` attribute.
             progress: Whether to display a progress bar.
             **kwargs: Additional arguments passed to the model. Arrays aligned with
                 ``X`` are batched with it; other values are passed whole, arrays
@@ -2392,10 +2021,6 @@ class ImpactModel(BaseModel):
                 ``y`` does not share ``X``'s leading-axis size.
             NotImplementedError: If a return site's axis-1 size does not match the
                 input batch size (``shard_axis="obs"`` only).
-
-        See Also:
-            :meth:`~aimz.ImpactModel.cleanup` to remove the temporary directory if
-            created.
         """
         _check_is_fitted(self)
         _validate_shard_axis(shard_axis, X=X)
@@ -2410,12 +2035,11 @@ class ImpactModel(BaseModel):
             )
             raise ValueError(msg)
 
-        # No posterior to shard means draw-parallel has nothing to chunk, so it behaves
-        # identically to the data-parallel path (a single-draw result).
+        # Without a posterior there is nothing to shard by draw
         if not self.posterior:
             shard_axis = "obs"
         # One value of the default float type per observation, whatever the output's
-        # own shape and dtype
+        # own shape and type
         shard_axis, batch_size = self._plan_execution(
             X,
             shard_axis=shard_axis,
@@ -2425,10 +2049,8 @@ class ImpactModel(BaseModel):
             posterior=self.posterior,
         )
 
-        # With no posterior, the single-draw result samples every latent site from the
-        # prior, which requires a seeded kernel. A posterior from fitting covers every
-        # latent site, so no key is consumed and the bare kernel keeps a stable identity
-        # for the compilation cache; a partial posterior raises an error.
+        # Without a posterior every latent site is drawn from the prior, which needs a
+        # seeded kernel; with one, the bare kernel keeps its identity for the cache
         kernel = (
             self.kernel if self.posterior else seed(self.kernel, rng_seed=self.rng_key)
         )
@@ -2463,17 +2085,13 @@ class ImpactModel(BaseModel):
         )
 
     def cleanup(self) -> None:
-        """Clean up the temporary directory created for storing outputs.
+        """Remove the model's temporary directory, if it exists.
 
-        If the temporary directory was never created or has already been cleaned up,
-        this method does nothing. It does not delete any explicitly specified output
-        directory. While the temporary directory is typically removed automatically
-        during garbage collection, this behavior is not guaranteed, so calling this
-        method explicitly is recommended for timely resource release.
+        An explicit ``output_dir`` is left alone. Garbage collection also removes the
+        directory, but not at a guaranteed time.
 
         See Also:
-            :meth:`~aimz.ImpactModel.cleanup_models`: clean temporary directories for
-            all tracked model instances.
+            :meth:`~aimz.ImpactModel.cleanup_models`
         """
         if hasattr(self, "_temp_dir") and self._temp_dir is not None:
             temp_dir = self._temp_dir.name
@@ -2483,11 +2101,10 @@ class ImpactModel(BaseModel):
 
     @classmethod
     def cleanup_models(cls) -> None:
-        """Clean up temporary directories for all :class:`~aimz.ImpactModel` instances.
+        """Remove the temporary directories of all :class:`~aimz.ImpactModel` instances.
 
         See Also:
-            :meth:`~aimz.ImpactModel.cleanup`: clean the temporary directory for a
-            single instance.
+            :meth:`~aimz.ImpactModel.cleanup`
         """
         for model in cls._models:
             try:

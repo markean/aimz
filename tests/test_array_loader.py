@@ -53,8 +53,7 @@ def test_array_loader() -> None:
     with pytest.warns(AimzWarning, match="Legacy `uint32` PRNGKey detected"):
         ArrayLoader(ArrayDataset(y=y), rng_key=random.PRNGKey(42))
 
-    # Loaders built with the same key yield identical shuffled batches, and each
-    # epoch holds every row exactly once in a fresh order
+    # Same key, same batches; each epoch is a fresh permutation of every row
     loaders = [
         ArrayLoader(
             ArrayDataset(y=y), rng_key=random.key(42), batch_size=7, shuffle=True

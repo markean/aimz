@@ -19,30 +19,18 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class KernelSpec:
-    """A dataclass describing the kernel structure.
+    """The kernel structure that a trace recorded.
 
-    Stores only the minimal information needed for downstream operations without
-    re-tracing the NumPyro model.
+    A trace with an observed output upgrades a spec traced without one, merging the
+    sites. Sites that appear only under specific arguments are not discovered and must
+    be requested through ``return_sites``.
 
     Attributes:
-        traced:
-            ``True`` once at least one successful trace has been performed.
-        sample_sites:
-            Names of the sample sites, latent and observed, encountered during tracing.
-        return_sites:
-            Names of default return sites. Always includes the output first, followed by
-            any deterministic sites. Latent sample sites are excluded.
-        output_observed:
-            ``True`` if the output site was observed in the validating trace, used to
-            distinguish prior-only from observed traces.
-
-    Notes:
-        Re-tracing only upgrades a prior-only spec (``output_observed`` is ``False``) to
-        one that includes an observed output, merging the newly discovered sites with
-        the existing ones; the user kernel is assumed immutable after construction, and
-        its site structure is assumed independent of the call's arguments. Sites that
-        appear only under specific arguments are not discovered by later calls and must
-        be requested explicitly via ``return_sites``.
+        traced: Whether a trace has run.
+        sample_sites: The sample sites, latent and observed, seen in traces.
+        return_sites: The default return sites: the output, then the deterministic
+            sites.
+        output_observed: Whether the output site was observed in the validating trace.
     """
 
     traced: bool

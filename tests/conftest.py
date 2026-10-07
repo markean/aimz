@@ -39,11 +39,7 @@ def _chdir_tmp_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(scope="module")
 def synthetic_data() -> tuple[Array, Array]:
-    """Generate 100 observations of 10 features with a linear Gaussian outcome.
-
-    Returns:
-        The input data and output data.
-    """
+    """Generate 100 observations of 10 features with a linear Gaussian outcome."""
     key_w, key_b, key_x, key_e = random.split(random.key(42), 4)
     w = random.normal(key_w, (10,))
     b = random.normal(key_b)
@@ -85,11 +81,7 @@ def mlm(X: Array, y: Array | None = None) -> None:
 
 
 def lm_subsample(X: Array, y: Array | None = None) -> None:
-    """Linear regression consuming subsampled batches through its arguments.
-
-    The plate declares the full data size of the ``synthetic_data`` fixture, with
-    ``subsample_size`` tracking the batch passed in.
-    """
+    """Linear regression whose plate scales a batch to the 100 rows of the data."""
     n_features = X.shape[1]
     w = sample("w", dist.Normal(jnp.zeros(n_features), jnp.ones(n_features)))
     b = sample("b", dist.Normal(0, 1))

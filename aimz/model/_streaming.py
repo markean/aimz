@@ -12,13 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Streaming engine that runs the kernel across shards and streams the outputs.
+"""Streaming engine: runs the kernel across shards and streams the outputs.
 
-:class:`_OutputStreamer` owns the streaming subsystem extracted from
-:class:`~aimz.ImpactModel`: it builds (and caches) the sharded callables, places the
-posterior on devices, and drives the data- and draw-parallel write paths into a Zarr
-store on disk or accumulated in host memory, per the request. The model passes a stable
-:class:`_RuntimeContext` once and a per-call :class:`_WriteRequest` each time.
+:class:`_OutputStreamer` caches the sharded callables and the posterior placement, and
+drives the data- and draw-parallel write paths into a Zarr store or host memory.
 """
 
 from __future__ import annotations
@@ -98,14 +95,7 @@ class _WriteRequest:
 
 
 class _Step(NamedTuple):
-    """Per-item inputs for one sharded forward call, shared by both write strategies.
-
-    A write strategy assembles a ``_Step`` for each item it streams (an observation
-    batch or a draw chunk) and hands it to a ``compute`` closure that forwards it to the
-    sharded sampler / log-likelihood function. The strategy fills the fields differently
-    (whole vs. sliced), but the ``compute`` signature is identical, which keeps the
-    strategy streamers kind-agnostic.
-    """
+    """Per-item inputs of one sharded forward call, for a batch or a draw chunk."""
 
     num: int
     """Draw count for the call: global count (data) or per-device count (draw)."""
@@ -122,21 +112,13 @@ class _Step(NamedTuple):
 
 
 class _OutputStreamer:
-    """Run the kernel across shards and stream the per-item outputs to a destination.
+    """Run the kernel across shards and stream the per-item outputs.
 
-    Constructed once per model from a :class:`_RuntimeContext`; owns the jit/shard_map
-    callable cache and the posterior device-placement cache. Exposes
-    :meth:`write_predictive` (predict / prior predictive) and
-    :meth:`write_log_likelihood`, each dispatching to the data- or draw-parallel
-    streamer by the request's ``shard_axis`` strategy.
+    One per model; caches the sharded callables and the posterior placement.
     """
 
     def __init__(self, ctx: _RuntimeContext) -> None:
-        """Initialize the streamer with its runtime context and empty caches.
-
-        Args:
-            ctx: Stable sharding configuration for the owning model.
-        """
+        """Set the runtime context and empty caches."""
         self._ctx = ctx
         self._fn_cache: dict[tuple[str, str, int, int], Callable] = {}
         self._posterior_device_cache: dict[Sharding | None, dict[str, Array]] = {}
@@ -150,23 +132,10 @@ class _OutputStreamer:
         n_kwargs_array: int,
         n_kwargs_const: int,
     ) -> Callable:
-        """Build a sharded callable once and cache it.
+        """Build a sharded callable once per key and cache it.
 
-        Keyed by ``(kind, shard_axis, n_kwargs_array, n_kwargs_const)``: the argument
-        counts are baked into the ``shard_map`` ``in_specs``, so a call with a different
-        arity needs its own callable rather than reusing a stale one. The callable is
-        built with ``factory`` (which selects the partition specs) on first use.
-
-        Args:
-            kind: Cache namespace for the callable (e.g. ``"predict"``,
-                ``"prior_predictive"``, ``"log_likelihood"``).
-            shard_axis: Multi-device sharding strategy the callable is built for.
-            factory: Builder that creates the sharded callable from the mesh and arity.
-            n_kwargs_array: Number of per-observation keyword arguments.
-            n_kwargs_const: Number of array leaves in the call constants.
-
-        Returns:
-            The sharded callable for the given key, built on first use and cached.
+        The argument counts are baked into the ``shard_map`` in-specs, so each arity
+        needs its own callable.
         """
         key = (kind, shard_axis, n_kwargs_array, n_kwargs_const)
         fn = self._fn_cache.get(key)
@@ -186,21 +155,11 @@ class _OutputStreamer:
         req: _WriteRequest,
         batch: Mapping[str, Array | np.ndarray] | None = None,
     ) -> tuple[tuple[str, ...], dict]:
-        """Resolve the per-observation keyword names and the call constants.
+        """Return the per-observation keyword names and the call constants.
 
-        The names drive both the ``shard_map`` in-spec arity and the by-name binding
-        in ``dispatch``, so they come from a single source and cannot drift. The
-        per-observation arguments are the fields of the retained first observation
-        batch; every other call kwarg is a constant of the call, passed whole to every
-        batch. Draw streaming holds the whole input, so all its kwargs are constants.
-
-        Args:
-            req: The streamed write job.
-            batch: The first observation batch, or ``None`` for draw streaming.
-
-        Returns:
-            - The ordered ``kwargs_key`` (the per-observation keyword names).
-            - The call constants by name.
+        The per-observation arguments are the fields of the first batch; every other
+        keyword argument is a constant of the call. Draw streaming has no batch, so all
+        of its keyword arguments are constants.
         """
         if batch is None:
             return (), dict(req.kwargs)
@@ -221,19 +180,14 @@ class _OutputStreamer:
         Iterator,
         dict[str, Array | np.ndarray],
     ]:
-        """Open one observation iterator and retain its validated first batch.
-
-        Args:
-            req: The streamed write job.
-            y: Observed outputs supplied alongside an array input.
+        """Open the observation stream and retain its validated first batch.
 
         Returns:
-            The loader, its iterator including the first batch, and that batch.
+            The loader, its iterator with the first batch put back, and that batch.
 
         Raises:
-            TypeError: If ``req.X`` is neither an array nor a data loader yielding
-                batch mappings.
-            ValueError: If the loader is empty.
+            TypeError: If ``req.X`` is neither an array nor a loader of batch mappings.
+            ValueError: If the loader is empty, or a keyword argument repeats a field.
         """
         loader, _ = _setup_inputs(
             X=req.X,
@@ -258,8 +212,7 @@ class _OutputStreamer:
             )
             raise TypeError(msg)
         first, _ = _prepare_batch(first, param_input=self._ctx.param_input)
-        # A data loader's fields are its per-observation arguments, so a keyword
-        # argument with a field's name would be silently ignored.
+        # A keyword argument named like a loader field would be ignored silently
         if not isinstance(req.X, ArrayLike) and (
             duplicates := sorted(first.keys() & req.kwargs.keys())
         ):
@@ -278,34 +231,16 @@ class _OutputStreamer:
     ) -> dict[str, Array]:
         """Return the posterior placed on devices, cached by ``sharding``.
 
-        The cache is rebuilt whenever ``posterior`` is replaced (by identity); each
-        distinct placement coexists in the same cache. Used by the data-parallel path
-        to replicate the posterior once across calls and to keep a host-backed posterior
-        device-resident; the draw-parallel path places its per-chunk slices itself.
-
-        Args:
-            posterior: The posterior samples to place, or empty/``None`` when unset.
-            sharding: Placement to commit the posterior to, or ``None`` to place it on
-                the default device (e.g. single-device).
-
-        Returns:
-            The posterior samples by variable name, placed on devices, or an empty
-            dict when no posterior samples are set. The placement stays cached (and
-            device-resident) until ``posterior`` is replaced.
+        The cache is rebuilt when ``posterior`` is replaced, by identity.
         """
         if not posterior:
             return {}
         if self._posterior_device_src is not posterior:
             self._posterior_device_cache = {}
-            # Keep the source posterior alive while its placements are cached, so the
-            # identity check above stays meaningful until it is next replaced.
             self._posterior_device_src = posterior
         cache = self._posterior_device_cache
         if sharding not in cache:
-            # sharding=None (no mesh): device_put converts a host-backed (NumPy)
-            # posterior to the default device once, instead of it being re-transferred
-            # on every downstream jit call; device-backed arrays pass through without a
-            # copy.
+            # Placed once, instead of being transferred on every jit call
             cache[sharding] = device_put(posterior, device=sharding)
 
         return cache[sharding]
@@ -331,35 +266,16 @@ class _OutputStreamer:
     ) -> dict[str, DaskArray] | None:
         """Stream predictive samples to the request's destination.
 
-        Builds the predictive ``compute`` (one sharded-sampler call per item) and
-        dispatches to the strategy streamer. ``shard_axis="draw"`` chunks the draw axis;
-        ``shard_axis="obs"`` shards the observation axis and conditions every batch on
-        the replicated posterior, or, for prior predictive, on the global prior
-        samples drawn once from a single-element probe (a sharded probe would propagate
-        the mesh axis onto global sites via JAX's sharding-in-types).
-
-        Args:
-            req: The streamed write job.
-            kernel: Probabilistic model with `NumPyro`_ primitives.
-            rng_key: Pseudo-random number generator key for sampling.
-            group: Output group (``"posterior_predictive"``, ``"predictions"``, or
-                ``"prior_predictive"``).
-            posterior: The posterior to condition on (ignored for prior predictive).
-            params: Values of the kernel's ``param`` sites and mutable state, passed
-                dynamically to the sampler and replicated across devices.
-            intervention: A dictionary mapping sample site names to replacement values
-                used during predictive sampling. Passed dynamically to the sampler
-                so the cached function keeps a stable kernel.
-            stream: An already opened observation stream, when used to trace the model.
+        Under ``shard_axis="obs"`` every batch conditions on the replicated posterior,
+        or, under the prior, on the global sites drawn once from a one-row probe, since
+        a sharded probe would propagate the mesh axis onto global sites.
 
         Returns:
-            The site arrays, Dask-backed over the retained host batches, when
-            ``req.artifact_path`` is ``None``; ``None`` for a Zarr-backed write.
-
-        .. _NumPyro: https://num.pyro.ai/
+            The site arrays over the retained host batches when ``req.artifact_path``
+            is ``None``; ``None`` for a Zarr-backed write.
         """
-        # Per-observation values join the input as reserved batch fields, so they are
-        # batched, padded, and sharded with it; the rest stay replicated constants.
+        # Per-observation intervention values are batched with the input as reserved
+        # fields
         n_obs = (
             len(cast("Sized", req.X))
             if req.shard_axis == "obs" and isinstance(req.X, ArrayLike)
@@ -424,9 +340,6 @@ class _OutputStreamer:
             )
 
         if group == "prior_predictive":
-            # Single-row probe from the retained first batch draws the global latents
-            # once, so every batch shares them; the stream is neither consumed nor
-            # restarted and the trace runs on a tiny input.
             first = stream[2]
             rng_key, rng_subkey = random.split(rng_key)
             rng_keys = random.split(rng_subkey, num=req.num_samples)
@@ -444,8 +357,8 @@ class _OutputStreamer:
                 )
 
             samples = probe({name: arr[:1] for name, arr in first.items()})
-            # A site whose shape follows the row count is per-observation; leave it
-            # out so each batch draws it fresh.
+            # A site whose shape follows the row count is per observation, so each
+            # batch draws it
             shapes = eval_shape(
                 probe,
                 {name: arr[:1].repeat(2, axis=0) for name, arr in first.items()},
@@ -479,25 +392,14 @@ class _OutputStreamer:
         params: Mapping[str, object] | None,
         y: ArrayLike | None,
     ) -> dict[str, DaskArray] | None:
-        """Stream the log-likelihood to the request's destination.
-
-        Builds the log-likelihood ``compute`` (one sharded call per item, keyed by the
-        output site) and dispatches to the strategy streamer.
-
-        Args:
-            req: The streamed write job (its single return site is the output site).
-            kernel: Probabilistic model with `NumPyro`_ primitives, seeded by the
-                caller when tracing needs to sample latent sites (empty posterior).
-            posterior: The posterior to condition on.
-            params: Values of the kernel's ``param`` sites and mutable state, passed
-                dynamically and replicated across devices.
-            y: Output data.
+        """Stream the log-likelihood of the output site to the request's destination.
 
         Returns:
-            The site arrays, Dask-backed over the retained host batches, when
-            ``req.artifact_path`` is ``None``; ``None`` for a Zarr-backed write.
+            The site arrays over the retained host batches when ``req.artifact_path``
+            is ``None``; ``None`` for a Zarr-backed write.
 
-        .. _NumPyro: https://num.pyro.ai/
+        Raises:
+            ValueError: If a loader's batches lack the output field.
         """
         site = self._ctx.param_output
         stream = self.setup_stream(req, y=y) if req.shard_axis == "obs" else None
@@ -580,38 +482,17 @@ class _OutputStreamer:
         rng_key: Array | None,
         desc: str,
     ) -> dict[str, DaskArray] | None:
-        """Stream over data-parallel batches into the request's destination.
+        """Stream over observation batches, each conditioned on the whole posterior.
 
-        Shards the observation axis across devices and conditions every batch on the
-        whole (replicated) ``samples``. For each batch it assembles a :class:`_Step`
-        and dispatches ``compute`` (asynchronous); collection blocks on the result and
-        trims the observation padding (axis 1). ``_write_loop`` keeps consecutive
-        batches in flight, so the next batch computes while the previous one is pulled
-        to host and written.
-
-        Args:
-            req: The streamed write job.
-            compute: Closure that runs the sharded sampler / log-likelihood on a
-                :class:`_Step`.
-            stream: The loader, opened iterator, and retained first batch.
-            samples: The whole (replicated) posterior to condition every batch on.
-            kwargs_key: The per-observation keyword names, whose batch arrays form each
-                step's ``tail`` in this order.
-            rng_key: Per-batch key source, or ``None`` for log-likelihood.
-            desc: Description of the progress bar over the batches.
-
-        Returns:
-            The strategy's site arrays for in-memory accumulation, or ``None`` for a
-            Zarr-backed write.
+        ``dispatch`` runs ``compute`` asynchronously; ``finalize`` waits and trims the
+        observation padding.
         """
         dataloader, batches, first = stream
-        # Only the built-in loader guarantees exact length and aligned chunks.
-        # External lengths may be estimates or raise; execution never queries them.
+        # Only `ArrayLoader` guarantees its length and aligned chunks
         known_size = type(dataloader) is ArrayLoader
         n_batches = len(dataloader) if known_size else None
-        # The built-in loader's only shorter batch is the last; padding it to the first
-        # batch's size keeps one compiled shape for at most one batch of padded rows.
-        # Other loaders may vary their batch sizes freely, so theirs stay unpadded.
+        # `ArrayLoader`'s last batch is padded to the first one's size, keeping one
+        # compiled shape; other loaders vary their batches freely
         size = first[self._ctx.param_input].shape[0] if known_size else 0
 
         def dispatch(item: object) -> tuple[dict[str, Array], int]:
@@ -629,11 +510,10 @@ class _OutputStreamer:
                 raise ValueError(msg)
             subkey = None
             if rng_key is not None:
-                # One fresh key per batch; the sampler splits it into per-draw keys.
+                # One key per batch, which the sampler splits into per-draw keys
                 rng_key, subkey = random.split(rng_key)
                 subkey = device_put(subkey, self._ctx.replicated_sharding)
-            # Bind by name in `kwargs_key` order, so positions match the sharded
-            # callable's in-specs.
+            # In `kwargs_key` order, matching the callable's in-specs
             tail = tuple(batch[name] for name in kwargs_key)
             step = _Step(
                 num=req.num_samples,
@@ -686,35 +566,14 @@ class _OutputStreamer:
         rng_key: Array | None,
         desc: str,
     ) -> dict[str, DaskArray] | None:
-        """Stream over draw chunks into the request's destination.
+        """Stream over draw chunks, holding the whole input replicated on every device.
 
-        Shards the draw axis across devices and holds the whole input resident:
-        replicates the input and output once (keyword arguments arrive as replicated
-        call constants), splits the per-draw keys once, and for each chunk slices a
-        posterior chunk (``_prepare_draw_chunk``), assembles
-        a :class:`_Step`, and dispatches ``compute`` (asynchronous); collection blocks
-        on the result and trims to the chunk's true draw count (axis 0).
-        ``_write_loop`` keeps consecutive chunks in flight, so the next chunk computes
-        while the previous one is pulled to host and written.
-
-        Args:
-            req: The streamed write job.
-            compute: Closure that runs the sharded sampler / log-likelihood on a
-                :class:`_Step`.
-            y: Output data, for log-likelihood; ``None`` otherwise.
-            posterior: The posterior to slice per draw chunk; empty for prior predictive
-                (each chunk draws fresh).
-            rng_key: Per-draw key source, or ``None`` for log-likelihood.
-            desc: Description of the progress bar over the draw chunks.
-
-        Returns:
-            The strategy's site arrays for in-memory accumulation, or ``None`` for a
-            Zarr-backed write.
+        ``dispatch`` runs ``compute`` asynchronously on a padded posterior chunk;
+        ``finalize`` waits and trims the padding draws.
         """
         batch_size = cast("int", req.batch_size)
         n_chunks = -(-req.num_samples // batch_size)
-        # The public draw-parallel entry points reject data loaders, so `req.X` is
-        # always an array here.
+        # The entry points reject data loaders under `draw`
         x_dev = _replicate(
             cast("ArrayLike", req.X),
             sharding=self._ctx.replicated_sharding,
@@ -749,8 +608,7 @@ class _OutputStreamer:
                 tail=(),
             )
             out = compute(step)
-            # Start the device-to-host copy as soon as each result is ready, so
-            # `finalize` only waits on it instead of initiating it.
+            # Start the device-to-host copy as soon as the result is ready
             tree.map(lambda arr: arr.copy_to_host_async(), out)
 
             return out, stop - start

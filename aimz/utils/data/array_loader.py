@@ -53,18 +53,17 @@ class ArrayLoader:
 
         Args:
             dataset: The dataset to load.
-            rng_key: A pseudo-random number generator key. Ignored if ``shuffle`` is
-                ``False``.
+            rng_key: A typed key array from :external:func:`jax.random.key`, used only
+                when ``shuffle`` is ``True``.
             batch_size: The number of samples per batch.
             shuffle: Whether to shuffle the dataset before batching.
 
         Raises:
             ValueError: If ``batch_size`` is not a positive integer.
 
-        Warning:
-            The ``rng_key`` parameter should be provided as a **typed key array**
-            created with :external:func:`jax.random.key`, rather than a legacy
-            ``uint32`` key created with :external:func:`jax.random.PRNGKey`.
+        Warns:
+            AimzWarning: If ``rng_key`` is a legacy ``uint32`` key, which is converted
+                to a typed key array.
         """
         self.dataset = dataset
         if (
@@ -79,18 +78,14 @@ class ArrayLoader:
         self.indices = np.arange(len(self.dataset))
         if isinstance(rng_key, Array) and rng_key.dtype == jnp.uint32:
             msg = "Legacy `uint32` PRNGKey detected; converting to a typed key array."
-            # A fixed stacklevel: skipping aimz frames would attribute this to MLflow's
-            # autolog wrapper when it runs inside fit, and MLflow then hides it.
+            # Not `skip_file_prefixes`: skipping the aimz frames would blame MLflow's
+            # autolog wrapper, which then hides the warning
             warn(msg, category=AimzWarning, stacklevel=2)
             rng_key = random.wrap_key_data(rng_key)
         self.rng_key = rng_key
 
     def __iter__(self) -> Iterator[dict[str, Array | npt.NDArray]]:
-        """Iterate over the dataset in batches.
-
-        Yields:
-            A batch of arrays with data from the dataset.
-        """
+        """Yield the batches of one pass over the dataset, shuffled if asked."""
         indices = self.indices
         if self.shuffle:
             self.rng_key, subkey = random.split(self.rng_key)
@@ -102,9 +97,5 @@ class ArrayLoader:
             yield {k: arr[batch_idx] for k, arr in self.dataset.arrays.items()}
 
     def __len__(self) -> int:
-        """Return the number of batches.
-
-        Returns:
-            The total number of batches.
-        """
+        """Return the number of batches."""
         return ceil(len(self.dataset) / self.batch_size)

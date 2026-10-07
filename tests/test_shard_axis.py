@@ -51,8 +51,7 @@ def test_local_latent_model(
         ll = im.log_likelihood(
             X, y, batch_size=len(X), progress=False, shard_axis="draw"
         )
-    # `z` is a local latent of shape (num_samples, n_obs), which the data-parallel
-    # path cannot stream
+    # `z` is shaped (num_samples, n_obs), which the obs path cannot stream
     assert dt["posterior_predictive"]["y"].shape == (1, n, len(X))
     assert dt["posterior_predictive"]["z"].shape == (1, n, len(X))
     assert ll["log_likelihood"]["y"].shape == (1, n, len(X))
@@ -64,8 +63,7 @@ def test_local_latent_model(
         ll = im.log_likelihood(X, y, batch_size=len(X), progress=False)
     assert ll["log_likelihood"]["y"].shape == (1, n, len(X))
 
-    # Under the prior nothing is conditioned: each chunk draws a fresh local latent
-    # that varies along the observation axis (prior std close to one)
+    # Under the prior each chunk draws a fresh local latent, varying across rows
     z = np.asarray(
         im.sample_prior_predictive(
             X,
@@ -84,12 +82,7 @@ def test_local_latent_model(
 def test_predict_data_reruns_draw_on_rank3_local_latent(
     synthetic_data: tuple[Array, Array],
 ) -> None:
-    """`shard_axis='obs'` reruns under draw for a rank-3 observation-aligned latent.
-
-    The posterior site `z` is shaped `(num_samples, n_obs, 2)`; the detector must
-    treat any `ndim >= 2` site with `shape[1] == n_obs` as observation-aligned, not
-    only rank-2 sites. `z` also round-trips through the draw write path as rank-3.
-    """
+    """A rank-3 observation-aligned latent also reruns under `draw` and round-trips."""
     X, y = synthetic_data
     im = ImpactModel(
         multidim_latent_model,
@@ -134,13 +127,12 @@ def test_plan_execution_aligned_posterior(
             posterior=im.posterior,
         )
 
-    # On several devices the observation axis is sharded, so the whole input never
-    # sits on one device
+    # On several devices the observation axis is always sharded
     monkeypatch.setattr(im, "_num_devices", 3)
     assert plan(len(X) // 4)[0] == "draw"
     assert plan(len(X))[0] == "draw"
-    # On one device the whole input is pinned when it fits the budget; an explicit
-    # smaller batch is the caller's contract and still falls back
+    # On one device the whole input is pinned when it fits; a smaller explicit batch
+    # still falls back
     monkeypatch.setattr(im, "_num_devices", 1)
     assert plan(None) == ("obs", len(X))
     assert plan(len(X))[0] == "obs"
@@ -158,8 +150,7 @@ def test_predict_draw_global_model(
     im = im_lm_svi_fitted
     n = _n_draws(im)
     key = random.key(11)
-    # The default batch size follows from the draws and the input; a per-draw scalar
-    # site streams beside the per-observation output
+    # A per-draw scalar site streams beside the per-observation output
     pp = im.predict(
         X,
         rng_key=key,
@@ -170,8 +161,7 @@ def test_predict_draw_global_model(
     assert pp["y"].shape == (1, n, len(X))
     assert pp["sigma"].dims == ("chain", "draw")
 
-    # Keys are split once over all draws and sliced per chunk, so the draws do not
-    # depend on the chunk size
+    # The draws do not depend on the chunk size
     chunked = im.predict(
         X,
         rng_key=key,
@@ -185,8 +175,7 @@ def test_predict_draw_global_model(
         np.asarray(chunked["posterior_predictive"]["y"]),
     )
 
-    # Both strategies use the same posterior draws: with the noise scale pinned near
-    # zero the predictions agree draw by draw
+    # With the noise pinned near zero, both strategies agree draw by draw
     data = im.predict(
         X,
         intervention={"sigma": 1e-6},
@@ -246,8 +235,7 @@ def test_streaming_argument_validation(
     for bad_batch_size in (-1, 0):
         with pytest.raises(ValueError, match="positive integer"):
             im.predict(X, batch_size=bad_batch_size, progress=False)
-    # The draw path replicates `X` and `y` independently and would otherwise
-    # broadcast a length-1 `y` across every observation
+    # A length-1 `y` would otherwise broadcast under `draw`
     for shard_axis in ("obs", "draw"):
         with pytest.raises(ValueError, match="leading-axis size"):
             im.log_likelihood(X, y[:1], shard_axis=shard_axis, progress=False)
@@ -268,8 +256,7 @@ def test_predict_obs_shards_draw_independent_noise(
     n_devices = local_device_count()
     if n_devices == 1:
         pytest.skip("Needs more than one device to compare shards.")
-    # A constant input holds the `lm` mean identical across observations, so whatever
-    # variation is left in the draws is the likelihood noise.
+    # With a constant input, the only variation left is the likelihood noise
     dt = im_lm_svi_fitted.predict(
         jnp.tile(X[:1], reps=(n_devices, 1)),
         batch_size=n_devices,

@@ -30,30 +30,14 @@ if TYPE_CHECKING:
 
 
 def _pin_subsample_indices(msg: Message) -> Array | None:
-    """Provide deterministic indices for subsample plate sites.
+    """Pin the indices of a subsampling plate to ``arange``, for a seed-free trace.
 
-    Log-likelihood evaluation passes each data batch to the model explicitly. For
-    kernels that consume the batch through the model's arguments, the indices of a
-    ``numpyro.plate`` site with ``subsample_size`` set smaller than ``size`` only
-    determine broadcasting shapes. Drawing them randomly would require an rng key that a
-    bare (unseeded) kernel does not have; pinning them to ``arange`` keeps tracing
-    seed-free.
-
-    Kernels that instead gather rows from a closed-over full-size array via the
-    plate's indices (``with plate(...) as idx``, or ``numpyro.subsample``) are not
-    supported by batched evaluation: the pinned indices always select the leading
-    rows.
-
-    Args:
-        msg: A NumPyro effect-handler site message.
-
-    Returns:
-        Deterministic indices for a subsample plate site, or ``None`` to leave the site
-        unchanged.
+    Each batch is passed through the model's arguments, so the indices only set shapes.
+    A kernel that gathers rows from a closed-over array through them is not supported:
+    the pinned indices select the leading rows.
 
     Raises:
-        ValueError: If the batch is larger than the plate size, which would require
-            out-of-range indices.
+        ValueError: If the batch is larger than the plate size.
     """
     if msg["type"] != "plate":
         return None
@@ -72,19 +56,10 @@ def _pin_subsample_indices(msg: Message) -> Array | None:
 
 
 def _substitute_latent(msg: Message, sample: dict[str, Array]) -> Array | None:
-    """Provide the posterior value for a latent sample site.
+    """Return the posterior value of a latent sample site, else ``None``.
 
-    Only latent sample sites take posterior values: deterministic sites are recomputed
-    from the trace, and observed sites score the passed data. This keeps injected
-    posteriors that carry output or deterministic sites from overriding either.
-
-    Args:
-        msg: A NumPyro effect-handler site message.
-        sample: One posterior draw, keyed by site name.
-
-    Returns:
-        The posterior value for a latent sample site, or ``None`` to leave the site
-        unchanged.
+    Deterministic sites are recomputed and observed sites score the data, so neither
+    takes a value from the posterior.
     """
     if msg["type"] == "deterministic" or msg.get("is_observed", False):
         return None
@@ -98,27 +73,13 @@ def _log_likelihood(
     params: dict[str, Array] | None,
     model_kwargs: Mapping[str, object] | None,
 ) -> dict[str, Array]:
-    """Compute per-site log-likelihood at observed sites for each posterior draw.
+    """Compute the log-likelihood at the observed sites for each posterior draw.
 
-    Kernels that subsample inside a ``numpyro.plate`` (``subsample_size``) get
-    deterministic plate indices (see :func:`_pin_subsample_indices`): the batch passed
-    through the model's arguments is scored as-is, and the trace stays free of
-    subsampling randomness.
-
-    Args:
-        model: A probabilistic model with NumPyro primitives.
-        samples: A dictionary of posterior samples to substitute into the model, where
-            each array has leading axis equal to the number of draws. ``None`` or an
-            empty dict yields a single-draw result with a leading axis of size 1.
-        params: Values of the model's ``param`` sites and mutable state, shared by
-            all draws, such as those learned by variational inference.
-        model_kwargs: Arguments passed to the model. Must include the input and the
-            output values keyed under the model's parameter names.
+    Without ``samples`` the result has a single draw. The plate indices are pinned by
+    :func:`_pin_subsample_indices`.
 
     Returns:
-        A dictionary mapping each observed sample site to its log-probability array
-        with leading axis equal to the number of posterior draws (or 1 when ``samples``
-        is empty or ``None``).
+        The log-probability of each observed site, with the draws on the leading axis.
     """
     if params:
         model = substitute(model, data=params)

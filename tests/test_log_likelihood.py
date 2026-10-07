@@ -24,11 +24,7 @@ from tests.conftest import lm_subsample, make_svi
 
 
 def test_log_likelihood_subsampled_kernel(synthetic_data: tuple[Array, Array]) -> None:
-    """A kernel subsampling in a plate scores every row; a batch past its plate raises.
-
-    Subsample indices are pinned deterministically rather than drawn at random, so the
-    bare (unseeded) kernel traces cleanly on both sharding paths.
-    """
+    """A subsampling kernel scores every row; a batch past its plate raises."""
     X, y = synthetic_data
     im = ImpactModel(
         lm_subsample,

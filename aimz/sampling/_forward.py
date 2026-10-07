@@ -37,40 +37,26 @@ def _sample_forward(
     intervention: dict | None,
     model_kwargs: Mapping[str, object] | None,
 ) -> dict[str, Array]:
-    """Generates forward samples from a model conditioned on parameter draws.
+    """Draw forward samples from a model, one trace per key in ``rng_keys``.
 
-    Traces the model once per draw, each with its own key from ``rng_keys`` and (when
-    provided) its own row of ``samples``. Deterministic sites are excluded from
-    substitution. Callers pass the per-draw keys directly: a scalar-key caller splits
-    with ``random.split(rng_key, num=num_samples)``, while the draw-parallel sharded
-    path forwards its device-local slice of the host-split keys (so draws stay
-    deterministic across mesh sizes).
-
-    Under a trace (e.g. when called inside :external:func:`jax.jit`), draws run as a
-    single fused :external:func:`jax.lax.map` loop in the compiled program. Called
-    eagerly, draws are instead vectorized with :external:func:`jax.vmap`: eager
-    ``lax.map`` would compile and cache a program keyed on the identity of a
-    per-call closure, so repeated eager calls would each retain a new compilation,
-    growing the cache without bound.
+    Each draw conditions on its row of ``samples``, deterministic sites excepted. Under
+    a trace the draws run as one :external:func:`jax.lax.map` loop; eagerly they are
+    vectorized with :external:func:`jax.vmap`, since an eager ``lax.map`` would cache a
+    program per call.
 
     Args:
         model: A probabilistic model with NumPyro primitives.
-        rng_keys: Per-draw keys with shape ``(num_samples,)``; the number of draws is
-            ``len(rng_keys)``.
-        return_sites: Names of variables (sites) to return.
-        samples: A dictionary of samples to condition on, where each array has shape
-            ``(num_samples, ...)``.
-        params: Values of the model's ``param`` sites and mutable state, shared by
-            all draws, such as those learned by variational inference. Passed as
-            dynamic inputs by compiled callers so a refit reuses the same program.
-        intervention: A dictionary mapping sample site names to replacement values
-            used during predictive sampling. Passed as dynamic inputs by compiled
-            callers so repeated interventions reuse the same program.
-        model_kwargs: Additional arguments passed to the model.
+        rng_keys: Per-draw keys with shape ``(num_samples,)``.
+        return_sites: Names of the sites to return; by default every sample site not
+            conditioned on and every deterministic site.
+        samples: Samples to condition on, with the draws on the leading axis.
+        params: Values of the model's ``param`` sites and mutable state, shared by all
+            draws.
+        intervention: Replacement values by sample site name.
+        model_kwargs: Arguments passed to the model.
 
     Returns:
-        A dictionary mapping each return site to an array of traced values with shape
-            ``(num_samples, ...)``.
+        The traced values of each return site, with the draws on the leading axis.
     """
     if params:
         model = substitute(model, data=params)

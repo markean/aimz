@@ -57,21 +57,14 @@ if TYPE_CHECKING:
     from zarr.core.array_spec import ArrayConfigParams
 
 
-# Maximum in-flight compute steps in `_write_loop`. Depth 2 dispatches the next step
-# before collecting the previous one, overlapping device compute with device-to-host
-# transfer and the host-side write work; each in-flight step holds one output chunk on
-# device, so raising this raises peak device memory proportionally.
+# Compute steps in flight in `_write_loop`: the next step is dispatched before the
+# previous one is collected, and each holds one output chunk on device
 _PIPELINE_DEPTH = 2
-# Ceiling on the items in flight on the host, queued plus being written. The pool
-# drains the queue as fast as the store allows, so a deeper queue adds no throughput;
-# it only holds more batches in memory when the store is slower than the producer.
+# Ceiling on the items queued plus being written; a deeper queue adds no throughput
 _QUEUE_SIZE_MAX = 16
-# Ceiling on the automatically chosen writer-thread pool size. Guards against
-# oversubscribing cores/disk; the effective count is further bounded by the write
-# strategy's own ceiling and the number of items.
+# Ceiling on the automatic writer-thread count
 _WRITER_COUNT_MAX = 8
-# Sentinel a concurrency-safe strategy returns from ``max_writers`` to signal "no
-# strategy-imposed limit"; the effective cap is then the item count and CPU/ceiling.
+# `max_writers` of a strategy that imposes no limit of its own
 _WRITER_COUNT_UNBOUNDED = 2**31 - 1
 # Every chunk is written, even one holding only the fill value, so a chunk missing on
 # read means the artifact was removed, which `_zarr_to_datatree` reports as an error.
@@ -85,20 +78,8 @@ def _iter_pipelined(
 ) -> Generator[dict[str, np.ndarray], None, None]:
     """Dispatch up to :data:`_PIPELINE_DEPTH` items ahead and finalize them in order.
 
-    ``dispatch`` launches an item's computation (JAX dispatch is asynchronous, so it
-    returns without waiting) and ``finalize`` blocks on the result, so keeping a
-    bounded queue of in-flight steps lets the device compute item N+1 while the
-    consumer collects and writes item N. Items are finalized in dispatch (FIFO)
-    order.
-
-    Args:
-        items: Items to iterate (batch mappings, or draw-chunk starts).
-        dispatch: Launches one item's computation and returns its in-flight handle.
-        finalize: Blocks on an in-flight handle and returns its mapping of site name
-            to array.
-
-    Yields:
-        Each item's mapping of site name to (post-slice) array, in item order.
+    JAX dispatch returns before the computation ends, so the device computes the next
+    item while the consumer writes the previous one.
     """
     pending: deque = deque()
     try:
@@ -126,20 +107,10 @@ def _determine_writer_count(
     num_items: int | None,
     requested: int | None = None,
 ) -> int:
-    """Determine the writer-thread pool size for a stream.
+    """Return the writer-thread count for a stream.
 
-    Without an explicit request the count defaults to the CPU count, capped by
-    :data:`_WRITER_COUNT_MAX`. The result is always bounded by the strategy's own
-    ceiling (``max_writers``; ``1`` for an order-sensitive strategy) and by
-    ``num_items`` (never more writers than there are items to write), and floored at 1.
-
-    Args:
-        max_writers: The write strategy's ceiling on concurrent writers.
-        num_items: Total items, or ``None`` when the stream length is unknown.
-        requested: Explicit writer count, or ``None`` to choose automatically.
-
-    Returns:
-        The number of writer threads to start.
+    The request, or the CPU count capped by :data:`_WRITER_COUNT_MAX`, bounded by the
+    strategy's ``max_writers`` and the item count, and floored at one.
     """
     auto = min(cpu_count() or 1, _WRITER_COUNT_MAX)
     n = auto if requested is None else requested
@@ -156,39 +127,22 @@ def _plan_writers(
     *,
     retained: bool = False,
 ) -> _StreamPlan:
-    """Plan the writer pool and shared-queue depth for a streamed write.
+    """Plan the writer pool and the depth of its shared queue.
 
-    The single place where the host-memory envelope and the concurrency bounds meet.
-    Invariants, stated once:
-
-    - In-flight host bytes (queued items, items being applied, and the pipelined
-      producer's :data:`_PIPELINE_DEPTH` pre-collected batches) stay within the
-      memory available at planning time, less the room every batch of the call takes
-      when the store keeps them all on the host.
-    - The pool never exceeds the strategy's ceiling, the batch count, the CPU-derived
-      automatic cap (or the explicit request), or what the memory envelope can feed.
-    - Both results are floored at 1, so a bounded queue and at least one writer always
-      exist; on an extremely tight envelope this floor (one queued item plus one being
-      applied) is the documented minimum footprint.
+    The items in flight on the host, plus the batches a memory store keeps, stay within
+    the memory available at planning time; the pool never exceeds the strategy's
+    ceiling, the item count, or what that memory can feed.
 
     Args:
         max_writers: The write strategy's ceiling on concurrent writers.
         n_items: Total batches, or ``None`` when the stream length is unknown.
-        item_nbytes: Bytes the first batch commits across all sites. For variable
-            batch sizes this is an estimate; the queue remains bounded by item count.
+        item_nbytes: Bytes the first batch commits across all sites.
         n_sites: Number of ``(site, payload)`` items each batch enqueues.
         requested: Explicit writer count, or ``None`` to choose automatically.
-        retained: Whether the store keeps every batch on the host for the whole call,
-            as the memory store does, so that the batches to come, rather than only
-            the items in flight, take up the memory.
-
-    Returns:
-        The writer-pool plan.
+        retained: Whether the store keeps every batch on the host for the whole call.
 
     Warns:
-        PerformanceWarning: If the batches the store keeps exceed the memory available
-            at planning time, so the call will swap or fail unless the batches are
-            written out instead.
+        PerformanceWarning: If the batches the store keeps exceed the memory available.
     """
     available = psutil.virtual_memory().available
     resident = n_items * item_nbytes if retained and n_items is not None else 0
@@ -199,17 +153,15 @@ def _plan_writers(
             "to write it out instead."
         )
         warn(msg, category=PerformanceWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
-    # Batches of headroom the host affords beyond the pipeline's in-flight steps and
-    # the batches a memory store keeps; NOT clamped by `n_items`, so a small batch
-    # count with ample memory still gets a full pool (every batch can be in flight at
-    # once).
+    # Headroom in batches beyond the pipeline's steps and the kept batches, not clamped
+    # by `n_items`
     mem_batches = (available - resident) // max(1, item_nbytes) - _PIPELINE_DEPTH
     mem_slots = mem_batches * n_sites
     n_writers = max(
         1,
         min(
             _determine_writer_count(max_writers, n_items, requested=requested),
-            # Reserve one queued slot so the producer can stay ahead of the pool.
+            # One queued slot is reserved for the producer to stay ahead of the pool
             mem_slots - 1,
         ),
     )
@@ -237,10 +189,7 @@ def _plan_writers(
 
 
 def _site_dtype(arr: np.ndarray) -> np.dtype | str:
-    """Destination dtype for a site's array: bfloat16 is upcast to float32.
-
-    Shared by every destination (Zarr and host memory) so the rule cannot drift.
-    """
+    """Return the destination dtype of a site's array: bfloat16 becomes float32."""
     return "float32" if arr.dtype == "bfloat16" else arr.dtype
 
 
@@ -251,16 +200,7 @@ def _validate_streamed_axis_size(
     axis: int,
     chunk_size: int,
 ) -> None:
-    """Verify a site emits the streamed axis at the expected batch size.
-
-    Contiguous batches must tile the streamed axis, so a site that does not emit it
-    (e.g. a global site with no observation axis under ``axis=1``) cannot be streamed.
-
-    Args:
-        arr: The site's batch array, possibly traced.
-        site: The sample site name.
-        axis: The streamed axis.
-        chunk_size: Expected batch length along the streamed axis.
+    """Raise unless a site emits the streamed axis at the batch size.
 
     Raises:
         NotImplementedError: If the site has no streamed axis, or its size does not
@@ -290,22 +230,10 @@ def _create_site_array(
     chunk: int,
     dims: Sequence[str],
 ) -> None:
-    """Create one Zarr array for a site.
+    """Create a site's Zarr array, sized ``total`` and chunked by ``chunk`` on ``axis``.
 
-    The streamed ``axis`` is sized to ``total`` (``0`` for append-style growth, the
-    full size for preallocated slice writing) and chunked by ``chunk``; every other
-    axis is taken whole from ``arr``. The leading axis is always the draw axis, so
-    ``dimension_names`` is ``("draw", *dims)``.
-
-    Args:
-        zarr_group: The open Zarr group to create the array in.
-        site: The sample site name (also the array name).
-        arr: A representative (post-slice) sample array; its ``shape``, ``ndim``, and
-            ``dtype`` are read.
-        axis: The streamed axis (the one filled batch by batch).
-        total: Full size of the streamed axis.
-        chunk: Chunk length along the streamed axis.
-        dims: The site's dimension names after the draw axis.
+    ``total`` is zero for append-style growth. The leading axis is the draw axis, so
+    the dimension names are ``("draw", *dims)``.
     """
     shape = list(arr.shape)
     shape[axis] = total
@@ -324,88 +252,43 @@ def _create_site_array(
 class _WriteStrategy(Protocol):
     """How a batch of per-site samples is created and queued for writing.
 
-    A strategy streams one **axis** of each site's destination array, filling it batch
-    by batch while every other axis is written whole: ``axis=0`` streams the draw axis
-    (draw-parallel), ``axis=1`` streams the observation axis (data-parallel). The
-    strategy also owns where the results land.
+    A strategy fills one axis of each site's destination batch by batch, ``axis=0`` the
+    draws and ``axis=1`` the observations, and owns where the results land.
     """
 
     @property
     def max_writers(self) -> int:
-        """Maximum number of concurrent writer threads this strategy tolerates.
-
-        ``1`` means the strategy is order-sensitive and must be written by a single
-        consumer; a larger value means writes are order-independent and may be spread
-        across a pool of workers.
-        """
+        """Maximum concurrent writers; ``1`` for an order-sensitive strategy."""
 
     @property
     def sink(self) -> Path | MutableMapping[str, list[np.ndarray]]:
-        """Where writer threads land payloads.
-
-        The path of a Zarr group (each worker opens it itself) or a shared
-        in-memory mapping of site name to destination, indexed the same way.
-        """
+        """The Zarr group's path, or the shared mapping of site name to batches."""
 
     def apply(self, array: Array | list[np.ndarray], item: object) -> None:
-        """Write one queued item into a site's destination.
-
-        Args:
-            array: The site's destination (a Zarr array, or an in-memory batch
-                list).
-            item: The queued payload to write.
-        """
+        """Write one queued payload into a site's destination."""
 
     def create_arrays(self, site_arrays: Mapping[str, np.ndarray]) -> None:
-        """Create any not-yet-created destination arrays for the sites in a batch.
-
-        Args:
-            site_arrays: Mapping of site name to the (post-slice) sample array emitted
-                for the current batch.
-        """
+        """Create the destination arrays of the sites not yet seen."""
 
     def enqueue(
         self,
         queue: Queue,
         site_arrays: Mapping[str, np.ndarray],
     ) -> None:
-        """Put a batch's per-site payloads onto the shared writer queue.
-
-        Each payload is enqueued as a ``(site, payload)`` item so any worker in the
-        pool can route it to the right destination. By default the payload is the
-        site's batch array itself.
-
-        Args:
-            queue: The shared writer queue.
-            site_arrays: Mapping of site name to the (post-slice) sample array
-                emitted for the current batch.
-        """
+        """Put a batch's ``(site, payload)`` items onto the shared writer queue."""
         for site, arr in site_arrays.items():
             queue.put((site, arr))
 
     def result(self) -> dict[str, DaskArray] | None:
-        """The accumulated site arrays for an in-memory sink, or ``None``.
-
-        Defaults to ``None``, as for the Zarr-backed strategies, whose results live
-        at :attr:`sink`. An in-memory strategy overrides this to return its finished
-        site arrays, Dask-backed over the retained host batches.
-        """
+        """Return the accumulated site arrays of an in-memory sink, else ``None``."""
         return None
 
 
 class _AppendWriteStrategy(_WriteStrategy):
     """Grow each site's Zarr array by appending batches along the streamed axis.
 
-    Requires no size information up front; the streamed-axis size emerges from the
-    batches as they arrive. ``array.append`` mutates the array's length metadata and is
-    order-sensitive, so this strategy is not concurrency-safe. It must be written by a
-    single consumer (:attr:`max_writers` is ``1``).
-
-    This is the designated fallback for generic data loaders, including unknown-length
-    and variable-batch streams. If single-consumer appends ever become the
-    bottleneck for that use case, a windowed hybrid (grow the array by a window of
-    batches, slice-write concurrently within each window) can restore pool parallelism
-    as a third strategy without touching :func:`_write_loop`.
+    Needs no size up front, so it serves generic data loaders. Appends change the
+    array's length, so a single writer consumes them in order.
     """
 
     def __init__(
@@ -416,15 +299,7 @@ class _AppendWriteStrategy(_WriteStrategy):
         axis: int,
         dims: Mapping[str, Sequence[str]] | None = None,
     ) -> None:
-        """Initialize the append write strategy.
-
-        Args:
-            artifact_path: Path of the Zarr group to create site arrays in (opened
-                for writing here).
-            batch_size: Chunk length along the streamed axis.
-            axis: The streamed axis to grow (``0`` for draws, ``1`` for observations).
-            dims: Dimension names by site, after the draw axis.
-        """
+        """Open the Zarr group at ``artifact_path`` for writing."""
         self._artifact_path = artifact_path
         self._zarr_group = open_group(artifact_path, mode="w")
         self._chunk_size = batch_size
@@ -434,33 +309,23 @@ class _AppendWriteStrategy(_WriteStrategy):
 
     @property
     def max_writers(self) -> int:
-        """A single writer: appends are order-sensitive and mutate array metadata."""
+        """A single writer: appends are order-sensitive."""
         return 1
 
     @property
     def sink(self) -> Path:
-        """The Zarr group's path; each writer thread opens the group itself."""
+        """The Zarr group's path."""
         return self._artifact_path
 
     def apply(self, array: Array | list[np.ndarray], item: object) -> None:
-        """Append the queued batch along the streamed axis.
-
-        Args:
-            array: The site's Zarr array.
-            item: The batch array to append.
-        """
+        """Append the batch along the streamed axis."""
         cast("Array", array).with_config(_ARRAY_CONFIG).append(
             cast("np.ndarray", item),
             axis=self._axis,
         )
 
     def create_arrays(self, site_arrays: Mapping[str, np.ndarray]) -> None:
-        """Create zero-width Zarr arrays for sites not yet seen.
-
-        Args:
-            site_arrays: Mapping of site name to the (post-slice) sample array emitted
-                for the current batch.
-        """
+        """Create zero-length arrays for the sites not yet seen."""
         names = _group_dims(
             {site: arr.shape[1:] for site, arr in site_arrays.items()},
             self._dims,
@@ -480,13 +345,10 @@ class _AppendWriteStrategy(_WriteStrategy):
 
 
 class _SliceWriteStrategy(_WriteStrategy):
-    """Write each batch into a fixed slice of a preallocated Zarr array along an axis.
+    """Write each batch into its slice of a preallocated Zarr array.
 
-    Requires the streamed-axis size up front. Every batch must emit a streamed-axis
-    size equal to the batch size, so contiguous slices tile the full axis; any other
-    size raises :exc:`NotImplementedError` on the first batch. With ``axis=0`` it
-    streams the draw axis (draw-parallel), where every site matches by construction;
-    with ``axis=1`` the observation axis (data-parallel).
+    Needs the streamed-axis size up front, and every batch must emit that axis at the
+    batch size, so the slices tile it; the first batch is checked.
     """
 
     def __init__(
@@ -498,16 +360,7 @@ class _SliceWriteStrategy(_WriteStrategy):
         axis: int,
         dims: Mapping[str, Sequence[str]] | None = None,
     ) -> None:
-        """Initialize the slice write strategy.
-
-        Args:
-            artifact_path: Path of the Zarr group to create site arrays in (opened
-                for writing here).
-            total: Full size of the streamed axis (preallocated up front).
-            batch_size: Chunk length along the streamed axis.
-            axis: The streamed axis to fill (``0`` for draws, ``1`` for observations).
-            dims: Dimension names by site, after the draw axis.
-        """
+        """Open the Zarr group at ``artifact_path`` for writing."""
         self._artifact_path = artifact_path
         self._zarr_group = open_group(artifact_path, mode="w")
         self._total = total
@@ -519,48 +372,27 @@ class _SliceWriteStrategy(_WriteStrategy):
 
     @property
     def max_writers(self) -> int:
-        """No strategy limit: slice writes are position-addressed and disjoint.
-
-        Each batch write targets a fixed, chunk-aligned slice (one Zarr chunk == one
-        file on a local store), so writers never contend and completion order is
-        irrelevant. The effective pool size is bounded elsewhere by the CPU count /
-        :data:`_WRITER_COUNT_MAX` (or an explicit request) and the item count.
-        """
+        """No limit: the slices are disjoint and chunk-aligned."""
         return _WRITER_COUNT_UNBOUNDED
 
     @property
     def sink(self) -> Path:
-        """The Zarr group's path; each writer thread opens the group itself."""
+        """The Zarr group's path."""
         return self._artifact_path
 
     def apply(self, array: Array | list[np.ndarray], item: object) -> None:
-        """Assign the queued ``(start, arr)`` batch into a fixed slice of the axis.
-
-        Args:
-            array: The site's (preallocated) Zarr array.
-            item: A ``(start, arr)`` tuple; ``arr`` is written to the streamed-axis
-                slice ``[start : start + arr.shape[axis])``.
-        """
+        """Assign the queued ``(start, arr)`` batch to its slice of the axis."""
         start, arr = cast("tuple[int, np.ndarray]", item)
         idx: list = [slice(None)] * arr.ndim
         idx[self._axis] = slice(start, start + arr.shape[self._axis])
         cast("Array", array).with_config(_ARRAY_CONFIG)[tuple(idx)] = arr
 
     def create_arrays(self, site_arrays: Mapping[str, np.ndarray]) -> None:
-        """Preallocate full-size Zarr arrays for sites not yet seen.
-
-        On the first call (the first batch), every site is verified to emit a
-        streamed-axis size equal to the batch size; mismatches raise. After creation,
-        each site is registered in ``self._site_offsets`` with offset zero so subsequent
-        batches can be written to fixed slices.
-
-        Args:
-            site_arrays: Mapping of site name to the (post-slice) sample array emitted
-                for the current batch.
+        """Preallocate the arrays of the sites not yet seen, checking their batch size.
 
         Raises:
-            NotImplementedError: If any return site emits a streamed-axis size that does
-                not match the batch size.
+            NotImplementedError: If a site's streamed-axis size differs from the batch
+                size.
         """
         names = _group_dims(
             {site: arr.shape[1:] for site, arr in site_arrays.items()},
@@ -592,12 +424,7 @@ class _SliceWriteStrategy(_WriteStrategy):
         queue: Queue,
         site_arrays: Mapping[str, np.ndarray],
     ) -> None:
-        """Enqueue each site's batch as ``(site, (start, arr))`` and advance its offset.
-
-        Args:
-            queue: The shared writer queue.
-            site_arrays: Mapping of site name to the batch array to write.
-        """
+        """Enqueue each site's batch with its offset, then advance the offset."""
         for site, arr in site_arrays.items():
             start = self._site_offsets[site]
             queue.put((site, (start, arr)))
@@ -605,49 +432,32 @@ class _SliceWriteStrategy(_WriteStrategy):
 
 
 class _MemoryWriteStrategy(_WriteStrategy):
-    """Retain each site's batches in host memory as the chunks of a Dask array.
+    """Keep each site's batches in host memory as the chunks of a Dask array.
 
-    The finalized batch arrays are kept in arrival order (a single consumer) and
-    :meth:`result` assembles each site into a lazy Dask array whose chunks are those
-    resident batches, mirroring the chunk layout the Zarr-backed strategies persist.
+    A single consumer keeps them in arrival order, mirroring the persisted chunks.
     """
 
     def __init__(self, *, axis: int) -> None:
-        """Initialize the in-memory write strategy.
-
-        Args:
-            axis: The streamed axis the batches tile (``0`` for draws, ``1`` for
-                observations).
-        """
+        """Set the streamed axis the batches tile."""
         self._axis = axis
         self._batches: dict[str, list[np.ndarray]] = {}
 
     @property
     def max_writers(self) -> int:
-        """A single writer: batches are retained in arrival order."""
+        """A single writer keeps the batches in arrival order."""
         return 1
 
     @property
     def sink(self) -> dict[str, list[np.ndarray]]:
-        """The shared mapping of site name to its retained batches (never rebound)."""
+        """The mapping of site name to its retained batches, never rebound."""
         return self._batches
 
     def apply(self, array: Array | list[np.ndarray], item: object) -> None:
-        """Retain the queued batch as one future chunk of the site's array.
-
-        Args:
-            array: The site's batch list.
-            item: The batch array to retain.
-        """
+        """Retain the batch as one future chunk of the site's array."""
         cast("list[np.ndarray]", array).append(cast("np.ndarray", item))
 
     def create_arrays(self, site_arrays: Mapping[str, np.ndarray]) -> None:
-        """Register batch lists for sites not yet seen.
-
-        Args:
-            site_arrays: Mapping of site name to the (post-slice) sample array emitted
-                for the current batch.
-        """
+        """Register the batch lists of the sites not yet seen."""
         for site in site_arrays:
             self._batches.setdefault(site, [])
 
@@ -655,12 +465,7 @@ class _MemoryWriteStrategy(_WriteStrategy):
     def result(self) -> dict[str, DaskArray]:
         """Assemble each site's retained batches into a lazy Dask array.
 
-        Chunks reference the retained batches directly via
-        :func:`dask.array.from_delayed` (:func:`dask.array.from_array` would copy
-        them); bfloat16 batches are upcast lazily per the shared dtype rule.
-
-        Returns:
-            The finished site arrays, Dask-backed over host memory.
+        :func:`dask.array.from_delayed` references the batches without copying them.
         """
         out = {}
         for site, batches in self._batches.items():
@@ -685,20 +490,9 @@ def _create_slice_strategy(
     axis: int,
     dims: Mapping[str, Sequence[str]] | None = None,
 ) -> _WriteStrategy:
-    """Build the slice-writing strategy for a stream with a known streamed-axis size.
+    """Return the slice-writing strategy for a known streamed-axis size.
 
-    Zarr-backed when an artifact path is given, host-memory accumulation otherwise.
-
-    Args:
-        artifact_path: Path of the Zarr group to create site arrays in, or ``None``
-            to accumulate the results in host memory.
-        total: Full size of the streamed axis.
-        batch_size: Chunk length along the streamed axis.
-        axis: The streamed axis to fill (``0`` for draws, ``1`` for observations).
-        dims: Dimension names by site, after the draw axis, for the Zarr arrays.
-
-    Returns:
-        The write strategy to use.
+    Host memory when ``artifact_path`` is ``None``, a Zarr store otherwise.
     """
     if artifact_path is None:
         return _MemoryWriteStrategy(axis=axis)
@@ -719,21 +513,10 @@ def _select_write_strategy(
     batch_size: int,
     dims: Mapping[str, Sequence[str]] | None = None,
 ) -> _WriteStrategy:
-    """Build the observation writer for a regular loader or a generic stream.
+    """Return the observation-axis strategy for a regular loader or a generic stream.
 
-    Host-memory accumulation needs no size information. On disk, a known total is
-    supplied only for regular, chunk-aligned batches; generic streams append serially
-    so variable batch boundaries cannot race on Zarr chunks.
-
-    Args:
-        artifact_path: Path of the Zarr group to create site arrays in, or ``None``
-            to accumulate the results in host memory.
-        total: Exact row count for regular batches, or ``None`` for generic streams.
-        batch_size: Regular batch size, or the first generic batch's size.
-        dims: Dimension names by site, after the draw axis, for the Zarr arrays.
-
-    Returns:
-        The write strategy to use.
+    A generic stream, with ``total`` unknown, appends serially: its batch boundaries
+    need not align with the Zarr chunks.
     """
     if artifact_path is None:
         return _MemoryWriteStrategy(axis=1)
@@ -761,40 +544,18 @@ def _writer(
     stop: Event,
     apply: Callable[[Array | list[np.ndarray], object], None],
 ) -> None:
-    """Background worker that writes queued ``(site, payload)`` items to the sink.
+    """Write queued ``(site, payload)`` items to the sink until a ``None`` sentinel.
 
-    One of a shared pool of interchangeable workers that all consume the same queue, so
-    a worker is not bound to a single site: each item names the site to write. Runs in a
-    loop, retrieving items and writing each into its site's array via ``apply``, exiting
-    when a ``None`` sentinel is received. A path sink is a Zarr group each worker opens
-    itself. A mapping sink is shared by reference and indexed directly. Concurrency
-    safety rests on the strategy: the pool is only sized above one for
-    order-independent, disjoint-write strategies (see
-    :meth:`_WriteStrategy.max_writers`).
-
-    If opening the group or a write fails, the error is logged, its details are put into
-    ``error_queue``, and the shared ``stop`` event is set so every worker switches to
-    drain mode: subsequent items are discarded (still marked done, so the bounded
-    producer cannot block and ``queue.join()`` can finish) rather than written into a
-    store that is being torn down.
-
-    Args:
-        queue: The shared queue of ``(site, payload)`` items (and ``None`` sentinels).
-        sink: The path of the Zarr group (opened here, per worker), or a shared
-            mapping of site name to destination array.
-        error_queue: The queue to collect errors raised by the writer threads, each as a
-            ``(site, exc, traceback)`` tuple (``site`` is ``None`` for an open failure).
-        stop: Shared event; set on the first error to put the pool into drain mode.
-        apply: Writes one queued payload into a site's destination array; the only
-            behavior that differs between write strategies.
+    The workers of a pool share the queue, and each item names its site. On an error
+    the worker puts ``(site, exc, traceback)`` on ``error_queue`` and sets ``stop``,
+    after which every worker discards its items, still marking them done, so the
+    producer never blocks and ``queue.join()`` completes.
     """
     group = None
     try:
         group = open_group(sink, mode="r+") if isinstance(sink, Path) else sink
     except Exception as exc:
-        # `stop.set()` first. It cannot fail, so the pool always enters drain mode even
-        # if reporting or logging below raises (e.g. under memory pressure); the
-        # suppress keeps this worker alive to drain the queue regardless.
+        # `stop.set()` cannot fail, so the pool drains even if the report raises
         stop.set()
         with suppress(Exception):
             error_queue.put((None, exc, exc.__traceback__))
@@ -806,8 +567,6 @@ def _writer(
             if item is None:
                 return
             if stop.is_set():
-                # Drain mode: discard the payload but keep the queue moving so the
-                # bounded producer never blocks and the sentinels are still consumed.
                 continue
             site, payload = cast("tuple[str, object]", item)
             try:
@@ -828,17 +587,10 @@ def _start_writer_threads(
     n_writers: int,
     queue_size: int,
 ) -> tuple[list[Thread], Queue, Queue, Event]:
-    """Start a shared pool of writer threads consuming one queue.
-
-    Args:
-        sink: The Zarr group path or shared in-memory mapping the workers write to.
-        apply: Writes one queued payload into a site's destination array.
-        n_writers: Number of writer threads in the pool.
-        queue_size: Maximum size of the shared work queue.
+    """Start a pool of writer threads over one queue.
 
     Returns:
-        A tuple of the worker threads, the shared work queue, the shared error queue,
-        and the shared stop event.
+        The threads, the work queue, the error queue, and the stop event.
     """
     queue: Queue = Queue(queue_size)
     error_queue: Queue = Queue()
@@ -854,9 +606,7 @@ def _start_writer_threads(
             thread.start()
             threads.append(thread)
     except BaseException:
-        # A mid-pool `Thread.start()` failure (e.g. hitting a thread limit) would
-        # otherwise orphan the already-started non-daemon workers on a queue the
-        # caller never receives, blocking interpreter exit; unwind them first.
+        # Unwind the started workers, or they would block interpreter exit
         for _ in threads:
             queue.put(None)
         for thread in threads:
@@ -873,21 +623,10 @@ def _shutdown_writer_threads(
     *,
     discard: bool,
 ) -> None:
-    """Signal the writer pool to stop and wait for its completion.
+    """Send one ``None`` sentinel per worker and wait for the pool to finish.
 
-    One ``None`` sentinel is enqueued per worker; each worker consumes exactly one and
-    exits, so any residual items (already ahead of the sentinels in the FIFO queue) are
-    written first, or discarded when ``discard`` is set. An interrupt while waiting
-    (e.g. ``KeyboardInterrupt``) also discards them and is re-raised once every worker
-    has exited, so none writes after the caller discards the partial output. Safe to
-    call when no pool was started (``queue is None``).
-
-    Args:
-        threads: The worker threads to join.
-        queue: The shared work queue, or ``None`` if no pool was started.
-        stop: The shared stop event, or ``None`` if no pool was started.
-        discard: Whether to discard the residual items (the stream failed) instead of
-            writing them.
+    The items ahead of the sentinels are written first, or discarded when ``discard``
+    is set or the wait is interrupted.
     """
     if queue is None or stop is None:
         return
@@ -898,9 +637,8 @@ def _shutdown_writer_threads(
         for _ in threads:
             queue.put(None)
             sent += 1
-        # Wait on the queue before the threads: on Python 3.12 an interrupted
-        # `Thread.join()` marks a running thread as stopped, so the recovery joins
-        # below would return while writes are still pending.
+        # The queue first: on Python 3.12 an interrupted `Thread.join()` marks a running
+        # thread as stopped, so the joins below would return while writes are pending
         queue.join()
         for thread in threads:
             thread.join()
@@ -914,14 +652,9 @@ def _shutdown_writer_threads(
 
 
 def _discard_partial_output(sink: Path | MutableMapping[str, list[np.ndarray]]) -> None:
-    """Discard a failed stream's partial output.
+    """Remove a failed stream's partial output: the files, or the retained batches.
 
-    A path sink has its on-disk artifacts removed; a mapping sink is emptied
-    eagerly, since a held traceback can keep the strategy alive and would
-    otherwise pin the partial batches with it.
-
-    Args:
-        sink: The failed stream's destination.
+    The batches are emptied eagerly, since a held traceback can keep the strategy alive.
     """
     if isinstance(sink, Path):
         rmtree(sink, ignore_errors=True)
@@ -941,35 +674,12 @@ def _write_loop(
     pbar: tqdm,
     num_writers: int | None = None,
 ) -> None:
-    """Produce per-item site arrays and write them concurrently to the strategy's sink.
+    """Produce the site arrays of each item and write them through a writer pool.
 
-    Shared by the data- and draw-parallel write paths. Items are produced through
-    :func:`_iter_pipelined`, which keeps consecutive items' computations in flight on
-    the device and finalizes them in item order, preserving the offset bookkeeping the
-    strategies rely on. Array creation/enqueuing is delegated to ``strategy`` and
-    writing to a shared pool of background writer threads. The pool size is chosen from
-    the strategy's :attr:`~_WriteStrategy.max_writers` ceiling (``1`` pins an
-    order-sensitive strategy to a single consumer) and the item count; ``num_writers``
-    overrides the automatic count.
-
-    Args:
-        items: Items to iterate (batch mappings, or draw-chunk starts).
-        n_items: Number of items, or ``None`` (used to size the queue and pool).
-        strategy: Write strategy that creates and enqueues each item's site arrays
-            and owns the destination (:attr:`~_WriteStrategy.sink`).
-        dispatch: Launches one item's computation and returns its in-flight handle.
-        finalize: Blocks on an in-flight handle and returns its mapping of site name
-            to array.
-        pbar: Progress bar instance to display progress.
-        num_writers: Explicit writer-thread pool size, or ``None`` (the production
-            path) to choose automatically. Bounded by the strategy's ceiling and the
-            item count; overriding is intended for tests.
-
-    Raises:
-        Exception: Any exception raised during production or writing is re-raised
-            after the queued items and the partial output at the strategy's sink are
-            discarded (on-disk artifacts removed, in-memory batches released). Writer
-            errors are also logged.
+    The items are produced in order through :func:`_iter_pipelined`; ``strategy``
+    creates and enqueues their arrays, and a pool sized from ``num_writers``, or
+    automatically, writes them. On any error the partial output is discarded and the
+    error re-raised.
     """
     threads: list[Thread] = []
     queue: Queue | None = None
@@ -1013,14 +723,12 @@ def _write_loop(
     finally:
         _shutdown_writer_threads(threads, queue=queue, stop=stop, discard=not completed)
         pbar.set_postfix_str("")
-        # Drop the in-flight pipeline results and the current batch explicitly.
         producer.close()
         with suppress(NameError):
             del sliced
         if worker_err is None and error_queue is not None and not error_queue.empty():
             worker_err = error_queue.get()
-        # `stop` set without a reported error means a writer failed while reporting
-        # (e.g. under memory pressure); treat it as a failure, never as a clean run.
+        # `stop` set without a report means a writer failed while reporting
         success = (
             completed and worker_err is None and (stop is None or not stop.is_set())
         )

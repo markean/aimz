@@ -69,30 +69,17 @@ def _check_is_fitted(model: ImpactModel) -> None:
 
 
 def _validate_group(dt_baseline: xr.DataTree, dt_intervention: xr.DataTree) -> str:
-    """Select the shared predictive group and check the two scenarios are comparable.
+    """Return the predictive group the two scenarios share, checking they compare.
 
-    Picks the first of ``predictions``, ``posterior_predictive``, and
-    ``prior_predictive`` present in ``dt_baseline``, and verifies it exists in both
-    trees. The ``posterior`` group of a tree holds the posterior samples a scenario
-    was computed from; a scenario without it is not checked.
-
-    Args:
-        dt_baseline: Precomputed output for the baseline scenario.
-        dt_intervention: Precomputed output for the intervention scenario.
-
-    Returns:
-        The group name (``predictions``, ``posterior_predictive``, or
-        ``prior_predictive``).
+    The group is the first of ``predictions``, ``posterior_predictive``, and
+    ``prior_predictive`` in ``dt_baseline``.
 
     Raises:
-        ValueError: If ``dt_baseline`` has none of these groups, or the chosen group
-            is missing from ``dt_intervention``.
+        ValueError: If the group is missing from either tree.
 
     Warns:
-        OutputWarning: If the chosen group's dimension sizes or coordinate labels
-            differ between the two scenarios (the effect subtraction would then
-            inner-join to the overlap), or if the scenarios hold different posterior
-            samples.
+        OutputWarning: If the group's dimension sizes or coordinate labels differ
+            between the scenarios, or the scenarios hold different posterior samples.
     """
     group = next(
         (
@@ -156,15 +143,10 @@ def _validate_intervention(
     intervention: dict | None,
     kernel_spec: KernelSpec | None,
 ) -> None:
-    """Validate that every intervened site is a sample site of the kernel.
-
-    Args:
-        intervention: Mapping from site names to replacement values, or ``None``.
-        kernel_spec: The model's cached kernel spec, or ``None``.
+    """Raise if an intervened site is not a sample site of a traced kernel.
 
     Raises:
-        ValueError: If ``intervention`` names a site that is not a sample site of the
-            kernel.
+        ValueError: If ``intervention`` names a site that is not a sample site.
     """
     if intervention is None or kernel_spec is None or not kernel_spec.traced:
         return
@@ -187,23 +169,14 @@ def _warn_unreachable_intervention(
 ) -> None:
     """Warn for the intervened sites whose values cannot reach the output.
 
-    Args:
-        intervention: Mapping from site names to replacement values, or ``None``.
-        output: Name of the output site.
-        parents: For each sample site, the sample sites its distribution depends on.
-        fixed: Sites whose values are taken from the posterior.
-
     Warns:
         OutputWarning: If an intervened site reaches the output only through sites
-            whose values are fixed or intervened on, so that the draws do not respond
-            to it.
+            whose values are fixed or intervened on.
     """
     if not intervention:
         return
-    # Walk from the output up the sites it depends on, once through every site and
-    # once stopping at the sites whose values are fixed or intervened on. A site the
-    # first walk meets and the second does not reaches the output only through such
-    # sites, which do not pass the intervention on.
+    # Walk up from the output once through every site and once stopping at the fixed
+    # and intervened sites; a site only the first walk meets is blocked
     reached = []
     for stop in (frozenset(), fixed | intervention.keys()):
         seen = {output}
@@ -229,15 +202,7 @@ def _validate_shard_axis(
     shard_axis: str,
     X: ArrayLike | ArrayLoader | Iterable[Mapping[str, Array | np.ndarray]],
 ) -> None:
-    """Validate a multi-device sharding strategy and its input compatibility.
-
-    Checked before any ``shard_axis`` coercion so the contract holds regardless of
-    posterior state: ``shard_axis="draw"`` replicates the whole input across devices,
-    so a data loader (which batches internally) is rejected.
-
-    Args:
-        shard_axis: The sharding strategy to validate.
-        X: Input data, used to enforce the draw-parallel array-only constraint.
+    """Raise for an unknown ``shard_axis``, or ``"draw"`` with a data loader.
 
     Raises:
         ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``.
@@ -255,11 +220,7 @@ def _validate_shard_axis(
 
 
 def _validate_store(store: str, output_dir: str | Path | None) -> None:
-    """Validate the result-store selection for the streaming entry points.
-
-    Args:
-        store: The requested result store.
-        output_dir: The requested output directory for the persistent store.
+    """Raise for an unknown ``store``, or an ``output_dir`` with the memory store.
 
     Raises:
         ValueError: If ``store`` is not ``"persistent"`` or ``"memory"``, or an
@@ -277,16 +238,7 @@ def _validate_batch_size(
     batch_size: int | None,
     X: ArrayLike | ArrayLoader | Iterable[Mapping[str, Array | np.ndarray]],
 ) -> None:
-    """Validate an explicit ``batch_size`` for the streaming entry points.
-
-    ``batch_size`` is ignored for a data loader (it batches internally) and ``None``
-    means auto-resolve, so both are skipped. Otherwise it must be a positive integer.
-    The draw path divides and steps by it; the data path requires the same via the
-    ``ArrayLoader``.
-
-    Args:
-        batch_size: The requested batch size, ``None`` to auto-resolve.
-        X: Input data.
+    """Raise for an explicit ``batch_size`` of an array input that is not positive.
 
     Raises:
         ValueError: If ``batch_size`` is not a positive integer.
@@ -306,16 +258,10 @@ def _validate_aligned_inputs(
     X: ArrayLike | ArrayLoader | Iterable[Mapping[str, Array | np.ndarray]],
     y: ArrayLike | None,
 ) -> None:
-    """Validate that ``X`` and ``y`` share one leading-axis size, for either path.
+    """Raise for an array ``X`` or ``y`` that is 0-D, empty, or misaligned.
 
-    Called from the streaming entry points and ``fit`` before any artifact path is
-    created. A data loader is skipped. For an array ``X``, then ``X`` and ``y`` (if
-    given) must be at least 1-D and share ``X``'s leading-axis size. Keyword arguments
-    are not checked: an array whose leading axis differs is a constant of the call.
-
-    Args:
-        X: Input data.
-        y: Output data, or ``None``.
+    A data loader is skipped, and keyword arguments are not checked: an array whose
+    leading axis differs is a constant of the call.
 
     Raises:
         ValueError: If ``X`` or ``y`` is 0-D, ``X`` is empty, or ``y`` does not share
@@ -347,16 +293,12 @@ def _validate_kernel_signature(
     param_input: str,
     param_output: str,
 ) -> None:
-    """Validate the signature of a kernel function.
-
-    Args:
-        kernel: The kernel function to validate.
-        param_input: Name of the parameter in ``kernel`` corresponding to the input.
-        param_output: Name of the parameter in ``kernel`` corresponding to the output.
+    """Raise for a kernel signature that aimz cannot call.
 
     Raises:
-        KernelValidationError: If the kernel signature does not meet the required
-            constraints.
+        KernelValidationError: If the kernel takes variable arguments, lacks the input
+            or output parameter, gives the input a default, or gives the output a
+            default other than ``None``.
     """
     params = signature(kernel).parameters
     if any(
@@ -392,17 +334,12 @@ def _validate_kernel_body(
     model_trace: OrderedDict[str, dict],
     with_output: bool,
 ) -> None:
-    """Validate the body of a kernel function.
-
-    Args:
-        kernel: The kernel function to validate.
-        param_output: Name of the parameter in ``kernel`` corresponding to the output.
-        model_trace: The model trace containing the sites.
-        with_output: Whether the kernel is expected to have observed output.
+    """Raise for a trace without a usable output site.
 
     Raises:
-        KernelValidationError: If the kernel body does not meet the required
-            constraints.
+        KernelValidationError: If a site name holds ``/``, the output site is missing,
+            is not an observed sample site when ``with_output`` is set, or a kernel
+            parameter shares a site's name.
     """
     invalid_site = [site for site in model_trace if "/" in site]
     if invalid_site:
@@ -439,10 +376,8 @@ def _validate_kernel_body(
         )
         raise KernelValidationError(msg)
 
-    # Collect parameter names from the kernel signature, excluding the output parameter
     params = list(signature(kernel).parameters)
     params.remove(param_output)
-    # Check for name conflicts between parameter names and model site names
     conflicts = set(params) & set(model_trace.keys())
     if conflicts:
         msg = (
@@ -457,18 +392,10 @@ def _validate_X_y_to_jax(
     X: ArrayLike,
     y: ArrayLike | None = None,
 ) -> tuple[Array, Array] | Array:
-    """Validate and convert data arrays to JAX arrays.
-
-    Arrays are checked, converted, and placed on the same device as their originals
-    when available.
-
-    Args:
-        X: Input data. The leading axis is the observation axis.
-        y: Output data. The leading axis is the observation axis.
+    """Convert ``X`` and ``y`` to JAX arrays on their own devices, checking alignment.
 
     Returns:
-        Validated JAX arrays, returning ``X`` if only X is provided, or a tuple
-        ``(X, y)`` otherwise.
+        ``X`` alone when ``y`` is ``None``, else ``(X, y)``.
 
     Raises:
         ValueError: If ``X`` or ``y`` is 0-D, or ``y`` does not share ``X``'s

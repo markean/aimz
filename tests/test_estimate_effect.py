@@ -150,8 +150,7 @@ def test_estimate_effect_scenario_compatibility(
     rng_key = random.key(0)
     base = im.predict_on_batch(X, rng_key=rng_key)
 
-    # The baseline's group must be present in the intervention, and a tree without
-    # any predictive group, such as a log-likelihood tree, has none to compare
+    # A predictive group missing on either side
     with pytest.raises(
         ValueError,
         match=r"Group 'posterior_predictive' not found in `dt_intervention`.",
@@ -202,8 +201,7 @@ def test_estimate_effect_warns_on_stale_baseline(
     im.fit_on_batch(X, y, num_steps=10, progress=False)
     baseline = im.predict_on_batch(X, rng_key=random.key(0), return_sites="mu")
 
-    # A deterministic site is computed from the posterior samples alone, so scenarios
-    # drawn with different keys are still paired on it.
+    # A deterministic site stays paired across keys
     with warnings.catch_warnings():
         warnings.simplefilter("error", OutputWarning)
         im.estimate_effect(
@@ -215,7 +213,7 @@ def test_estimate_effect_warns_on_stale_baseline(
             ),
         )
 
-    # A refit replaces the posterior samples that the baseline was computed from.
+    # A refit replaces the posterior samples the baseline came from
     im.fit_on_batch(X, y, num_steps=10, progress=False)
     with pytest.warns(OutputWarning, match="have different posterior samples"):
         im.estimate_effect(

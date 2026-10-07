@@ -26,11 +26,7 @@ if TYPE_CHECKING:
 
 
 class BaseModel(ABC):
-    """Abstract base class for the impact model.
-
-    Attributes:
-        kernel: A probabilistic model with NumPyro primitives.
-    """
+    """Abstract base class for the impact model."""
 
     def __init__(
         self,
@@ -38,14 +34,7 @@ class BaseModel(ABC):
         param_input: str = "X",
         param_output: str = "y",
     ) -> None:
-        """Initialize the BaseModel with a callable model.
-
-        Args:
-            kernel: A probabilistic model with NumPyro primitives.
-            param_input: Name of the parameter in the ``kernel`` for the main input
-                data.
-            param_output: Name of the parameter in the ``kernel`` for the output data.
-        """
+        """Validate the kernel's signature and record the parameter names."""
         self._kernel = kernel
         self._param_input = param_input
         self._param_output = param_output
