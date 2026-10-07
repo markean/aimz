@@ -371,7 +371,9 @@ class ImpactModel(BaseModel):
 
         :setter: This sets :external:data:`~numpyro.infer.svi.SVIRunResult` without
             marking the model fitted. It does not perform posterior sampling; use
-            :meth:`~aimz.ImpactModel.sample` separately to obtain samples.
+            :meth:`~aimz.ImpactModel.sample` separately to obtain samples. Training
+            with :meth:`~aimz.ImpactModel.fit` or
+            :meth:`~aimz.ImpactModel.fit_on_batch` continues from its state.
         """
         return self._vi_result
 
@@ -390,6 +392,8 @@ class ImpactModel(BaseModel):
             This stores the result but does not mark the model fitted or draw
             posterior samples. Draw them with :meth:`~aimz.ImpactModel.sample` and
             register them via :meth:`~aimz.ImpactModel.set_posterior_sample`.
+            Training with :meth:`~aimz.ImpactModel.fit` or
+            :meth:`~aimz.ImpactModel.fit_on_batch` continues from its state.
         """
         if not np.all(np.isfinite(vi_result.losses)):
             msg = "Loss contains NaN or Inf, indicating numerical instability."
@@ -397,6 +401,7 @@ class ImpactModel(BaseModel):
             # autolog wrapper when it runs inside fit, and MLflow then hides it.
             warn(msg, category=FitWarning, stacklevel=2)
         self._vi_result = vi_result
+        self._vi_state = vi_result.state
 
     def _bind_kernel_args(
         self,
@@ -1330,14 +1335,16 @@ class ImpactModel(BaseModel):
         _group_kwargs(kwargs, forbid=(self.param_input, self.param_output))
         batch = {self.param_input: X, self.param_output: y, **kwargs}
 
-        if self._vi_state is None:
+        svi = cast("SVI", self.inference)
+        if self._vi_state is None or svi.constrain_fn is None:
             self._build_kernel_spec(
                 signature(self.kernel).bind(**batch).arguments,
                 with_output=True,
             )
             if rng_key is None:
                 self._rng_key, rng_key = random.split(self._rng_key)
-            self._vi_state = cast("SVI", self.inference).init(rng_key, **batch)
+            state = svi.init(rng_key, **batch)
+            self._vi_state = state if self._vi_state is None else self._vi_state
         # Trace the array leaves and hold every other value static, so arguments such
         # as integers and strings can set shapes or drive control flow in the kernel.
         if self._fn_vi_update is None:
@@ -1422,6 +1429,9 @@ class ImpactModel(BaseModel):
             self._rng_key, rng_key = random.split(self._rng_key)
         rng_key, rng_subkey = random.split(rng_key)
         if isinstance(self.inference, SVI):
+            if self._vi_state is not None and self.inference.constrain_fn is None:
+                rng_key, rng_init = random.split(rng_key)
+                self.inference.init(rng_init, **args_bound)
             logger.info("Performing variational inference optimization")
             vi_result = self.inference.run(
                 rng_subkey,

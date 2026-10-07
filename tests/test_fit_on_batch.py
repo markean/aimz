@@ -24,7 +24,7 @@ from numpyro.infer.autoguide import AutoNormal
 from numpyro.optim import Adam
 
 from aimz import ImpactModel
-from tests.conftest import lm
+from tests.conftest import _make_svi, lm
 
 
 @pytest.mark.parametrize("vi", [lm], indirect=True)
@@ -118,3 +118,23 @@ def test_fit_on_batch_length_mismatch_raises(
         match=r"`X` and `y` must have the same leading-axis size.",
     ):
         im.fit_on_batch(X=X, y=y[:-1])
+
+
+def test_fit_on_batch_continues_from_vi_result(
+    synthetic_data: tuple[Array, Array],
+) -> None:
+    """Training continues from a result set through `vi_result`, on either path."""
+    X, y = synthetic_data
+    trained = _make_svi(lm).run(
+        random.key(0), num_steps=2000, X=X, y=y, progress_bar=False
+    )
+    # The models hold inference objects that never trained themselves; a first loss
+    # near the end of the earlier run shows the training continued from its state
+    im = ImpactModel(lm, rng_key=random.key(1), inference=_make_svi(lm))
+    im.vi_result = trained
+    im.fit_on_batch(X, y, num_steps=20, num_samples=10, progress=False)
+    assert im.vi_result.losses[0] < trained.losses[-50:].mean() * 1.2
+    im = ImpactModel(lm, rng_key=random.key(2), inference=_make_svi(lm))
+    im.vi_result = trained
+    im.fit(X, y, batch_size=len(X), epochs=1, num_samples=10, progress=False)
+    assert im.vi_result.losses[0] < trained.losses[-50:].mean() * 1.2

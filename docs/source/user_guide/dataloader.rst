@@ -239,6 +239,8 @@ After a manual training loop you can populate the model state so downstream call
     # Register the samples so predictive methods can use them
     im.set_posterior_sample(posterior_sample)
 
+Training with :meth:`~aimz.ImpactModel.fit` or :meth:`~aimz.ImpactModel.fit_on_batch` afterwards continues from the stored state.
+
 The same wrapped loader then serves prediction and likelihood evaluation directly, as shown above.
 
 
