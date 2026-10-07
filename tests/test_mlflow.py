@@ -54,11 +54,8 @@ from aimz.mlflow import (
 
 @pytest.fixture(autouse=True)
 def _isolate_mlflow_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pin MLflow's tracking store to the test's temporary directory.
-
-    Autologging errors are re-raised instead of being logged as warnings, so a failed
-    autolog step fails the test.
-    """
+    """Pin MLflow's tracking store to the test's temporary directory."""
+    # Autologging errors are raised instead of logged, so they fail the test
     monkeypatch.setenv("MLFLOW_AUTOLOGGING_TESTING", "true")
     monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path}/mlflow.db")
 
@@ -68,12 +65,7 @@ def test_pyfunc_round_trip_predicts(
     synthetic_data: tuple[Array, Array],
     tmp_path: Path,
 ) -> None:
-    """Save an aimz model, reload it through the pyfunc flavor, and predict.
-
-    Exercises the flavor round-trip: save with signature inference from the
-    ``input_example``, :func:`mlflow.pyfunc.load_model`, and prediction through the
-    wrapper's :meth:`~aimz.ImpactModel.predict` delegation.
-    """
+    """A saved model reloads through the pyfunc flavor with a signature and predicts."""
     X, _ = synthetic_data
     rng_key = random.key_data(im_lm_svi_fitted.rng_key)
     save_model(
@@ -87,12 +79,9 @@ def test_pyfunc_round_trip_predicts(
     loaded = mlflow.pyfunc.load_model(str(tmp_path / "model"))
 
     assert isinstance(loaded.get_raw_model(), ImpactModel)
-    # Signature inference swallows all exceptions upstream; assert it actually
-    # produced a signature, or a broken wrapper wiring would pass silently.
+    # Signature inference swallows exceptions, so check that it produced one
     assert loaded.metadata.signature is not None
 
-    # The tensor signature enforces a NumPy input; `progress` defaults to False from the
-    # signature params (MLflow injects it), so no params are needed here.
     out = cast("xr.DataTree", loaded.predict(np.asarray(X)))
 
     assert out["posterior_predictive"]["y"].sizes["y_dim_0"] == len(X)
@@ -117,8 +106,7 @@ def test_pyfunc_serving_params(
     )
     loaded = mlflow.pyfunc.load_model(str(tmp_path / "model"))
 
-    # The signature records the parameters, so they are the loaded model's defaults:
-    # arrays, which a scoring server serializes, drawn under the recorded seed
+    # The recorded params are the loaded model's defaults
     out = cast("dict[str, np.ndarray]", loaded.predict(np.asarray(X)))
     assert out["y"].shape[-1] == len(X)
     scoring_server.predictions_to_json(out, StringIO())
@@ -132,11 +120,7 @@ def test_pyfunc_predict_with_dict_input(
     synthetic_data: tuple[Array, Array],
     tmp_path: Path,
 ) -> None:
-    """Saved without an ``input_example`` (no signature), a dict input is unpacked.
-
-    The wrapper forwards a mapping as ``predict(**model_input)``, so prediction keyword
-    arguments pass through the pyfunc boundary.
-    """
+    """Saved without a signature, a mapping input is unpacked as keyword arguments."""
     X, _ = synthetic_data
     save_model(im_lm_svi_fitted, tmp_path / "model")
 
@@ -194,12 +178,7 @@ def test_log_model_round_trip_outputs_match(
     im_lm_svi_fitted: ImpactModel,
     synthetic_data: tuple[Array, Array],
 ) -> None:
-    """A logged model reloads predicting identically to the original.
-
-    Across a :func:`~aimz.mlflow.log_model` -> :func:`~aimz.mlflow.load_model` round
-    trip, the reloaded model must reproduce predictions draw-for-draw under the same
-    explicit PRNG key, without a refit.
-    """
+    """A logged model reloads and predicts identically under the same key."""
     X, _ = synthetic_data
     with mlflow.start_run():
         info = log_model(im_lm_svi_fitted, name="model")
@@ -226,8 +205,7 @@ def test_load_model_guards(
     save_model(im_lm_svi_fitted, tmp_path / "model")
     save_model(im_lm_svi_fitted, tmp_path / "gated")
 
-    # The only reader of the flavor key: a model written by a future aimz version, or
-    # a tampered MLmodel file, must raise instead of blindly unpickling `model.pkl`
+    # An unknown format must raise instead of unpickling `model.pkl`
     mlmodel = mlflow.models.Model.load(str(tmp_path / "model"))
     mlmodel.flavors["aimz"]["serialization_format"] = "unsupported_format"
     mlmodel.save(str(tmp_path / "model" / "MLmodel"))
@@ -249,12 +227,7 @@ def test_load_model_guards(
 def test_autolog_input_example_snapshot_copies_multi_input(
     synthetic_data: tuple[Array, Array],
 ) -> None:
-    """A multi-array fit call yields a dict example copied before training.
-
-    The label and PRNG key are excluded, and the example rows are copies, so
-    in-place changes to the training arrays after the snapshot (i.e. during
-    training) cannot leak into the logged example.
-    """
+    """The input example of a multi-array fit excludes the label and copies the rows."""
     X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(0), inference=make_svi(lm))
     z = np.zeros(len(X), dtype=np.float32)
@@ -355,10 +328,7 @@ def test_autolog_logs_model_with_loader_input(
 def test_autolog_manages_run_without_model(
     synthetic_data: tuple[Array, Array],
 ) -> None:
-    """Without an active run, autologging creates, tags, and ends its own run.
-
-    With ``log_models=False``, no model is logged.
-    """
+    """Without an active run, autologging manages its own run and logs no model."""
     X, y = synthetic_data
     autolog(log_models=False, extra_tags={"key": "value"})
     try:
@@ -409,10 +379,7 @@ def test_autolog_logs_mcmc_sampler_settings(
 def test_autolog_logs_elbo_when_fit_raises(
     synthetic_data: tuple[Array, Array],
 ) -> None:
-    """A fit raising after optimization keeps its ELBO curve.
-
-    The inference is a subclass of SVI, which is logged as SVI, with its optimizer.
-    """
+    """A fit raising after optimization keeps its ELBO curve, for an SVI subclass."""
 
     class _SVI(SVI):
         pass
@@ -471,8 +438,7 @@ def test_autolog_reports_unreadable_kernel_source(
     finally:
         autolog(disable=True)
 
-    # The message goes through MLflow's logger, shown by default like the messages of
-    # the built-in flavors, and muted by `silent=True`
+    # Shown through MLflow's logger by default, muted by `silent=True`
     shown = "Failed to log the kernel source code" in capsys.readouterr().err
     assert shown is not silent
     assert len(logged) == 1

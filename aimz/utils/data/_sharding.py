@@ -42,42 +42,15 @@ def _create_sharded_sampler(
     n_kwargs_const: int,
     shard_axis: Literal["obs", "draw"] = "obs",
 ) -> Callable:
-    """Create a sharded predictive sampling function.
+    """Create a jitted predictive sampler, sharded over ``mesh`` if any.
 
-    Args:
-        mesh: The JAX mesh object defining the device mesh for sharding.
-        n_kwargs_array: The number of arguments in the keyword arguments that are
-            array-like.
-        n_kwargs_const: The number of array leaves in the call constants, which are
-            traced and replicated rather than sharded.
-        shard_axis: ``"obs"`` (default) shards the observation axis of ``X`` and the
-            array-kwargs and replicates the posterior on every device. ``"draw"``
-            shards the posterior draws axis and replicates ``X`` and the array-kwargs;
-            the caller then passes a pre-split ``(num_samples,)`` key array as
-            ``rng_key`` and the per-device draw count as ``num_samples``.
-
-    Returns:
-        A sharded function that takes the following arguments:
-            - kernel: A probabilistic model with NumPyro primitives.
-            - num_samples: The number of samples to draw (per-device under ``"draw"``
-                sharding).
-            - rng_key: A scalar PRNG key under ``"obs"`` sharding, or a pre-split
-                ``(num_samples,)`` key array under ``"draw"`` sharding.
-            - return_sites: Names of variables (sites) to return.
-            - samples: A dictionary of samples to condition on.
-            - params: Values of the kernel's ``param`` sites and mutable state,
-                replicated across devices as dynamic inputs.
-            - intervention: A dictionary mapping sample site names to replacement
-                values used during predictive sampling. Replicated across devices
-                as dynamic inputs rather than captured in a static kernel.
-            - param_input: The name of the parameter in the ``kernel`` for the input
-                data.
-            - kwargs_key: The names of the per-observation keyword arguments.
-            - kwargs_static: The static part of the call constants (see
-                :func:`~aimz.utils._kwargs._partition`).
-            - X: Input data.
-            - *args: The per-observation keyword arguments in ``kwargs_key`` order,
-                then the array leaves of the call constants.
+    ``"obs"`` shards the input and the per-observation keyword arguments and
+    replicates the posterior; ``"draw"`` shards the pre-split per-draw keys and the
+    posterior and replicates the input. The function takes the kernel, the draw count
+    (per device under ``"draw"``), the key or keys, the return sites, the samples, the
+    params, the intervention, the input parameter name, the per-observation keyword
+    names, the static constants, the input, and then the per-observation arrays and
+    the array leaves of the constants.
     """
     draws = shard_axis == "draw"
     axis = None
@@ -98,8 +71,7 @@ def _create_sharded_sampler(
         X: Array,
         *args: object,
     ) -> dict[str, Array]:
-        # Draws-sharding forwards the device's slice of the pre-split per-draw keys;
-        # obs-sharding splits the device-folded scalar key into ``num_samples`` keys.
+        # Under `obs` each device folds its index into the key before splitting it
         if draws:
             rng_keys = rng_key
         else:
@@ -128,8 +100,7 @@ def _create_sharded_sampler(
             intervention={**intervention, **fields},
             model_kwargs=model_kwargs,
         )
-        # Checked at trace time, so every device count raises the same error for a site
-        # without an observation axis.
+        # Checked at trace time, so every device count raises the same error
         if not draws:
             for site, value in out.items():
                 _validate_streamed_axis_size(
@@ -154,11 +125,8 @@ def _create_sharded_sampler(
             ],
         )(f)
 
-    # Draw mode shards the posterior draw axis (rng keys + samples) and replicates the
-    # whole input; data mode shards the observation axis of the input and replicates
-    # the posterior. Under draw, ``out_spec`` shards only the leading axis: a
-    # rank-agnostic single-axis spec keeps scalar-per-draw (rank-1) sites valid, whereas
-    # ``PartitionSpec(axis, None)`` would require rank >= 2.
+    # Under `draw`, `out_spec` shards only the leading axis, so a rank-1 per-draw site
+    # stays valid
     if draws:
         rng_spec = samples_spec = PartitionSpec(axis)
         x_spec = kw_spec = PartitionSpec()
@@ -211,35 +179,13 @@ def _create_sharded_log_likelihood(
     n_kwargs_const: int,
     shard_axis: Literal["obs", "draw"] = "obs",
 ) -> Callable:
-    """Create a sharded log-likelihood function.
+    """Create a jitted log-likelihood function, sharded over ``mesh`` if any.
 
-    Args:
-        mesh: The JAX mesh object defining the device mesh for sharding.
-        n_kwargs_array: The number of arguments in the keyword arguments that are
-            array-like.
-        n_kwargs_const: The number of array leaves in the call constants, which are
-            traced and replicated rather than sharded.
-        shard_axis: ``"obs"`` (default) shards the observation axis of ``X``/``y`` and
-            the array-kwargs and replicates the posterior. ``"draw"`` shards the
-            posterior draws axis and replicates ``X``/``y`` and the array-kwargs.
-
-    Returns:
-        A sharded function that takes the following arguments:
-            - kernel: A probabilistic model with NumPyro primitives.
-            - samples: A dictionary of posterior samples to condition on.
-            - params: Values of the kernel's ``param`` sites and mutable state,
-                replicated across devices as dynamic inputs.
-            - param_input: The name of the parameter in the ``kernel`` for the input
-                data.
-            - param_output: The name of the parameter in the ``kernel`` for the output
-                data.
-            - kwargs_key: The names of the per-observation keyword arguments.
-            - kwargs_static: The static part of the call constants (see
-                :func:`~aimz.utils._kwargs._partition`).
-            - X: Input data.
-            - y: Output data.
-            - *args: The per-observation keyword arguments in ``kwargs_key`` order,
-                then the array leaves of the call constants.
+    ``"obs"`` shards the input, the output, and the per-observation keyword arguments
+    and replicates the posterior; ``"draw"`` the reverse. The function takes the
+    kernel, the samples, the params, the input and output parameter names, the
+    per-observation keyword names, the static constants, the input, the output, and
+    then the per-observation arrays and the array leaves of the constants.
     """
     draws = shard_axis == "draw"
 
@@ -290,10 +236,8 @@ def _create_sharded_log_likelihood(
         )(f)
 
     (axis,) = mesh.axis_names
-    # Draw mode shards the posterior draw axis (samples) and replicates the whole input
-    # (X + y); data mode shards the observation axis of the input and replicates the
-    # posterior. ``out_spec`` matches the sampler factory: a rank-agnostic single-axis
-    # spec under draw, the observation axis under data.
+    # `out_spec` as in the sampler: the leading axis under `draw`, the observations
+    # under `obs`
     if draws:
         samples_spec = PartitionSpec(axis)
         xy_spec = kw_spec = PartitionSpec()
@@ -338,18 +282,7 @@ def _create_sharded_log_likelihood(
 
 
 def _replicate(arr: ArrayLike, sharding: Sharding | None) -> Array:
-    """Place a whole input array replicated across devices (single device: as-is).
-
-    Draw-parallel holds the input resident and replicated while only the posterior draw
-    axis is sharded, so every device sees the full input.
-
-    Args:
-        arr: The array to replicate.
-        sharding: The replicated sharding, or ``None`` on a single device.
-
-    Returns:
-        The array placed on every device (or left as-is when ``sharding`` is ``None``).
-    """
+    """Place an array replicated across devices, or as is on a single device."""
     if sharding is None:
         return jnp.asarray(arr)
 
@@ -360,16 +293,8 @@ def _replicate(arr: ArrayLike, sharding: Sharding | None) -> Array:
 def _take_draws(arr: Array, start: int, *, size: int) -> Array:
     """Take ``size`` draws from ``start`` along the leading axis.
 
-    ``start`` is traced, so every chunk of a call reuses one compiled program. Indices
-    past the last draw repeat it, which pads a shorter last chunk.
-
-    Args:
-        arr: The whole array of draws or per-draw keys.
-        start: Index of the first draw to take.
-        size: Number of draws to take.
-
-    Returns:
-        The ``size`` draws starting at ``start``.
+    ``start`` is traced, so every chunk reuses one program; indices past the last draw
+    repeat it, which pads a shorter last chunk.
     """
     return arr[jnp.minimum(start + jnp.arange(size), arr.shape[0] - 1)]
 
@@ -383,29 +308,14 @@ def _prepare_draw_chunk(
     num_devices: int,
     sharding: Sharding | None,
 ) -> tuple[dict[str, Array], Array | None, int]:
-    """Slice, pad, and shard one draw chunk for draw-parallel streaming.
+    """Slice, pad, and shard the posterior and the keys of the draws ``[start:stop)``.
 
-    Returns ``(chunk_samples, chunk_keys, per_device)`` for draws ``[start:stop)``: the
-    posterior slice and per-draw keys padded to ``size`` draws rounded up to a
-    multiple of ``num_devices``, so a shorter last chunk has the same shape as the
-    others (reusing their compiled program) and splits evenly under draw-parallel
-    sharding, with the per-device draw count. A host-backed posterior is sliced and
-    padded on the host, so only the keys need a compiled program. ``chunk_samples`` is
-    empty for prior predictive; ``chunk_keys`` is ``None`` when no keys are used.
-
-    Args:
-        posterior: The whole posterior to slice (empty for prior predictive).
-        draw_keys: The whole per-draw key array, or ``None`` when no keys are used.
-        start: Start index of the chunk along the draw axis.
-        stop: Stop index of the chunk along the draw axis.
-        size: Draw count to pad a shorter chunk up to.
-        num_devices: Number of devices the draw axis is sharded across.
-        sharding: The draw-sharding to place the chunk on, or ``None`` on a single
-            device.
+    The chunk is padded to ``size`` rounded up to a multiple of ``num_devices``, so a
+    shorter last chunk keeps the shape of the others. A host-backed posterior is sliced
+    on the host.
 
     Returns:
-        The padded posterior chunk, the padded chunk keys (or ``None``), and the
-        per-device draw count.
+        The posterior chunk, the chunk keys or ``None``, and the per-device draw count.
     """
     clen = stop - start
     clen_pad = -(-max(clen, size) // num_devices) * num_devices

@@ -109,8 +109,7 @@ def test_kernel_body_validation(synthetic_data: tuple[Array, Array]) -> None:
         with pytest.raises(KernelValidationError):
             im.fit(X, y, batch_size=len(X), progress=False)
 
-    # Without an output, the prior predictive trace still needs a sample or
-    # deterministic site named after it
+    # The prior predictive trace needs a sample or deterministic output site
     def delta_only(X: Array, y: Array | None = None) -> None:
         sample("z", dist.Delta(y if y is not None else jnp.zeros(len(X))), obs=y)
 
@@ -127,8 +126,7 @@ def test_dual_branch_kernel_sites(synthetic_data: tuple[Array, Array]) -> None:
         rng_key=random.key(42),
         inference=make_svi(lm_dual_branch),
     )
-    # The deterministic output of the data-free branch validates before a fit and
-    # leads the default return sites once
+    # The data-free branch validates before a fit, its output listed once
     dt = im.sample_prior_predictive_on_batch(X, num_samples=10)
     assert "y" in dt["prior_predictive"]
     assert im.kernel_spec.return_sites == ("y", "mu")

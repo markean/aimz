@@ -45,23 +45,13 @@ def _prepare_batch(
     device: Sharding | None = None,
     size: int = 0,
 ) -> tuple[dict[str, Array | np.ndarray], int]:
-    """Validate named observation arrays and optionally pad/place them for inference.
-
-    Used both to inspect a stream's first batch without device transfer and to
-    prepare each inference batch. The returned count excludes synthetic rows.
-
-    Args:
-        batch: Mapping of parameter names to NumPy or JAX arrays.
-        param_input: Required model input field.
-        device: Observation sharding, or ``None`` to leave the arrays unplaced.
-        size: Row count to pad a smaller batch up to, so it has the same shape as the
-            stream's first batch and reuses its compiled program.
+    """Validate a batch of named arrays, and pad and place it for inference.
 
     Returns:
-        The prepared mapping and the number of valid observations.
+        The prepared mapping and the number of valid observations, padding excluded.
 
     Raises:
-        TypeError: If the batch is not a mapping of named NumPy/JAX arrays.
+        TypeError: If the batch is not a mapping of named NumPy or JAX arrays.
         ValueError: If the input is missing, empty, scalar, or misaligned.
     """
     if not isinstance(batch, Mapping):
@@ -100,18 +90,13 @@ def _prepare_batch(
     return arrays, n_valid
 
 
-# Soft memory budget per batch or chunk, in bytes. The element cap is derived at call
-# time by dividing this by the output dtype's item size, so the budget tracks precision:
-# ~100 MB whether the predictive output is float32 (default, 25M elements) or float64
-# (under `jax_enable_x64`, 12.5M elements). Helps control memory and disk usage.
+# Soft memory budget per batch or chunk; the element cap derives from it by the
+# output's item size, so it tracks the float precision
 MAX_BYTES = 100_000_000
-# Automatic batching targets this many batches per writer thread, so the writer pool
-# has enough independent work items to run fully occupied with headroom for load
-# balancing and the pipelined producer.
+# Batches per writer thread that automatic batching targets
 _BATCHES_PER_WRITER = 4
-# Floor on the output bytes a batch produces under automatic batching. Splitting below
-# this trades real I/O parallelism for per-chunk file and dispatch overhead: outputs
-# too small to reach it are not I/O-bound in the first place, so they stay whole.
+# Floor on the output bytes of an automatic batch: a smaller output is not I/O-bound
+# and stays whole
 _BATCH_BYTES_MIN = 4 * 1024 * 1024
 
 
@@ -122,43 +107,29 @@ def _resolve_batch_size(
     num_devices: int,
     item_nbytes: int | None = None,
 ) -> int:
-    """Resolve the per-step batch size along the chunked axis of a 2-axis output.
+    """Resolve the batch size along the chunked axis of a two-axis output.
 
-    Each streamed step produces ``batch_size * other_size`` elements of every return
-    site: data-parallel chunks the observation axis (``other_size`` draws per
-    observation), while draw-parallel chunks the draw axis (``other_size`` resident
-    observations). An explicit ``batch_size`` is used as given. It is the caller's
-    contract, even when it yields a single batch.
-
-    Automatic resolution balances three concerns: each batch stays within the
-    :data:`MAX_BYTES` memory budget, counting the ``item_nbytes`` of every return site;
-    the axis is split into enough batches to keep the writer-thread pool occupied
-    (:data:`_BATCHES_PER_WRITER` per writer); and no batch is smaller than one holding
-    :data:`_BATCH_BYTES_MIN` of a single value per element, so tiny workloads (which
-    are not I/O-bound) stay whole instead of paying per-chunk overhead. The memory
-    budget takes precedence. The result is rounded down to a multiple of
-    ``num_devices`` (floored at ``num_devices``) and clamped to ``axis_size``.
+    An explicit ``batch_size`` is used as given. Otherwise each batch stays within
+    :data:`MAX_BYTES`, the axis splits into enough batches to occupy the writer pool,
+    and no batch is smaller than :data:`_BATCH_BYTES_MIN`, the memory budget taking
+    precedence; the result is rounded down to a multiple of ``num_devices`` and
+    clamped to the axis.
 
     Args:
         batch_size: The requested batch size, or ``None`` to resolve a default.
-        axis_size: Length of the axis being chunked (observations or draws).
+        axis_size: Length of the chunked axis, observations or draws.
         other_size: Length of the axis held whole within each step.
         num_devices: Number of devices the chunked axis is sharded across.
-        item_nbytes: Bytes of output that one index along the chunked axis produces
-            across every return site, or ``None`` for a single value per element.
-
-    Returns:
-        The resolved batch size.
+        item_nbytes: Output bytes per index along the chunked axis, or ``None`` for a
+            single value per element.
     """
     if batch_size is not None:
         return batch_size
 
-    # Output chunks hold predictive samples in JAX's default float precision; resolve
-    # the element budgets against that dtype so they track precision.
+    # The budgets are resolved against JAX's default float type
     itemsize = jnp.result_type(float).itemsize
     other_size = max(1, other_size)
 
-    # Memory ceiling and pool-occupancy target per batch, and the output-size floor.
     cap = MAX_BYTES // max(1, item_nbytes or itemsize * other_size)
     target_batches = _BATCHES_PER_WRITER * min(cpu_count() or 1, _WRITER_COUNT_MAX)
     target = -(-axis_size // target_batches)
@@ -170,21 +141,7 @@ def _resolve_batch_size(
 
 
 def _fits_single_batch(axis_size: int, item_nbytes: int) -> bool:
-    """Return whether the whole axis fits the per-batch memory budget as one batch.
-
-    Mirrors the memory ceiling used by :func:`_resolve_batch_size`, independent of its
-    pool-occupancy splitting policy. Callers that cannot tolerate a split axis (e.g. an
-    observation-aligned posterior) use this to decide between pinning a whole-input
-    batch and falling back to draw-parallel streaming.
-
-    Args:
-        axis_size: Length of the axis that would be chunked.
-        item_nbytes: Bytes of output that one index along the axis produces across
-            every return site.
-
-    Returns:
-        ``True`` if a single batch covering the whole axis stays within the budget.
-    """
+    """Return whether the whole axis fits :data:`MAX_BYTES` as one batch."""
     return axis_size * item_nbytes < MAX_BYTES
 
 
@@ -199,25 +156,19 @@ def _setup_inputs(
     shuffle: bool = False,
     **kwargs: object,
 ) -> tuple[Iterable[Mapping[str, Array | np.ndarray]], dict]:
-    """Prepare a data loader and grouped keyword arguments.
+    """Return the data loader and the call constants of a streamed or fitting call.
 
-    Args:
-        X: Input array with observations on the leading axis, or a data loader
-            yielding batch mappings keyed by kernel parameter names.
-        y: Output array with observations on the leading axis. Must be ``None`` if
-            ``X`` is a data loader.
-        param_input: Dataset key for ``X``, matching the kernel's input parameter so
-            each batch is keyed as the downstream lookup expects.
-        param_output: Dataset key for ``y``, matching the kernel's output parameter.
-        rng_key: A pseudo-random number generator key.
-        batch_size: The size of batches for data loading, or ``None`` for the whole
-            input.
-        shuffle: Whether to shuffle the dataset before batching.
-        **kwargs: Additional arguments passed to the model.
+    An array input is wrapped in an :class:`~aimz.utils.data.ArrayLoader` keyed by the
+    kernel's parameter names; a data loader is used as is.
 
-    Returns:
-        - The data loader for batching.
-        - The constants of the call, passed whole to every batch.
+    Raises:
+        TypeError: If ``y`` is passed with a data loader, or ``X`` is neither an array
+            nor a data loader.
+        ValueError: If ``X`` or ``y`` is 0-D.
+
+    Warns:
+        OutputWarning: If an :class:`~aimz.utils.data.ArrayLoader` that shuffles is
+            passed where the data order matters.
     """
     kwargs_array, kwargs_extra = _group_kwargs(
         kwargs,
@@ -238,8 +189,6 @@ def _setup_inputs(
             raise ValueError(msg)
         if batch_size is None:
             batch_size = len(X)
-        # Key the dataset by the kernel's input/output parameter names (alongside the
-        # array kwargs) so each batch is keyed as the downstream lookup expects.
         kwargs_array[param_input] = X
         kwargs_array[param_output] = y
         loader = ArrayLoader(

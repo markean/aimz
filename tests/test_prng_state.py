@@ -23,10 +23,7 @@ from tests.conftest import lm_subsample, make_svi
 
 
 def test_rng_key_consistency(synthetic_data: tuple[Array, Array]) -> None:
-    """An explicit key leaves the model's internal key unchanged on every method.
-
-    A legacy ``uint32`` key given to the constructor is converted with a warning.
-    """
+    """An explicit key leaves the model's internal key unchanged on every method."""
     X, y = synthetic_data
     with pytest.warns(AimzWarning, match="Legacy `uint32` PRNGKey detected"):
         im = ImpactModel(

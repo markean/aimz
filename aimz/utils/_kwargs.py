@@ -28,8 +28,7 @@ if TYPE_CHECKING:
 
     from jax.typing import ArrayLike
 
-# Prefix of the reserved batch-field names that carry per-observation intervention
-# values alongside the input, so they are batched, padded, and sharded with it.
+# Prefix of the reserved batch fields that carry per-observation intervention values
 _INTERVENTION_PREFIX = "__do__"
 
 # Placeholder for the traced (array) leaves in the static part of a partition.
@@ -37,17 +36,10 @@ _TRACED = object()
 
 
 def _is_per_observation(value: object, n_obs: int | None) -> bool:
-    """Return whether a value is an array aligned with the observation axis.
+    """Return whether a value is an array with ``n_obs`` rows on its leading axis.
 
-    Args:
-        value: The value to check.
-        n_obs: The number of observations in an array input, or ``None`` when the input
-            is a data loader, whose batches carry the per-observation arrays, or under
-            ``shard_axis="draw"``.
-
-    Returns:
-        ``True`` if the value is an at least 1-D array-like with ``n_obs`` entries on
-        its leading axis.
+    ``n_obs`` is ``None`` when the input is a data loader or is replicated under
+    ``shard_axis="draw"``, so that no value is per observation.
     """
     if n_obs is None or not _is_arraylike(value):
         return False
@@ -61,26 +53,10 @@ def _group_kwargs(
     n_obs: int | None = None,
     forbid: tuple[str, ...] = (),
 ) -> tuple[dict, dict]:
-    """Separate keyword arguments into per-observation arrays and call constants.
-
-    Per-observation arrays are batched and sharded with the input. Every other value is
-    a constant of the call, passed whole to every batch, including an array whose
-    leading axis does not match the input.
-
-    Args:
-        kwargs: A dictionary of keyword arguments.
-        n_obs: The number of observations in an array input, or ``None`` when the input
-            is a data loader, whose batches carry the per-observation arrays.
-        forbid: Names that must not appear in ``kwargs``. Reserved parameter names whose
-            values are supplied through dedicated arguments instead.
-
-    Returns:
-        A tuple containing two dictionaries:
-            - kwargs_array: Contains the per-observation arrays.
-            - kwargs_extra: Contains the constants of the call.
+    """Split keyword arguments into per-observation arrays and call constants.
 
     Raises:
-        TypeError: If a forbidden name appears in ``kwargs``.
+        TypeError: If a name in ``forbid`` appears in ``kwargs``.
     """
     for name in forbid:
         if name in kwargs:
@@ -98,16 +74,8 @@ def _group_kwargs(
 def _partition(kwargs: Mapping[str, object]) -> tuple[list, tuple]:
     """Split call constants into traced array leaves and a hashable static part.
 
-    JAX and NumPy arrays, including NumPy scalars, are traced, and every other leaf is
-    held static, so it can set shapes or drive Python control flow as it does in an
-    uncompiled call.
-
-    Args:
-        kwargs: The call constants by name.
-
-    Returns:
-        The array leaves in order, and the static part that :func:`_combine` uses to
-        rebuild the constants from them.
+    Every leaf that is not an array is static, so it can set shapes or drive control
+    flow as in an uncompiled call.
 
     Raises:
         TypeError: If a constant holds a leaf that is neither an array nor hashable.
@@ -136,15 +104,7 @@ def _partition(kwargs: Mapping[str, object]) -> tuple[list, tuple]:
 
 
 def _combine(leaves: Iterable[object], static: tuple) -> dict:
-    """Rebuild the call constants from their array leaves and static part.
-
-    Args:
-        leaves: The array leaves returned by :func:`_partition`, possibly traced.
-        static: The static part returned by :func:`_partition`.
-
-    Returns:
-        The call constants by name.
-    """
+    """Rebuild the call constants from their array leaves and static part."""
     leaves = iter(leaves)
 
     return {
@@ -160,19 +120,7 @@ def _split_intervention(
     intervention: dict | None,
     n_obs: int | None,
 ) -> tuple[dict, dict]:
-    """Separate per-observation intervention values from replicated constants.
-
-    Args:
-        intervention: A dictionary mapping sample site names to replacement values, or
-            ``None``.
-        n_obs: The number of observations in an array input, or ``None`` when the input
-            is a data loader or under ``shard_axis="draw"``.
-
-    Returns:
-        A tuple containing two dictionaries:
-            - constants: The replicated values keyed by site name.
-            - fields: The per-observation values keyed by reserved batch-field name.
-    """
+    """Split an intervention into replicated constants and per-observation fields."""
     constants, fields = {}, {}
     for site, value in (intervention or {}).items():
         if _is_per_observation(value, n_obs):
@@ -186,16 +134,7 @@ def _split_intervention(
 def _split_intervention_fields(
     kwargs: Mapping[str, object],
 ) -> tuple[dict[str, object], dict[str, object]]:
-    """Separate the reserved per-observation intervention fields from model kwargs.
-
-    Args:
-        kwargs: Keyword arguments bound by name, possibly including reserved fields.
-
-    Returns:
-        A tuple containing two dictionaries:
-            - model_kwargs: The arguments passed to the model.
-            - intervention: The per-observation values keyed by sample site name.
-    """
+    """Split the reserved per-observation intervention fields from model kwargs."""
     model_kwargs = {
         name: value
         for name, value in kwargs.items()

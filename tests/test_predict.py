@@ -52,13 +52,9 @@ def test_predict_rejects_unsupported_size(
     im_lm_svi_fitted: ImpactModel,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`.predict()` rejects return sites whose axis-1 size doesn't match the batch.
-
-    Streaming requires every return site to emit an axis-1 size equal to the input
-    batch size; ``sigma`` in ``lm`` does not satisfy this.
-    """
+    """A site without an observation axis, like `sigma`, cannot stream under `obs`."""
     X, _ = synthetic_data
-    # Force the single-device (unsharded) path by swapping in a mesh-less streamer.
+    # A mesh-less streamer forces the single-device path
     monkeypatch.setattr(
         im_lm_svi_fitted,
         "_streamer",
@@ -249,16 +245,12 @@ def test_predict_generator_matches_array(
     synthetic_data: tuple[Array, Array],
     im_lm_svi_fitted: ImpactModel,
 ) -> None:
-    """A one-shot generator of regular batches reproduces the array result exactly.
-
-    The last batch of 4 is padded to the 3 host devices and trimmed on the way out,
-    and the persistent store takes the append strategy since the generator has no
-    length.
-    """
+    """A one-shot generator of regular batches reproduces the array result exactly."""
     X, _ = synthetic_data
     im = im_lm_svi_fitted
     rng_key = random.key(7)
     ref = im.predict(X, rng_key=rng_key, batch_size=6, progress=False)
+    # The last batch of 4 is padded to the 3 devices, and the store appends
     via = im.predict(
         _iter_batches(X, sizes=[6] * 16 + [4]), rng_key=rng_key, progress=False
     )
@@ -331,8 +323,7 @@ def test_predict_blocked_intervention() -> None:
     y = 3.0 + X[:, 0]
     im = ImpactModel(centered, rng_key=random.key(0), inference=make_svi(centered))
     im.fit_on_batch(X, y, num_steps=10, num_samples=5, progress=False)
-    # `z` reaches `y` only through `m`, whose posterior draws do not respond to it,
-    # while an intervention on `m` itself takes effect
+    # `z` reaches `y` only through `m`, whose posterior draws block it
     msg = "reach the output site 'y' only through"
     with pytest.warns(OutputWarning, match=msg):
         im.predict(X, intervention={"z": 0.0}, store="memory", progress=False)

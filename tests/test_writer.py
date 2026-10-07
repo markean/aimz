@@ -83,11 +83,7 @@ def _run_pool(
 
 @pytest.fixture
 def fake_psutil(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
-    """Install a fake `psutil` with a controllable `virtual_memory().available`.
-
-    Decouples the tests from the host's available memory, so the memory-aware branch
-    runs deterministically in any environment.
-    """
+    """Install a fake `psutil` with a controllable `virtual_memory().available`."""
     fake = MagicMock()
     fake.virtual_memory.return_value.available = 10**12  # 1 TiB default
     monkeypatch.setattr("aimz.utils._output.psutil", fake)
@@ -98,8 +94,7 @@ def fake_psutil(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 def test_plan_writers_policy(fake_psutil: MagicMock) -> None:
     """The pool follows the batch count, the memory left, and the queue ceiling."""
     item_nbytes = 1024
-    # Few batches with plentiful memory still get one writer per batch: the pipeline
-    # reservation applies to the memory bound only
+    # Few batches with plentiful memory get one writer per batch
     n_items = 3
     plan = _plan_writers(
         _WRITER_COUNT_UNBOUNDED,
@@ -115,8 +110,7 @@ def test_plan_writers_policy(fake_psutil: MagicMock) -> None:
         _WRITER_COUNT_UNBOUNDED, n_items=10**6, item_nbytes=1, n_sites=1
     )
     assert plan.queue_size <= _QUEUE_SIZE_MAX
-    # Room for three batches, two of them reserved by the pipeline, collapses to the
-    # floor: one queued, one applying
+    # Room for three batches, two reserved by the pipeline: one queued, one applying
     fake_psutil.virtual_memory.return_value.available = 3 * item_nbytes
     plan = _plan_writers(
         _WRITER_COUNT_UNBOUNDED,
@@ -126,8 +120,7 @@ def test_plan_writers_policy(fake_psutil: MagicMock) -> None:
         requested=8,
     )
     assert (plan.n_writers, plan.queue_size) == (1, 1)
-    # Kept batches shrink the queue, with one slot of their room reserved for the
-    # producer to stay ahead, and warn when they will not fit in memory
+    # Kept batches shrink the queue and warn when they will not fit in memory
     n_items, room = 10, 20
     fake_psutil.virtual_memory.return_value.available = room * item_nbytes
     kept = _plan_writers(
@@ -273,16 +266,14 @@ def test_writer_pool_lands_every_batch(tmp_path: Path) -> None:
             batch_size=chunk,
             axis=0,
         ),
-        # `max_writers=1` pins the pool to one worker, whose FIFO consumption
-        # preserves the batch order the growing array depends on
+        # A single writer keeps the order the growing array depends on
         "append": _AppendWriteStrategy(
             artifact_path=tmp_path / "append", batch_size=chunk, axis=0
         ),
     }
     for name, strategy in strategies.items():
         _run_pool(strategy, _batches(n_batches, chunk, ("y", "z")), num_writers=4)
-        # Content equality proves each batch was written exactly once at its own
-        # offset, regardless of the order in which the pool completed the writes
+        # Each batch landed exactly once at its own offset, whatever the write order
         group = open_group(tmp_path / name, mode="r")
         for site in ("y", "z"):
             np.testing.assert_array_equal(
@@ -315,8 +306,7 @@ def test_writer_pool_failure_raises_and_cleans_up(
 
     run("plain", num_writers=4)
 
-    # A raising log call inside the writer's error handler cannot hang the stream:
-    # the error is enqueued before logging and both are guarded
+    # A raising log call inside the error handler must not hang the stream
     def raising_exception(*args: object, **kwargs: object) -> None:
         msg = "logging failed"
         raise MemoryError(msg)
@@ -324,10 +314,8 @@ def test_writer_pool_failure_raises_and_cleans_up(
     monkeypatch.setattr("aimz.utils._output.logger.exception", raising_exception)
     run("logging", num_writers=1)
 
-    # A writer that cannot even report its error leaves the stop event as the only
-    # failure signal, and the write must still fail rather than return partial output.
-    # The error queue is the only unbounded queue the writer creates, so failing `put`
-    # on `maxsize == 0` breaks error reporting while the bounded work queue flows
+    # A writer that cannot report its error must still fail the write; the error queue
+    # is the only unbounded queue, so `put` fails only there
     class _BrokenErrorQueue(Queue):
         def put(self, item: object, *args: object, **kwargs: object) -> None:
             if self.maxsize == 0:
@@ -347,16 +335,11 @@ def test_partial_pool_startup_unwinds_started_workers(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """A mid-pool `Thread.start()` failure joins already-started workers.
-
-    Without the unwind, the started non-daemon workers would block forever on a queue
-    the caller never receives, hanging interpreter exit.
-    """
+    """A mid-pool `Thread.start()` failure joins the workers already started."""
     started = 0
     fail_at = 2
 
-    # A targeted override of the module's `Thread` attribute; patching
-    # `threading.Thread.start` globally would break Zarr's own worker threads.
+    # Patching `threading.Thread.start` globally would break Zarr's own threads
     class _FlakyThread(Thread):
         def start(self) -> None:
             nonlocal started
@@ -378,8 +361,7 @@ def test_partial_pool_startup_unwinds_started_workers(
             queue_size=4,
         )
 
-    # The first (successfully started) worker was sentineled and joined; nothing from
-    # the aborted pool is left alive.
+    # Nothing from the aborted pool is left alive
     assert not any(
         thread.name.endswith("(_writer)") and thread.is_alive()
         for thread in threading.enumerate()

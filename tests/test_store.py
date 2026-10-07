@@ -125,8 +125,7 @@ def test_persistent_read_raises_after_artifact_removal(
     def kernel(X: Array, t: Array, y: Array | None = None) -> None:
         b = sample("b", dist.Normal())
         with plate("n", size=X.shape[0]):
-            # Exactly +0.0 where `t` is 0, so the first two chunks hold only the fill
-            # value
+            # Exactly +0.0 where `t` is 0: the first two chunks hold only the fill value
             deterministic("effect", t * b**2)
             sample("y", dist.Normal(X.sum(axis=-1) + b * t, 1.0), obs=y)
 
@@ -147,12 +146,7 @@ def test_interrupted_memory_stream_releases_partial_batches(
     im_lm_svi_fitted: ImpactModel,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An interrupted stream frees its retained batches despite a held traceback.
-
-    An exception's traceback keeps the interrupted call stack (including the write
-    strategy) reachable (e.g. a notebook's post-mortem state), so the failure path
-    must empty the retained batches rather than rely on the frames dying.
-    """
+    """An interrupted stream frees its retained batches despite a held traceback."""
     X, _ = synthetic_data
     interrupt_at_batch = 2
     calls = {"n": 0}
@@ -173,8 +167,7 @@ def test_interrupted_memory_stream_releases_partial_batches(
     with pytest.raises(KeyboardInterrupt) as excinfo:
         im_lm_svi_fitted.predict(X, batch_size=30, store="memory", progress=False)
 
-    # Walk the held traceback to the frames owning the strategy and verify its
-    # retained batches were released.
+    # The traceback keeps the strategy reachable, as a notebook's post-mortem would
     sinks = []
     tb = excinfo.tb
     while tb is not None:

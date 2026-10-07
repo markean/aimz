@@ -37,8 +37,7 @@ def test_fit_on_batch_continues_training(synthetic_data: tuple[Array, Array]) ->
     im.fit_on_batch(X, y, num_steps=1000, num_samples=10, progress=False)
     assert im.vi_result.losses[-1] < first_loss
 
-    # The models hold inference objects that never trained themselves; a first loss
-    # near the end of the earlier run shows the training continued from its state
+    # A first loss near the end of the earlier run shows the training continued
     trained = make_svi(lm).run(
         random.key(0), num_steps=2000, X=X, y=y, progress_bar=False
     )

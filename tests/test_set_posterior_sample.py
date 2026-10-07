@@ -80,8 +80,7 @@ def test_chain_layout(
     im.set_posterior_sample(im_lm_svi_fitted.posterior, num_chains=num_chains)
     assert im.predict_on_batch(X).posterior_predictive.sizes["chain"] == num_chains
 
-    # Once the kernel is traced, a posterior without one of its latent sites warns; an
-    # untraced model has nothing to compare it with
+    # A traced kernel warns about a missing latent site; an untraced one cannot
     partial = {k: v for k, v in im_lm_svi_fitted.posterior.items() if k != "sigma"}
     with warnings.catch_warnings():
         warnings.simplefilter("error")

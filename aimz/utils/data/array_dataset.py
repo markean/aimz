@@ -29,12 +29,7 @@ if TYPE_CHECKING:
 
 
 class ArrayDataset:
-    """Dataset for named arrays.
-
-    Arrays are stored as-is by default, preserving whichever backend (NumPy or JAX) the
-    caller supplied. Pass ``to_jax=True`` to convert all arrays to JAX arrays at
-    construction time.
-    """
+    """Dataset of named arrays, kept as given unless ``to_jax`` converts them."""
 
     def __init__(
         self,
@@ -45,15 +40,12 @@ class ArrayDataset:
         """Initialize an ArrayDataset instance.
 
         Args:
-            to_jax: Whether to convert the input arrays to JAX arrays.
-            **arrays: Named JAX arrays, NumPy arrays, or ``None``; other array-likes
-                (e.g., lists) are converted to NumPy arrays. At least one non-``None``
-                array must be provided. All non-``None`` arrays must have the same
-                length.
+            to_jax: Whether to convert the arrays to JAX arrays.
+            **arrays: Named arrays, or ``None`` to leave a name out; an array-like
+                other than a JAX or NumPy array becomes a NumPy array.
 
         Raises:
-            ValueError: If no non-``None`` arrays are provided or if the arrays do not
-                have the same length.
+            ValueError: If no array is given, or the arrays differ in length.
         """
         self.arrays = {
             k: v if isinstance(v, (Array, np.ndarray)) else np.asarray(v)
@@ -72,20 +64,9 @@ class ArrayDataset:
             self.arrays = {k: jnp.asarray(v) for k, v in self.arrays.items()}
 
     def __len__(self) -> int:
-        """Get the number of samples in the dataset.
-
-        Returns:
-            The number of samples.
-        """
+        """Return the number of samples."""
         return self.length
 
     def __getitem__(self, idx: int) -> dict[str, Array | npt.NDArray | np.generic]:
-        """Retrieve the elements at the specified index.
-
-        Args:
-            idx: Index of the item to retrieve.
-
-        Returns:
-            A dictionary mapping array names to their elements at the specified index.
-        """
+        """Return the element of each array at ``idx``, by name."""
         return {k: v[idx] for k, v in self.arrays.items()}
