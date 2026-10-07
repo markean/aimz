@@ -14,127 +14,92 @@
 
 """Tests for the `.fit_on_batch()` method."""
 
-import jax.numpy as jnp
+import warnings
+
+import numpy as np
 import numpyro.distributions as dist
 import pytest
 from jax import Array, random
-from numpyro import deterministic, sample
-from numpyro.infer import MCMC, NUTS, SVI, Trace_ELBO
-from numpyro.infer.autoguide import AutoNormal
-from numpyro.optim import Adam
+from numpyro import sample
+from numpyro.infer import MCMC, NUTS
 
 from aimz import ImpactModel
-from tests.conftest import _make_svi, lm
+from tests.conftest import lm, make_svi
 
 
-@pytest.mark.parametrize("vi", [lm], indirect=True)
-def test_fit_svi(synthetic_data: tuple[Array, Array], vi: SVI) -> None:
-    """Test the `.fit_on_batch()` method of ImpactModel using SVI."""
+def test_fit_on_batch_continues_training(synthetic_data: tuple[Array, Array]) -> None:
+    """A second call, or a result set through `vi_result`, continues the training."""
     X, y = synthetic_data
-    im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
-    im.fit_on_batch(X=X, y=y)
-    assert im.is_fitted(), "Model fitting check failed"
-    assert im.vi_result is not None, "VI result should not be `None`"
+    im = ImpactModel(lm, rng_key=random.key(42), inference=make_svi(lm))
+    im.fit_on_batch(X, y, num_steps=1000, num_samples=10, progress=False)
+    assert im.is_fitted()
     first_loss = im.vi_result.losses[0]
+    im.fit_on_batch(X, y, num_steps=1000, num_samples=10, progress=False)
+    assert im.vi_result.losses[-1] < first_loss
 
-    # Continue training to check if loss decreases
-    im.fit_on_batch(X=X, y=y)
-    last_loss = im.vi_result.losses[-1]
-    assert last_loss < first_loss, (
-        f"Loss did not decrease after training: first={first_loss}, last={last_loss}"
+    # The models hold inference objects that never trained themselves; a first loss
+    # near the end of the earlier run shows the training continued from its state
+    trained = make_svi(lm).run(
+        random.key(0), num_steps=2000, X=X, y=y, progress_bar=False
     )
+    for method, kwargs in (
+        ("fit_on_batch", {"num_steps": 20}),
+        ("fit", {"batch_size": len(X)}),
+    ):
+        im = ImpactModel(lm, rng_key=random.key(1), inference=make_svi(lm))
+        im.vi_result = trained
+        getattr(im, method)(X, y, num_samples=10, progress=False, **kwargs)
+        assert im.vi_result.losses[0] < trained.losses[-50:].mean() * 1.2
 
 
-def test_fit_mcmc_keeps_chains(synthetic_data: tuple[Array, Array]) -> None:
-    """Outputs keep the sampler's chains until a posterior is injected."""
+def test_fit_on_batch_mcmc_keeps_chains(synthetic_data: tuple[Array, Array]) -> None:
+    """Outputs keep the sampler's chains on every path until a posterior is injected."""
     X, y = synthetic_data
 
     def kernel(X: Array, y: Array | None = None) -> None:
         b = sample("b", dist.Normal(0.0, 1.0))
-        mu = deterministic("mu", X.sum(axis=-1) + b)
-        sample("y", dist.Normal(mu, 1.0), obs=y)
+        sample("y", dist.Normal(X.sum(axis=-1) + b, 1.0), obs=y)
 
-    im = ImpactModel(
-        kernel,
-        rng_key=random.key(42),
-        inference=MCMC(NUTS(kernel), num_warmup=10, num_samples=5, num_chains=2),
-    )
+    mcmc = MCMC(NUTS(kernel), num_warmup=10, num_samples=5, num_chains=2)
+    im = ImpactModel(kernel, rng_key=random.key(42), inference=mcmc)
     im.fit_on_batch(X, y)
     b = im.inference.get_samples(group_by_chain=True)["b"]
+    try:
+        # A rerun under `draw` would warn and bypass the obs path
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            trees = {
+                "posterior_predictive": im.predict_on_batch(X),
+                "predictions": im.predict(X, in_sample=False, progress=False),
+            }
+        trees["posterior_predictive"] = im.predict(X, shard_axis="draw", progress=False)
+        for group, dt in trees.items():
+            np.testing.assert_array_equal(dt.posterior["b"].values, b)
+            sizes = dt[group].sizes
+            assert (sizes["chain"], sizes["draw"]) == (2, 5)
+        for shard_axis in ("obs", "draw"):
+            out = im.log_likelihood(X, y, shard_axis=shard_axis, progress=False)
+            np.testing.assert_allclose(
+                out.log_likelihood["y"].transpose("chain", "draw", ...).values,
+                dist.Normal(X.sum(axis=-1) + b[..., None], 1.0).log_prob(y),
+                rtol=1e-6,
+            )
+    finally:
+        im.cleanup()
 
-    for dt in (
-        im.predict_on_batch(X),
-        im.predict(X, shard_axis="draw", progress=False),
-    ):
-        assert jnp.array_equal(dt.posterior["b"].values, b)
-        assert jnp.allclose(
-            dt.posterior_predictive["mu"].values,
-            X.sum(axis=-1) + b[..., None],
-        )
-    im.cleanup()
-
-    # Collapsed draws from both chains, in a count the chains do not divide.
+    # Collapsed draws from both chains, in a count the chains do not divide
     im.set_posterior_sample({"b": b.reshape(-1)[:7]})
     sizes = im.predict_on_batch(X).posterior_predictive.sizes
     assert (sizes["chain"], sizes["draw"]) == (1, 7)
 
 
-def test_fit_on_batch_zero_dim_raises(synthetic_data: tuple[Array, Array]) -> None:
-    """A 0-dimensional ``X`` or ``y`` raises ``ValueError``."""
+def test_fit_on_batch_input_validation(synthetic_data: tuple[Array, Array]) -> None:
+    """0-D arrays and mismatched leading axes are rejected on the on-batch paths."""
     X, y = synthetic_data
-    im = ImpactModel(
-        lm,
-        rng_key=random.key(42),
-        inference=SVI(
-            lm,
-            guide=AutoNormal(lm),
-            optim=Adam(step_size=1e-3),
-            loss=Trace_ELBO(),
-        ),
-    )
+    im = ImpactModel(lm, rng_key=random.key(42), inference=make_svi(lm))
     with pytest.raises(ValueError, match=r"`X` must have at least 1 dimension."):
         im.fit_on_batch(X=1.0, y=y)
     with pytest.raises(ValueError, match=r"`y` must have at least 1 dimension."):
         im.fit_on_batch(X=X, y=1.0)
-
-
-def test_fit_on_batch_length_mismatch_raises(
-    synthetic_data: tuple[Array, Array],
-) -> None:
-    """Mismatched leading-axis sizes between ``X`` and ``y`` raise ``ValueError``."""
-    X, y = synthetic_data
-    im = ImpactModel(
-        lm,
-        rng_key=random.key(42),
-        inference=SVI(
-            lm,
-            guide=AutoNormal(lm),
-            optim=Adam(step_size=1e-3),
-            loss=Trace_ELBO(),
-        ),
-    )
-    with pytest.raises(
-        ValueError,
-        match=r"`X` and `y` must have the same leading-axis size.",
-    ):
+    with pytest.raises(ValueError, match="must have the same leading-axis size"):
         im.fit_on_batch(X=X, y=y[:-1])
-
-
-def test_fit_on_batch_continues_from_vi_result(
-    synthetic_data: tuple[Array, Array],
-) -> None:
-    """Training continues from a result set through `vi_result`, on either path."""
-    X, y = synthetic_data
-    trained = _make_svi(lm).run(
-        random.key(0), num_steps=2000, X=X, y=y, progress_bar=False
-    )
-    # The models hold inference objects that never trained themselves; a first loss
-    # near the end of the earlier run shows the training continued from its state
-    im = ImpactModel(lm, rng_key=random.key(1), inference=_make_svi(lm))
-    im.vi_result = trained
-    im.fit_on_batch(X, y, num_steps=20, num_samples=10, progress=False)
-    assert im.vi_result.losses[0] < trained.losses[-50:].mean() * 1.2
-    im = ImpactModel(lm, rng_key=random.key(2), inference=_make_svi(lm))
-    im.vi_result = trained
-    im.fit(X, y, batch_size=len(X), epochs=1, num_samples=10, progress=False)
-    assert im.vi_result.losses[0] < trained.losses[-50:].mean() * 1.2

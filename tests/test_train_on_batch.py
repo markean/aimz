@@ -14,39 +14,28 @@
 
 """Tests for the `.train_on_batch()` method."""
 
-from __future__ import annotations
-
 import jax.numpy as jnp
 import numpyro.distributions as dist
-import pytest
 from jax import Array, random
 from numpyro import sample
-from numpyro.infer import SVI, Trace_ELBO
-from numpyro.infer.autoguide import AutoNormal
-from numpyro.optim import Adam
 
 from aimz import ImpactModel
-from tests.conftest import lm_with_kwargs_array
+from tests.conftest import lm_with_kwargs_array, make_svi
 
 
-@pytest.mark.parametrize("vi", [lm_with_kwargs_array], indirect=True)
 def test_train_on_batch_lm_with_kwargs_array(
     synthetic_data: tuple[Array, Array],
-    vi: SVI,
 ) -> None:
-    """Test the `.train_on_batch()` method of `ImpactModel`."""
+    """The loss decreases over repeated steps on one batch."""
     X, y = synthetic_data
-    im = ImpactModel(lm_with_kwargs_array, rng_key=random.key(42), inference=vi)
-
-    for i in range(1000):
-        _, loss = im.train_on_batch(X=X, y=y, c=y)
-        if i == 0:
-            first_loss = float(loss)
-        last_loss = float(loss)
-
-    assert last_loss < first_loss, (
-        f"Loss did not decrease after training: first={first_loss}, last={last_loss}"
+    im = ImpactModel(
+        lm_with_kwargs_array,
+        rng_key=random.key(42),
+        inference=make_svi(lm_with_kwargs_array),
     )
+    losses = [float(im.train_on_batch(X=X, y=y, c=y)[1]) for _ in range(1000)]
+
+    assert losses[-1] < losses[0]
 
 
 def test_train_on_batch_different_extra_kwargs(
@@ -66,17 +55,14 @@ def test_train_on_batch_different_extra_kwargs(
         mu = mu if link == "identity" else jnp.exp(mu)
         sample("y", dist.Normal(mu, 1.0), obs=y)
 
-    vi = SVI(
-        kernel,
-        guide=AutoNormal(kernel),
-        optim=Adam(step_size=1e-3),
-        loss=Trace_ELBO(),
-    )
-    im = ImpactModel(kernel, rng_key=random.key(42), inference=vi)
-
+    im = ImpactModel(kernel, rng_key=random.key(42), inference=make_svi(kernel))
     # Each call passes a different set of string (non-array, static) kwargs
     im.train_on_batch(X=X, y=y, link="identity")
     im.train_on_batch(X=X, y=y, noise="normal")
+    # The streaming methods take the same static kwargs
+    im.sample_prior_predictive(
+        X, link="identity", num_samples=2, store="memory", progress=False
+    )
     num_configs = 2
-    assert im._fn_vi_update is not None
+
     assert im._fn_vi_update._cache_size() == num_configs

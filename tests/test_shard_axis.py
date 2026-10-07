@@ -23,11 +23,7 @@ from jax import Array, local_device_count, random
 
 from aimz import ImpactModel, PerformanceWarning
 from aimz.utils.data import ArrayDataset, ArrayLoader
-from tests.conftest import (
-    _make_svi,
-    latent_variable_model,
-    multidim_latent_model,
-)
+from tests.conftest import latent_variable_model, make_svi, multidim_latent_model
 
 
 def _n_draws(im: ImpactModel) -> int:
@@ -35,13 +31,14 @@ def _n_draws(im: ImpactModel) -> int:
     return len(next(iter(im.posterior.values())))
 
 
-def test_predict_draw_local_latent_no_fallback(
+def test_local_latent_model(
     synthetic_data: tuple[Array, Array],
     im_latent_var_svi_fitted: ImpactModel,
 ) -> None:
-    """`shard_axis='draw'` streams a local-latent model without a rerun warning."""
-    X, _ = synthetic_data
+    """A local latent streams under `draw`; `obs` warns and reruns under it."""
+    X, y = synthetic_data
     im = im_latent_var_svi_fitted
+    n = _n_draws(im)
     with warnings.catch_warnings():
         warnings.simplefilter("error", UserWarning)
         dt = im.predict(
@@ -51,32 +48,37 @@ def test_predict_draw_local_latent_no_fallback(
             shard_axis="draw",
             return_sites=("y", "z"),
         )
-    pp = dt["posterior_predictive"]
-    assert pp["y"].sizes["draw"] == _n_draws(im)
-    assert pp["y"].shape[-1] == len(X)
-    # `z` is a local latent of shape (num_samples, n_obs), the case that the
-    # data-parallel path cannot stream.
-    assert pp["z"].sizes["draw"] == _n_draws(im)
-    assert pp["z"].shape[-1] == len(X)
-
-
-def test_predict_data_reruns_draw_on_local_latent(
-    synthetic_data: tuple[Array, Array],
-    im_latent_var_svi_fitted: ImpactModel,
-) -> None:
-    """`shard_axis='obs'` warns and reruns under draw for a local-latent model."""
-    X, _ = synthetic_data
-    im = im_latent_var_svi_fitted
-    with pytest.warns(PerformanceWarning, match="rerunning with"):
-        dt = im.predict(
-            X,
-            batch_size=len(X),
-            progress=False,
-            shard_axis="obs",
+        ll = im.log_likelihood(
+            X, y, batch_size=len(X), progress=False, shard_axis="draw"
         )
-    pp = dt["posterior_predictive"]
-    assert pp["y"].sizes["draw"] == _n_draws(im)
-    assert pp["y"].shape[-1] == len(X)
+    # `z` is a local latent of shape (num_samples, n_obs), which the data-parallel
+    # path cannot stream
+    assert dt["posterior_predictive"]["y"].shape == (1, n, len(X))
+    assert dt["posterior_predictive"]["z"].shape == (1, n, len(X))
+    assert ll["log_likelihood"]["y"].shape == (1, n, len(X))
+
+    with pytest.warns(PerformanceWarning, match="rerunning with"):
+        dt = im.predict(X, batch_size=len(X), progress=False, shard_axis="obs")
+    assert dt["posterior_predictive"]["y"].shape == (1, n, len(X))
+    with pytest.warns(PerformanceWarning, match="rerunning with"):
+        ll = im.log_likelihood(X, y, batch_size=len(X), progress=False)
+    assert ll["log_likelihood"]["y"].shape == (1, n, len(X))
+
+    # Under the prior nothing is conditioned: each chunk draws a fresh local latent
+    # that varies along the observation axis (prior std close to one)
+    z = np.asarray(
+        im.sample_prior_predictive(
+            X,
+            num_samples=200,
+            batch_size=len(X) // 4,
+            progress=False,
+            shard_axis="draw",
+            return_sites=("y", "z"),
+        )["prior_predictive"]["z"],
+    )
+    min_prior_std = 0.5
+    assert z.shape[-1] == len(X)
+    assert z.std(axis=-1).mean() > min_prior_std
 
 
 def test_predict_data_reruns_draw_on_rank3_local_latent(
@@ -92,7 +94,7 @@ def test_predict_data_reruns_draw_on_rank3_local_latent(
     im = ImpactModel(
         multidim_latent_model,
         rng_key=random.key(0),
-        inference=_make_svi(multidim_latent_model),
+        inference=make_svi(multidim_latent_model),
     )
     im.fit(X=X, y=y, batch_size=len(X), progress=False)
     try:
@@ -105,364 +107,22 @@ def test_predict_data_reruns_draw_on_rank3_local_latent(
                 return_sites=("y", "z"),
             )
         pp = dt["posterior_predictive"]
-        assert pp["y"].sizes["draw"] == _n_draws(im)
-        assert pp["y"].shape[-1] == len(X)
+        assert pp["y"].shape == (1, _n_draws(im), len(X))
         # The rank-3 latent streams back as (draw, n_obs, 2).
-        assert pp["z"].sizes["draw"] == _n_draws(im)
-        assert pp["z"].shape[-2:] == (len(X), 2)
+        assert pp["z"].shape == (1, _n_draws(im), len(X), 2)
     finally:
         im.cleanup()
 
 
 @pytest.mark.filterwarnings("ignore:One or more posterior sample shapes")
-@pytest.mark.parametrize("n_devices", [1, 3])
-def test_plan_execution_explicit_batch(
-    synthetic_data: tuple[Array, Array],
-    im_latent_var_svi_fitted: ImpactModel,
-    monkeypatch: pytest.MonkeyPatch,
-    n_devices: int,
-) -> None:
-    """An aligned posterior needs the whole input when the obs axis is split.
-
-    On multiple devices that is always (the axis is sharded); on one device only
-    when an explicit `batch_size` is smaller than the observation count.
-    """
-    X, _ = synthetic_data
-    im = im_latent_var_svi_fitted
-    monkeypatch.setattr(im, "_num_devices", n_devices)
-
-    def plan(batch_size: int) -> str:
-        shard_axis, _ = im._plan_execution(
-            X,
-            shard_axis="obs",
-            batch_size=batch_size,
-            num_samples=im._num_samples,
-            nbytes=im._output_nbytes(("y",)),
-            posterior=im.posterior,
-        )
-        return shard_axis
-
-    assert plan(len(X) // 4) == "draw"
-    assert plan(len(X)) == ("draw" if n_devices > 1 else "obs")
-
-
-def test_predict_draw_default_batch_size(
-    synthetic_data: tuple[Array, Array],
-    im_lm_svi_fitted: ImpactModel,
-) -> None:
-    """Omitting `batch_size` under draw auto-resolves it from the draws and input."""
-    X, _ = synthetic_data
-    dt = im_lm_svi_fitted.predict(X, shard_axis="draw", progress=False)
-    pp = dt["posterior_predictive"]
-    assert pp["y"].sizes["draw"] == _n_draws(im_lm_svi_fitted)
-    assert pp["y"].shape[-1] == len(X)
-
-
-def test_predict_draw_scalar_return_site(
-    synthetic_data: tuple[Array, Array],
-    im_lm_svi_fitted: ImpactModel,
-) -> None:
-    """A scalar-per-draw (rank-1) return site streams under `shard_axis='draw'`.
-
-    With >1 host device the draw-mode `out_specs` must shard only the leading draw
-    axis; a length-2 spec would reject the rank-1 `sigma` site at trace time.
-    """
-    X, _ = synthetic_data
-    im = im_lm_svi_fitted
-    dt = im.predict(
-        X,
-        batch_size=len(X),
-        progress=False,
-        shard_axis="draw",
-        return_sites=("y", "sigma"),
-    )
-    pp = dt["posterior_predictive"]
-    # `sigma` is a global scalar latent: one value per draw, no observation axis.
-    assert pp["sigma"].sizes["draw"] == _n_draws(im)
-    assert "sigma_dim_0" not in pp["sigma"].dims
-    # `y` (per-observation) still streams correctly alongside it.
-    assert pp["y"].sizes["draw"] == _n_draws(im)
-    assert pp["y"].shape[-1] == len(X)
-
-
-def test_predict_draw_num_samples_less_than_devices(
-    synthetic_data: tuple[Array, Array],
-) -> None:
-    """`num_samples` smaller than the device count still round-trips."""
-    X, y = synthetic_data
-    n_draws = 2
-    im = ImpactModel(
-        latent_variable_model,
-        rng_key=random.key(0),
-        inference=_make_svi(latent_variable_model),
-    )
-    im.fit(X=X, y=y, num_samples=n_draws, batch_size=len(X), progress=False)
-    try:
-        dt = im.predict(X, batch_size=len(X), progress=False, shard_axis="draw")
-        assert dt["posterior_predictive"]["y"].sizes["draw"] == n_draws
-    finally:
-        im.cleanup()
-
-
-def test_predict_data_vs_draw_same_draws(
-    synthetic_data: tuple[Array, Array],
-    im_lm_svi_fitted: ImpactModel,
-) -> None:
-    """For a global model both strategies use the same posterior draws.
-
-    Fixing the noise scale near zero removes the per-draw likelihood noise, so the
-    predictions agree draw by draw.
-    """
-    X, _ = synthetic_data
-    # A batch size divisible by the 3 host devices avoids the divisibility warning.
-    data = np.asarray(
-        im_lm_svi_fitted.predict(
-            X,
-            intervention={"sigma": 1e-6},
-            batch_size=99,
-            progress=False,
-            shard_axis="obs",
-        )["posterior_predictive"]["y"],
-    )
-    draw = np.asarray(
-        im_lm_svi_fitted.predict(
-            X,
-            intervention={"sigma": 1e-6},
-            batch_size=len(X),
-            progress=False,
-            shard_axis="draw",
-        )["posterior_predictive"]["y"],
-    )
-    assert data.shape == draw.shape
-    np.testing.assert_allclose(data, draw, atol=1e-4)
-
-
-def test_log_likelihood_draw_local_latent(
-    synthetic_data: tuple[Array, Array],
-    im_latent_var_svi_fitted: ImpactModel,
-) -> None:
-    """`log_likelihood(shard_axis='draw')` works on a local-latent model."""
-    X, y = synthetic_data
-    im = im_latent_var_svi_fitted
-    dt = im.log_likelihood(X, y, batch_size=len(X), progress=False, shard_axis="draw")
-    ll = dt["log_likelihood"]["y"]
-    assert ll.sizes["draw"] == _n_draws(im)
-    assert ll.shape[-1] == len(X)
-
-
-def test_log_likelihood_data_reruns_draw_on_local_latent(
-    synthetic_data: tuple[Array, Array],
-    im_latent_var_svi_fitted: ImpactModel,
-) -> None:
-    """`shard_axis='obs'` warns and reruns under draw for a local-latent model."""
-    X, y = synthetic_data
-    with pytest.warns(PerformanceWarning, match="rerunning with"):
-        dt = im_latent_var_svi_fitted.log_likelihood(
-            X,
-            y,
-            batch_size=len(X),
-            progress=False,
-            shard_axis="obs",
-        )
-    assert dt["log_likelihood"]["y"].shape[-1] == len(X)
-
-
-def test_log_likelihood_draw_empty_posterior_parity(
-    synthetic_data: tuple[Array, Array],
-    im_lm_svi_fitted: ImpactModel,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """With no posterior, `shard_axis='draw'` matches the single-draw data path."""
-    X, y = synthetic_data
-    monkeypatch.setattr(im_lm_svi_fitted, "_posterior", None)
-    # A batch size divisible by the 3 host devices avoids the divisibility warning.
-    dt = im_lm_svi_fitted.log_likelihood(
-        X,
-        y,
-        batch_size=99,
-        progress=False,
-        shard_axis="draw",
-    )
-    assert dt["log_likelihood"]["y"].sizes["draw"] == 1
-
-
-def test_predict_draw_chunk_size_invariant(
-    synthetic_data: tuple[Array, Array],
-    im_lm_svi_fitted: ImpactModel,
-) -> None:
-    """Draw output is invariant to the per-chunk draw count (split-once-then-slice).
-
-    Keys are split once over all draws and sliced per chunk, so the same `rng_key`
-    yields identical draws no matter how many chunks the draw axis is split into.
-    """
-    X, _ = synthetic_data
-    key = random.key(11)
-    n = _n_draws(im_lm_svi_fitted)
-    a = np.asarray(
-        im_lm_svi_fitted.predict(
-            X,
-            rng_key=key,
-            batch_size=n,
-            progress=False,
-            shard_axis="draw",
-        )["posterior_predictive"]["y"],
-    )
-    b = np.asarray(
-        im_lm_svi_fitted.predict(
-            X,
-            rng_key=key,
-            batch_size=max(1, n // 4),
-            progress=False,
-            shard_axis="draw",
-        )["posterior_predictive"]["y"],
-    )
-    np.testing.assert_array_equal(a, b)
-
-
-def test_sample_prior_predictive_draw_local_latent(
-    synthetic_data: tuple[Array, Array],
-    im_latent_var_svi_fitted: ImpactModel,
-) -> None:
-    """Prior predictive draw-parallel redraws a local latent fresh per observation.
-
-    No plate and no conditioning: the whole input is held resident, so each chunk draws
-    a complete fresh prior sample and the local latent varies across the observation
-    axis (prior std close to one).
-    """
-    X, _ = synthetic_data
-    pp = im_latent_var_svi_fitted.sample_prior_predictive(
-        X,
-        num_samples=200,
-        batch_size=len(X) // 4,
-        progress=False,
-        shard_axis="draw",
-        return_sites=("y", "z"),
-    )["prior_predictive"]
-    z = np.asarray(pp["z"])
-    min_prior_std = 0.5
-    assert z.shape[-1] == len(X)
-    assert pp["y"].shape[-1] == len(X)
-    assert z.std(axis=-1).mean() > min_prior_std
-
-
-class TestValidation:
-    """Invalid arguments are rejected up front, before any output is written."""
-
-    def test_invalid_shard_axis_value_raises(
-        self,
-        synthetic_data: tuple[Array, Array],
-        im_lm_svi_fitted: ImpactModel,
-    ) -> None:
-        """An unknown `shard_axis` value raises, not silently run as data-parallel."""
-        X, y = synthetic_data
-        im = im_lm_svi_fitted
-        with pytest.raises(ValueError, match="shard_axis"):
-            im.predict(X, progress=False, shard_axis="rows")
-        with pytest.raises(ValueError, match="shard_axis"):
-            im.sample_posterior_predictive(X, progress=False, shard_axis="rows")
-        with pytest.raises(ValueError, match="shard_axis"):
-            im.log_likelihood(X, y, progress=False, shard_axis="rows")
-        with pytest.raises(ValueError, match="shard_axis"):
-            im.sample_prior_predictive(
-                X,
-                num_samples=2,
-                progress=False,
-                shard_axis="rows",
-            )
-
-    @pytest.mark.parametrize("bad_batch_size", [-1, 0])
-    def test_predict_rejects_nonpositive_batch_size(
-        self,
-        synthetic_data: tuple[Array, Array],
-        im_lm_svi_fitted: ImpactModel,
-        bad_batch_size: int,
-    ) -> None:
-        """A non-positive `batch_size` is rejected before the parallel paths split.
-
-        The draw path would otherwise step `range` by it (empty -> silent empty
-        result for `-1`) or divide by it (`ZeroDivisionError` for `0`).
-        """
-        X, _ = synthetic_data
-        with pytest.raises(ValueError, match="positive integer"):
-            im_lm_svi_fitted.predict(X, batch_size=bad_batch_size, progress=False)
-
-    def test_log_likelihood_draw_rejects_mismatched_y(
-        self,
-        synthetic_data: tuple[Array, Array],
-        im_lm_svi_fitted: ImpactModel,
-    ) -> None:
-        """A length-mismatched `y` is rejected up front, the same way both paths are.
-
-        The draw path replicates `X`/`y` independently and would otherwise broadcast a
-        length-1 `y` across every observation, silently returning wrong log-likelihoods.
-        """
-        X, y = synthetic_data
-        im = im_lm_svi_fitted
-        with pytest.raises(ValueError, match="leading-axis size"):
-            im.log_likelihood(
-                X,
-                y[:1],
-                shard_axis="draw",
-                batch_size=len(X),
-                progress=False,
-            )
-        # Parity: the data path raises the same error from the same entry-point check.
-        with pytest.raises(ValueError, match="leading-axis size"):
-            im.log_likelihood(
-                X,
-                y[:1],
-                shard_axis="obs",
-                batch_size=len(X),
-                progress=False,
-            )
-
-    def test_log_likelihood_draw_rejects_0d_y(
-        self,
-        synthetic_data: tuple[Array, Array],
-        im_lm_svi_fitted: ImpactModel,
-    ) -> None:
-        """A 0-D `y` is rejected before any output directory is created."""
-        X, _ = synthetic_data
-        with pytest.raises(ValueError, match="at least 1 dimension"):
-            im_lm_svi_fitted.log_likelihood(
-                X,
-                np.float32(0.5),
-                shard_axis="draw",
-                batch_size=len(X),
-                progress=False,
-            )
-
-    def test_predict_draw_rejects_data_loader(
-        self,
-        synthetic_data: tuple[Array, Array],
-        im_lm_svi_fitted: ImpactModel,
-    ) -> None:
-        """Draw-parallel requires an array `X`, not a data loader."""
-        X, _ = synthetic_data
-        loader = ArrayLoader(
-            ArrayDataset(X=np.asarray(X)),
-            rng_key=random.key(0),
-            batch_size=10,
-        )
-        with pytest.raises(TypeError, match="not a data loader"):
-            im_lm_svi_fitted.predict(loader, progress=False, shard_axis="draw")
-
-
-@pytest.mark.filterwarnings("ignore:One or more posterior sample shapes")
-def test_aligned_posterior_pins_whole_input_on_single_device(
+def test_plan_execution_aligned_posterior(
     synthetic_data: tuple[Array, Array],
     im_latent_var_svi_fitted: ImpactModel,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """On one device, an aligned posterior that fits memory avoids the draw fallback.
-
-    Automatic batching splits the observation axis for I/O parallelism, which an
-    observation-aligned posterior cannot tolerate; the whole-input batch is pinned
-    instead of warning and rerunning draw-parallel, preserving the pre-split behavior.
-    """
+    """An aligned posterior needs the whole input whenever the obs axis would split."""
     X, _ = synthetic_data
     im = im_latent_var_svi_fitted
-    monkeypatch.setattr(im, "_num_devices", 1)
 
     def plan(batch_size: int | None) -> tuple[str, int | None]:
         return im._plan_execution(
@@ -474,13 +134,129 @@ def test_aligned_posterior_pins_whole_input_on_single_device(
             posterior=im.posterior,
         )
 
-    # Fits the budget on a single device: pin the whole input, no fallback.
+    # On several devices the observation axis is sharded, so the whole input never
+    # sits on one device
+    monkeypatch.setattr(im, "_num_devices", 3)
+    assert plan(len(X) // 4)[0] == "draw"
+    assert plan(len(X))[0] == "draw"
+    # On one device the whole input is pinned when it fits the budget; an explicit
+    # smaller batch is the caller's contract and still falls back
+    monkeypatch.setattr(im, "_num_devices", 1)
     assert plan(None) == ("obs", len(X))
-    # An explicit smaller batch is the caller's contract and still forces the fallback.
-    assert plan(max(1, len(X) // 2))[0] == "draw"
-    # A budget-exceeding whole batch cannot be pinned: draw-parallel fallback.
+    assert plan(len(X))[0] == "obs"
+    assert plan(len(X) // 2)[0] == "draw"
     monkeypatch.setattr(im, "_num_samples", 10**12)
     assert plan(None)[0] == "draw"
+
+
+def test_predict_draw_global_model(
+    synthetic_data: tuple[Array, Array],
+    im_lm_svi_fitted: ImpactModel,
+) -> None:
+    """Under `draw` a global model streams any site, invariant to the chunking."""
+    X, _ = synthetic_data
+    im = im_lm_svi_fitted
+    n = _n_draws(im)
+    key = random.key(11)
+    # The default batch size follows from the draws and the input; a per-draw scalar
+    # site streams beside the per-observation output
+    pp = im.predict(
+        X,
+        rng_key=key,
+        progress=False,
+        shard_axis="draw",
+        return_sites=("y", "sigma"),
+    )["posterior_predictive"]
+    assert pp["y"].shape == (1, n, len(X))
+    assert pp["sigma"].dims == ("chain", "draw")
+
+    # Keys are split once over all draws and sliced per chunk, so the draws do not
+    # depend on the chunk size
+    chunked = im.predict(
+        X,
+        rng_key=key,
+        batch_size=max(1, n // 4),
+        progress=False,
+        shard_axis="draw",
+        return_sites="y",
+    )
+    np.testing.assert_array_equal(
+        np.asarray(pp["y"]),
+        np.asarray(chunked["posterior_predictive"]["y"]),
+    )
+
+    # Both strategies use the same posterior draws: with the noise scale pinned near
+    # zero the predictions agree draw by draw
+    data = im.predict(
+        X,
+        intervention={"sigma": 1e-6},
+        batch_size=99,
+        progress=False,
+        shard_axis="obs",
+    )
+    draw = im.predict(
+        X,
+        intervention={"sigma": 1e-6},
+        batch_size=len(X),
+        progress=False,
+        shard_axis="draw",
+    )
+    np.testing.assert_allclose(
+        np.asarray(data["posterior_predictive"]["y"]),
+        np.asarray(draw["posterior_predictive"]["y"]),
+        atol=1e-4,
+    )
+
+
+def test_predict_draw_num_samples_less_than_devices(
+    synthetic_data: tuple[Array, Array],
+) -> None:
+    """`num_samples` smaller than the device count still round-trips."""
+    X, y = synthetic_data
+    n_draws = 2
+    im = ImpactModel(
+        latent_variable_model,
+        rng_key=random.key(0),
+        inference=make_svi(latent_variable_model),
+    )
+    im.fit(X=X, y=y, num_samples=n_draws, batch_size=len(X), progress=False)
+    try:
+        dt = im.predict(X, batch_size=len(X), progress=False, shard_axis="draw")
+        assert dt["posterior_predictive"]["y"].sizes["draw"] == n_draws
+    finally:
+        im.cleanup()
+
+
+def test_streaming_argument_validation(
+    synthetic_data: tuple[Array, Array],
+    im_lm_svi_fitted: ImpactModel,
+) -> None:
+    """Invalid arguments are rejected up front, before any output is written."""
+    X, y = synthetic_data
+    im = im_lm_svi_fitted
+    for method, args in (
+        ("predict", (X,)),
+        ("sample_posterior_predictive", (X,)),
+        ("sample_prior_predictive", (X,)),
+        ("log_likelihood", (X, y)),
+    ):
+        with pytest.raises(ValueError, match="shard_axis"):
+            getattr(im, method)(*args, progress=False, shard_axis="rows")
+    # The draw path would otherwise step `range` by a non-positive batch size
+    for bad_batch_size in (-1, 0):
+        with pytest.raises(ValueError, match="positive integer"):
+            im.predict(X, batch_size=bad_batch_size, progress=False)
+    # The draw path replicates `X` and `y` independently and would otherwise
+    # broadcast a length-1 `y` across every observation
+    for shard_axis in ("obs", "draw"):
+        with pytest.raises(ValueError, match="leading-axis size"):
+            im.log_likelihood(X, y[:1], shard_axis=shard_axis, progress=False)
+    with pytest.raises(ValueError, match="at least 1 dimension"):
+        im.log_likelihood(X, np.float32(0.5), shard_axis="draw", progress=False)
+    # Draw-parallel replicates the whole input, so it takes an array, not a loader
+    loader = ArrayLoader(ArrayDataset(X=np.asarray(X)), rng_key=random.key(0))
+    with pytest.raises(TypeError, match="not a data loader"):
+        im.predict(loader, progress=False, shard_axis="draw")
 
 
 def test_predict_obs_shards_draw_independent_noise(

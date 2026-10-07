@@ -16,42 +16,23 @@
 
 import pytest
 from jax import Array, random
+from numpyro.infer import MCMC, NUTS
 
 from aimz import ImpactModel
+from tests.conftest import lm, make_svi
 
 
-def test_missing_param_output(
-    synthetic_data: tuple[Array, Array],
-    im_lm_mcmc_fitted: ImpactModel,
-) -> None:
-    """Missing `param_output` argument raises TypeError."""
-    X, _ = synthetic_data
-    with pytest.raises(TypeError, match="must be provided"):
-        im_lm_mcmc_fitted.sample(rng_key=random.key(42), X=X)
-
-
-def test_sample_with_vi(
-    synthetic_data: tuple[Array, Array],
-    im_lm_svi_fitted: ImpactModel,
-) -> None:
-    """Test the `.sample()` method of ImpactModel with SVI."""
+def test_sample(synthetic_data: tuple[Array, Array]) -> None:
+    """`sample` draws from the guide, or continues the chain, in the number asked."""
     X, y = synthetic_data
     num_samples = 7
-    samples = im_lm_svi_fitted.sample(
-        num_samples=num_samples,
-        rng_key=random.key(42),
-        return_sites="b",
-        X=X,
-        y=y,
+    im = ImpactModel(lm, rng_key=random.key(42), inference=make_svi(lm))
+    im.fit_on_batch(X, y, num_steps=10, num_samples=10, progress=False)
+    posterior = im.sample(
+        num_samples=num_samples, rng_key=random.key(42), return_sites="b", X=X, y=y
     ).posterior
-
-    # Check shapes for all sampled sites
-    for var in samples.data_vars:
-        assert samples[var].values.shape[1] == num_samples, (
-            f"Incorrect number of samples for site {var}"
-        )
-
-    samples_dict = im_lm_svi_fitted.sample(
+    assert posterior.sizes["draw"] == num_samples
+    samples = im.sample(
         num_samples=num_samples,
         rng_key=random.key(42),
         return_sites=["w", "b", "sigma"],
@@ -59,42 +40,23 @@ def test_sample_with_vi(
         X=X,
         y=y,
     )
-
-    for k, v in samples_dict.items():
-        assert v.shape[0] == num_samples, f"Incorrect number of samples for site {k}"
-
-
-def test_sample_with_mcmc(
-    synthetic_data: tuple[Array, Array],
-    im_lm_mcmc_fitted: ImpactModel,
-) -> None:
-    """Test the `.sample()` method of ImpactModel with MCMC."""
-    X, y = synthetic_data
-    num_samples = 7
-    num_samples_fit = im_lm_mcmc_fitted.inference.num_samples
-    # rng_key is ignored for MCMC; sampling uses the post_warmup_state
-    samples = im_lm_mcmc_fitted.sample(
-        num_samples=num_samples,
-        rng_key=random.key(42),
-        X=X,
-        y=y,
-    ).posterior
-
-    assert im_lm_mcmc_fitted.inference.num_samples == num_samples_fit
-
-    # Check shapes for all sampled sites
-    for var in samples.data_vars:
-        assert samples[var].values.shape[1] == num_samples, (
-            f"Incorrect number of samples for site {var}"
-        )
-
-    samples_dict = im_lm_mcmc_fitted.sample(
-        num_samples=num_samples,
-        rng_key=random.key(42),
-        return_datatree=False,
-        X=X,
-        y=y,
+    assert {k: v.shape[0] for k, v in samples.items()} == dict.fromkeys(
+        ("w", "b", "sigma"), num_samples
     )
 
-    for k, v in samples_dict.items():
-        assert v.shape[0] == num_samples, f"Incorrect number of samples for site {k}"
+    num_samples_fit = 10
+    mcmc = MCMC(
+        NUTS(lm), num_warmup=10, num_samples=num_samples_fit, progress_bar=False
+    )
+    im = ImpactModel(lm, rng_key=random.key(42), inference=mcmc)
+    im.fit_on_batch(X, y)
+    with pytest.raises(TypeError, match="must be provided"):
+        im.sample(rng_key=random.key(42), X=X)
+    # The chain continues from its last state for this call only; the key is ignored
+    posterior = im.sample(
+        num_samples=num_samples, rng_key=random.key(42), X=X, y=y
+    ).posterior
+    assert posterior.sizes["draw"] == num_samples
+    assert im.inference.num_samples == num_samples_fit
+    samples = im.sample(num_samples=num_samples, return_datatree=False, X=X, y=y)
+    assert all(v.shape[0] == num_samples for v in samples.values())

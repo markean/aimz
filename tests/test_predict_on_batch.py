@@ -14,17 +14,15 @@
 
 """Tests for the `.predict_on_batch()` method."""
 
+import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
 import pytest
 from jax import Array, random
 from numpyro import deterministic, plate, sample
-from numpyro.infer import SVI, Trace_ELBO
-from numpyro.infer.autoguide import AutoNormal
-from numpyro.optim import Adam
 
 from aimz import ImpactModel, OutputWarning
-from tests.conftest import _make_svi, mlm
+from tests.conftest import make_svi, mlm
 
 
 def test_predict_on_batch_lm_with_kwargs_array(
@@ -54,42 +52,16 @@ def test_predict_on_batch_lm_with_kwargs_array(
     np.testing.assert_array_equal(samples["y"], dt.posterior_predictive["y"][0])
 
 
-def test_predict_on_batch_x_zero_dim_raises(
-    im_lm_svi_fitted: ImpactModel,
-) -> None:
-    """A 0-dimensional ``X`` raises ``ValueError``."""
-    with pytest.raises(ValueError, match=r"`X` must have at least 1 dimension."):
-        im_lm_svi_fitted.predict_on_batch(X=1.0)
-
-
-def test_predict_on_batch_mlm() -> None:
-    """`.predict_on_batch()` works with a multivariate linear regression model."""
-    n_obs, n_features, n_targets = 100, 3, 2
-    rng_key = random.key(42)
-    rng_key, rng_subkey = random.split(rng_key)
-    X = random.normal(rng_subkey, (n_obs, n_features))
-    rng_key, rng_subkey = random.split(rng_key)
-    w = random.normal(rng_subkey, (n_features, n_targets))
-    rng_key, rng_subkey = random.split(rng_key)
-    e = random.normal(rng_subkey, (n_obs, n_targets))
-    y = X @ w + e
-
-    rng_key, rng_subkey = random.split(rng_key)
-    im = ImpactModel(
-        mlm,
-        rng_key=rng_subkey,
-        inference=SVI(
-            mlm,
-            guide=AutoNormal(mlm),
-            optim=Adam(step_size=1e-2),
-            loss=Trace_ELBO(),
-        ),
+def test_predict_on_batch_mlm(synthetic_data: tuple[Array, Array]) -> None:
+    """A multivariate output keeps its target axis as a named dimension."""
+    X, y = synthetic_data
+    im = ImpactModel(mlm, rng_key=random.key(42), inference=make_svi(mlm))
+    im.fit_on_batch(
+        X, jnp.stack([y, y], axis=1), num_steps=10, num_samples=10, progress=False
     )
-    im.fit_on_batch(X=X, y=y, num_steps=10, num_samples=10, progress=False)
-    out = im.predict_on_batch(X=X)
+    sizes = im.predict_on_batch(X).posterior_predictive["y"].sizes
 
-    assert out["posterior_predictive"]["y"].sizes["data"] == n_obs
-    assert out["posterior_predictive"]["y"].sizes["y_dim_0"] == n_targets
+    assert (sizes["data"], sizes["y_dim_0"]) == (len(X), 2)
 
 
 def test_predict_on_batch_warns_on_dimension_names_that_cannot_apply() -> None:
@@ -113,7 +85,7 @@ def test_predict_on_batch_warns_on_dimension_names_that_cannot_apply() -> None:
 
     X = np.linspace(-1.0, 1.0, 20).reshape(10, 2)
     y = X.sum(axis=1)
-    im = ImpactModel(kernel, rng_key=random.key(0), inference=_make_svi(kernel))
+    im = ImpactModel(kernel, rng_key=random.key(0), inference=make_svi(kernel))
     # The trace drops names that outnumber the site's dimensions
     with pytest.warns(OutputWarning, match="names .* of site 'v' cannot apply"):
         im.fit_on_batch(X, y, num_steps=5, num_samples=4, progress=False)

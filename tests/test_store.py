@@ -14,6 +14,8 @@
 
 """Tests for the `store` option of the streaming methods."""
 
+from itertools import product
+from pathlib import Path
 from queue import Queue
 
 import jax.numpy as jnp
@@ -23,215 +25,76 @@ import pytest
 import xarray as xr
 from jax import Array, random
 from numpyro import deterministic, plate, sample
-from numpyro.infer import SVI
 from zarr.errors import ChunkNotFoundError
 
 from aimz import ImpactModel
-from tests.conftest import _make_svi, lm
+from aimz.utils._output import _MemoryWriteStrategy
+from tests.conftest import lm, make_svi
+
+GROUPS = {
+    "predict": "posterior_predictive",
+    "sample_prior_predictive": "prior_predictive",
+    "log_likelihood": "log_likelihood",
+}
 
 
-def test_predict_persistent_matches_memory_obs(
+@pytest.mark.parametrize("shard_axis", ["obs", "draw"])
+@pytest.mark.parametrize(
+    "method", ["predict", "sample_prior_predictive", "log_likelihood"]
+)
+def test_persistent_matches_memory(
+    synthetic_data: tuple[Array, Array],
+    im_lm_svi_fitted: ImpactModel,
+    method: str,
+    shard_axis: str,
+) -> None:
+    """Both stores return the same tree with the same chunks under either strategy."""
+    X, y = synthetic_data
+    kwargs: dict[str, object] = {
+        "shard_axis": shard_axis,
+        "batch_size": 30,
+        "progress": False,
+    }
+    if method == "log_likelihood":
+        args = (X, y)
+    else:
+        args = (X,)
+        kwargs["rng_key"] = random.key(7)
+    persistent = getattr(im_lm_svi_fitted, method)(*args, **kwargs)
+    memory = getattr(im_lm_svi_fitted, method)(*args, store="memory", **kwargs)
+
+    xr.testing.assert_equal(persistent, memory)
+    group = GROUPS[method]
+    assert memory[group]["y"].chunks == persistent[group]["y"].chunks
+    assert "artifact_path" not in memory.attrs
+    assert "artifact_path" not in memory[group].attrs
+
+
+def test_persistent_store_records_draw_attributes(
     synthetic_data: tuple[Array, Array],
     im_lm_svi_fitted: ImpactModel,
 ) -> None:
-    """`store` option returns the same tree (obs-parallel)."""
+    """The store carries the group's attributes, so the files alone rebuild the tree."""
     X, _ = synthetic_data
-    rng_key = random.key(7)
-    batch_size = 30
+    rng_key, batch_size = random.key(7), 30
+    dt = im_lm_svi_fitted.predict(
+        X, rng_key=rng_key, batch_size=batch_size, progress=False
+    )
+    ds = xr.open_zarr(dt.attrs["artifact_path"], consolidated=False)
 
-    dt_persistent = im_lm_svi_fitted.predict(
-        X,
-        rng_key=rng_key,
-        batch_size=batch_size,
-        progress=False,
-    )
-    dt_mem = im_lm_svi_fitted.predict(
-        X,
-        rng_key=rng_key,
-        batch_size=batch_size,
-        store="memory",
-        progress=False,
-    )
-
-    xr.testing.assert_equal(dt_persistent, dt_mem)
-    assert (
-        dt_mem["posterior_predictive"]["y"].chunks
-        == dt_persistent["posterior_predictive"]["y"].chunks
-    )
-    assert "artifact_path" not in dt_mem.attrs
-    assert "artifact_path" not in dt_mem["posterior_predictive"].attrs
-    # The store carries the group's attributes, so the files alone rebuild the tree
-    ds = xr.open_zarr(dt_persistent.attrs["artifact_path"], consolidated=False)
     assert ds.attrs["num_chains"] == 1
     assert ds.attrs["batch_size"] == batch_size
     np.testing.assert_array_equal(ds.attrs["rng_key"], random.key_data(rng_key))
 
 
-def test_predict_persistent_matches_memory_draw(
-    synthetic_data: tuple[Array, Array],
-    im_lm_svi_fitted: ImpactModel,
-) -> None:
-    """`store` option returns the same tree (draw-parallel)."""
-    X, _ = synthetic_data
-    rng_key = random.key(11)
-
-    dt_persistent = im_lm_svi_fitted.predict(
-        X,
-        rng_key=rng_key,
-        shard_axis="draw",
-        batch_size=30,
-        progress=False,
-    )
-    dt_mem = im_lm_svi_fitted.predict(
-        X,
-        rng_key=rng_key,
-        shard_axis="draw",
-        batch_size=30,
-        store="memory",
-        progress=False,
-    )
-
-    xr.testing.assert_equal(dt_persistent, dt_mem)
-    assert (
-        dt_mem["posterior_predictive"]["y"].chunks
-        == dt_persistent["posterior_predictive"]["y"].chunks
-    )
-    assert "artifact_path" not in dt_mem.attrs
-    assert "artifact_path" not in dt_mem["posterior_predictive"].attrs
-
-
-def test_sample_prior_predictive_persistent_matches_memory_obs(
-    synthetic_data: tuple[Array, Array],
-    im_lm_svi_fitted: ImpactModel,
-) -> None:
-    """`store` option returns the same tree (obs-parallel)."""
-    X, _ = synthetic_data
-    rng_key = random.key(3)
-
-    dt_persistent = im_lm_svi_fitted.sample_prior_predictive(
-        X,
-        num_samples=300,
-        rng_key=rng_key,
-        batch_size=30,
-        progress=False,
-    )
-    dt_mem = im_lm_svi_fitted.sample_prior_predictive(
-        X,
-        num_samples=300,
-        rng_key=rng_key,
-        batch_size=30,
-        store="memory",
-        progress=False,
-    )
-
-    xr.testing.assert_equal(dt_persistent, dt_mem)
-    assert (
-        dt_mem["prior_predictive"]["y"].chunks
-        == dt_persistent["prior_predictive"]["y"].chunks
-    )
-
-
-def test_sample_prior_predictive_persistent_matches_memory_draw(
-    synthetic_data: tuple[Array, Array],
-    im_lm_svi_fitted: ImpactModel,
-) -> None:
-    """`store` option returns the same tree (draw-parallel)."""
-    X, _ = synthetic_data
-    rng_key = random.key(5)
-
-    dt_persistent = im_lm_svi_fitted.sample_prior_predictive(
-        X,
-        num_samples=300,
-        rng_key=rng_key,
-        shard_axis="draw",
-        batch_size=30,
-        progress=False,
-    )
-    dt_mem = im_lm_svi_fitted.sample_prior_predictive(
-        X,
-        num_samples=300,
-        rng_key=rng_key,
-        shard_axis="draw",
-        batch_size=30,
-        store="memory",
-        progress=False,
-    )
-
-    xr.testing.assert_equal(dt_persistent, dt_mem)
-    assert (
-        dt_mem["prior_predictive"]["y"].chunks
-        == dt_persistent["prior_predictive"]["y"].chunks
-    )
-
-
-def test_log_likelihood_persistent_matches_memory_obs(
-    synthetic_data: tuple[Array, Array],
-    im_lm_svi_fitted: ImpactModel,
-) -> None:
-    """`store` option returns the same tree (obs-parallel)."""
-    X, y = synthetic_data
-
-    dt_persistent = im_lm_svi_fitted.log_likelihood(
-        X,
-        y,
-        batch_size=30,
-        progress=False,
-    )
-    dt_mem = im_lm_svi_fitted.log_likelihood(
-        X,
-        y,
-        batch_size=30,
-        store="memory",
-        progress=False,
-    )
-
-    xr.testing.assert_equal(dt_persistent, dt_mem)
-    assert (
-        dt_mem["log_likelihood"]["y"].chunks
-        == dt_persistent["log_likelihood"]["y"].chunks
-    )
-
-
-def test_log_likelihood_persistent_matches_memory_draw(
-    synthetic_data: tuple[Array, Array],
-    im_lm_svi_fitted: ImpactModel,
-) -> None:
-    """`store` option returns the same tree (draw-parallel)."""
-    X, y = synthetic_data
-
-    dt_persistent = im_lm_svi_fitted.log_likelihood(
-        X,
-        y,
-        shard_axis="draw",
-        batch_size=30,
-        progress=False,
-    )
-    dt_mem = im_lm_svi_fitted.log_likelihood(
-        X,
-        y,
-        shard_axis="draw",
-        batch_size=30,
-        store="memory",
-        progress=False,
-    )
-
-    xr.testing.assert_equal(dt_persistent, dt_mem)
-    assert (
-        dt_mem["log_likelihood"]["y"].chunks
-        == dt_persistent["log_likelihood"]["y"].chunks
-    )
-
-
-@pytest.mark.parametrize("vi", [lm], indirect=True)
 def test_memory_store_leaves_filesystem_untouched(
     synthetic_data: tuple[Array, Array],
-    vi: SVI,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Memory-store calls never materialize the temp directory, even on failure."""
     X, y = synthetic_data
-    im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
-    im.fit_on_batch(X=X, y=y)
+    im = ImpactModel(lm, rng_key=random.key(42), inference=make_svi(lm))
+    im.fit_on_batch(X=X, y=y, num_steps=10, num_samples=10, progress=False)
 
     assert im.temp_dir is None
 
@@ -267,7 +130,7 @@ def test_persistent_read_raises_after_artifact_removal(
             deterministic("effect", t * b**2)
             sample("y", dist.Normal(X.sum(axis=-1) + b * t, 1.0), obs=y)
 
-    im = ImpactModel(kernel, rng_key=random.key(42), inference=_make_svi(kernel))
+    im = ImpactModel(kernel, rng_key=random.key(42), inference=make_svi(kernel))
     im.fit_on_batch(X=X, y=y, t=t, num_steps=10, num_samples=10, progress=False)
     dt = im.predict(X, t=t, batch_size=30, progress=False)
 
@@ -291,15 +154,12 @@ def test_interrupted_memory_stream_releases_partial_batches(
     must empty the retained batches rather than rely on the frames dying.
     """
     X, _ = synthetic_data
-
-    from aimz.utils import _output  # noqa: PLC0415
-
     interrupt_at_batch = 2
     calls = {"n": 0}
-    unpatched = _output._MemoryWriteStrategy.enqueue
+    unpatched = _MemoryWriteStrategy.enqueue
 
     def interrupt_on_second_batch(
-        self: _output._MemoryWriteStrategy,
+        self: _MemoryWriteStrategy,
         queue: Queue,
         site_arrays: dict,
     ) -> None:
@@ -308,11 +168,7 @@ def test_interrupted_memory_stream_releases_partial_batches(
         if calls["n"] >= interrupt_at_batch:
             raise KeyboardInterrupt
 
-    monkeypatch.setattr(
-        _output._MemoryWriteStrategy,
-        "enqueue",
-        interrupt_on_second_batch,
-    )
+    monkeypatch.setattr(_MemoryWriteStrategy, "enqueue", interrupt_on_second_batch)
 
     with pytest.raises(KeyboardInterrupt) as excinfo:
         im_lm_svi_fitted.predict(X, batch_size=30, store="memory", progress=False)
@@ -323,7 +179,7 @@ def test_interrupted_memory_stream_releases_partial_batches(
     tb = excinfo.tb
     while tb is not None:
         obj = tb.tb_frame.f_locals.get("strategy")
-        if isinstance(obj, _output._MemoryWriteStrategy):
+        if isinstance(obj, _MemoryWriteStrategy):
             sinks.append(obj.sink)
         tb = tb.tb_next
 
@@ -331,75 +187,42 @@ def test_interrupted_memory_stream_releases_partial_batches(
     assert all(not sink for sink in sinks)
 
 
-class TestValidation:
-    """Test class for `store` validation across the four streaming methods."""
-
-    METHODS = (
+def test_store_validation(
+    synthetic_data: tuple[Array, Array],
+    im_lm_svi_fitted: ImpactModel,
+    tmp_path: Path,
+) -> None:
+    """An unknown `store`, or an `output_dir` with the memory store, raises."""
+    X, y = synthetic_data
+    for method in (
         "predict",
         "sample_posterior_predictive",
         "sample_prior_predictive",
         "log_likelihood",
-    )
-
-    @staticmethod
-    def _call(
-        im: ImpactModel,
-        method: str,
-        X: Array,
-        y: Array,
-        **kwargs: object,
-    ) -> None:
-        """Invoke one of the streaming methods with its required arguments."""
-        if method == "log_likelihood":
-            getattr(im, method)(X, y, **kwargs)
-        else:
-            getattr(im, method)(X, **kwargs)
-
-    def test_invalid_store(
-        self,
-        synthetic_data: tuple[Array, Array],
-        im_lm_svi_fitted: ImpactModel,
-    ) -> None:
-        """An unknown `store` raises an error."""
-        X, y = synthetic_data
-        for method in self.METHODS:
-            with pytest.raises(ValueError, match="`store` must be either"):
-                self._call(im_lm_svi_fitted, method, X, y, store="rows")
-
-    def test_output_dir_with_memory_store(
-        self,
-        synthetic_data: tuple[Array, Array],
-        im_lm_svi_fitted: ImpactModel,
-        tmp_path: object,
-    ) -> None:
-        """`store="memory"` combined with an explicit `output_dir` raises an error."""
-        X, y = synthetic_data
-        for method in self.METHODS:
-            with pytest.raises(ValueError, match="`output_dir` must be `None`"):
-                self._call(
-                    im_lm_svi_fitted,
-                    method,
-                    X,
-                    y,
-                    store="memory",
-                    output_dir=str(tmp_path),
-                )
+    ):
+        args = (X, y) if method == "log_likelihood" else (X,)
+        with pytest.raises(ValueError, match="`store` must be either"):
+            getattr(im_lm_svi_fitted, method)(*args, store="rows")
+        with pytest.raises(ValueError, match="`output_dir` must be `None`"):
+            getattr(im_lm_svi_fitted, method)(
+                *args, store="memory", output_dir=str(tmp_path)
+            )
 
 
-def test_estimate_effect_store_combinations_match(
+def test_estimate_effect_store_combinations(
     synthetic_data: tuple[Array, Array],
     im_lm_svi_fitted: ImpactModel,
 ) -> None:
-    """All four `store` combinations return the same effect tree."""
+    """Any combination of stores gives the same effect, recording persistent paths."""
     X, _ = synthetic_data
     rng_key = random.key(13)
-
-    effects = [
-        im_lm_svi_fitted.estimate_effect(
+    effects = {}
+    for stores in product(("persistent", "memory"), repeat=2):
+        effects[stores] = im_lm_svi_fitted.estimate_effect(
             args_baseline={
                 "X": X,
                 "rng_key": rng_key,
-                "store": store_baseline,
+                "store": stores[0],
                 "batch_size": 30,
                 "progress": False,
             },
@@ -407,64 +230,18 @@ def test_estimate_effect_store_combinations_match(
                 "X": X,
                 "intervention": {"b": 0.0},
                 "rng_key": rng_key,
-                "store": store_intervention,
+                "store": stores[1],
                 "batch_size": 30,
                 "progress": False,
             },
         )
-        for store_baseline in ("persistent", "memory")
-        for store_intervention in ("persistent", "memory")
-    ]
 
-    for effect in effects[1:]:
-        xr.testing.assert_equal(effects[0], effect)
-
-
-def test_estimate_effect_memory_records_no_artifact_paths(
-    synthetic_data: tuple[Array, Array],
-    im_lm_svi_fitted: ImpactModel,
-) -> None:
-    """Effects from two memory-store scenarios record no artifact-path attrs."""
-    X, _ = synthetic_data
-
-    effect = im_lm_svi_fitted.estimate_effect(
-        args_baseline={
-            "X": X,
-            "store": "memory",
-            "batch_size": 30,
-            "progress": False,
-        },
-        args_intervention={
-            "X": X,
-            "intervention": {"b": 0.0},
-            "store": "memory",
-            "batch_size": 30,
-            "progress": False,
-        },
-    )
-
-    assert "posterior_predictive" in effect.children
-    assert "artifact_path_baseline" not in effect.attrs
-    assert "artifact_path_intervention" not in effect.attrs
-
-
-def test_estimate_effect_mixed_stores_records_persistent_side_only(
-    synthetic_data: tuple[Array, Array],
-    im_lm_svi_fitted: ImpactModel,
-) -> None:
-    """Mixing stores records only the persistent scenario's artifact path."""
-    X, _ = synthetic_data
-
-    effect = im_lm_svi_fitted.estimate_effect(
-        args_baseline={"X": X, "batch_size": 30, "progress": False},
-        args_intervention={
-            "X": X,
-            "intervention": {"b": 0.0},
-            "store": "memory",
-            "batch_size": 30,
-            "progress": False,
-        },
-    )
-
-    assert "artifact_path_baseline" in effect.attrs
-    assert "artifact_path_intervention" not in effect.attrs
+    reference = effects["persistent", "persistent"]
+    for (store_baseline, store_intervention), effect in effects.items():
+        xr.testing.assert_equal(reference, effect)
+        assert ("artifact_path_baseline" in effect.attrs) == (
+            store_baseline == "persistent"
+        )
+        assert ("artifact_path_intervention" in effect.attrs) == (
+            store_intervention == "persistent"
+        )
