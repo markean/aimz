@@ -16,6 +16,7 @@ We build two `NumPyro`_ models, one for conversion and one for spend (a logistic
     import numpy as np
     import numpyro.distributions as dist
     import pandas as pd
+    import xarray as xr
     from jax import Array, random
     from numpyro import deterministic, factor, plate, sample
     from numpyro.infer import MCMC, NUTS
@@ -84,7 +85,6 @@ The dataset contains the following 11 columns:
   - ``conversion``: 1 if the customer made a purchase, 0 otherwise.
   - ``spend``: dollar amount spent (0 for non-purchasers).
 
-
 The bar charts below show the raw conversion rates and average spend by treatment arm.
 
 .. jupyter-execute::
@@ -113,31 +113,6 @@ The bar charts below show the raw conversion rates and average spend by treatmen
     axes[1].tick_params(axis="x", rotation=0);
 
 The email groups show higher conversion rates and spend than the control group.
-
-.. jupyter-execute::
-
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-
-    # All customers
-    for i, seg in enumerate(segments):
-        subset = df.loc[df["segment"] == seg, "spend"]
-        axes[0].hist(subset, label=seg, color=f"C{i}", density=True)
-    axes[0].set(xlabel="Spend", ylabel="Density")
-    axes[0].set_title("Spend Distribution (All Customers)")
-    axes[0].legend()
-
-    # Buyers only
-    for i, seg in enumerate(segments):
-        subset = df.loc[(df["segment"] == seg) & (df["spend"] > 0), "spend"]
-        axes[1].hist(subset, label=seg, color=f"C{i}", density=True)
-    axes[1].set(xlabel="Spend", ylabel="Density")
-    axes[1].set_title("Spend Distribution (Buyers Only)")
-    axes[1].legend();
-
-\
-
-The left panel confirms that the spend distribution is heavily zero-inflated: the vast majority of customers do not purchase.
-The right panel, restricted to buyers, shows a right-skewed but roughly continuous distribution across all three segments.
 
 Before modeling, we check that covariates are balanced across treatment arms, as expected in a randomized experiment.
 
@@ -190,14 +165,11 @@ We encode the treatment segment as an integer, one-hot encode the categorical co
     ) / df[cols_to_standardize].std(ddof=0)
 
     # Build JAX arrays
+    features = ["recency", "history", "mens", "womens", "newbie"] + [
+        c for c in df.columns if c.startswith(("zip_code_", "channel_"))
+    ]
     segment = jnp.asarray(df["segment"].to_numpy(), dtype=jnp.int32)
-    X = jnp.asarray(
-        df[
-            ["recency", "history", "mens", "womens", "newbie"]
-            + [c for c in df.columns if c.startswith(("zip_code_", "channel_"))]
-        ].to_numpy(),
-        dtype=jnp.float32,
-    )
+    X = jnp.asarray(df[features].to_numpy(), dtype=jnp.float32)
     y_conversion = jnp.asarray(df["conversion"].to_numpy(), dtype=jnp.int32)
     y_spend = jnp.asarray(df["spend"].to_numpy(), dtype=jnp.float32)
 
@@ -250,7 +222,45 @@ Calling :meth:`~aimz.ImpactModel.fit_on_batch` runs the configured inference eng
 
     im_conv.fit_on_batch(X, y_conversion, segment=segment)
 
+
+Estimating Treatment Effects on Conversion
+------------------------------------------
+
+With the fitted model in hand, we now estimate treatment effects.
+:meth:`~aimz.ImpactModel.estimate_effect` takes two scenarios, each a dict of keyword arguments that would be passed to the underlying prediction method.
+For every posterior draw, it generates predictions under both scenarios, subtracts baseline from intervention, and returns per-observation differences as an :class:`~xarray.DataTree`.
+
+Because ``segment`` is a function argument rather than a :func:`~numpyro.primitives.sample` site, each counterfactual scenario is specified by passing the desired treatment value directly, here one value for every customer.
+Each campaign is compared with the control group.
+
+.. jupyter-execute::
+    :hide-output:
+
+    campaigns = {"Mens E-Mail": 1, "Womens E-Mail": 2}
+    effect_conv = {
+        name: im_conv.estimate_effect(
+            args_baseline={"X": X, "segment": 0},
+            args_intervention={"X": X, "segment": arm},
+            on_batch=True,
+        )
+        for name, arm in campaigns.items()
+    }
+
 \
+
+Averaging the per-observation differences over all customers gives the ATE posterior, one value per draw, fully propagating parameter uncertainty.
+
+.. jupyter-execute::
+
+    ate_conv = xr.Dataset(
+        {name: eff.posterior_predictive["y"].mean("obs") for name, eff in effect_conv.items()},
+    )
+    azs.summary(ate_conv, kind="stats", ci_prob=0.95, ci_kind="hdi", round_to=4)
+
+\
+
+Both intervals sit entirely above zero, providing strong evidence that both campaigns increase conversion relative to the control group.
+The Men's E-Mail effect is somewhat larger, though the posteriors overlap substantially.
 
 After fitting, the underlying `NumPyro`_ inference object is accessible via :attr:`~aimz.ImpactModel.inference`.
 We use it here to print MCMC diagnostics.
@@ -261,7 +271,7 @@ We use it here to print MCMC diagnostics.
 
 \
 
-Before estimating treatment effects, we run a posterior predictive check to verify that the model reproduces the observed conversion rates, overall and per treatment arm.
+The posterior predictive check verifies that the model reproduces the observed conversion rates, overall and per treatment arm.
 :meth:`~aimz.ImpactModel.predict_on_batch` generates posterior predictive samples and returns an :class:`~xarray.DataTree`.
 
 .. jupyter-execute::
@@ -271,17 +281,24 @@ Before estimating treatment effects, we run a posterior predictive check to veri
 
 \
 
+A coordinate on ``obs`` labels every customer with their arm, so one ``groupby`` gives the predicted rate per arm.
+
 .. jupyter-execute::
 
     pp_conv = dt_conv.posterior_predictive["y"]
+    pred_conv = (
+        pp_conv.assign_coords(segment=("obs", np.asarray(segment)))
+        .groupby("segment")
+        .mean("obs")
+    )
+    obs_conv = df.groupby("segment")["conversion"].mean()
 
     fig, axes = plt.subplots(2, 2, figsize=(12, 8), layout="constrained")
     axes = axes.flatten()
 
     # Overall
     obs_overall = float(y_conversion.mean())
-    pred_overall = pp_conv.mean(dim="obs").to_numpy().flatten()
-    axes[0].hist(pred_overall, bins=20, color="C0")
+    axes[0].hist(pp_conv.mean("obs").to_numpy().flatten(), bins=20, color="C0")
     axes[0].axvline(
         obs_overall,
         color="red",
@@ -294,16 +311,17 @@ Before estimating treatment effects, we run a posterior predictive check to veri
 
     # Per treatment arm
     for arm_id, arm_name in enumerate(segments):
-        mask = np.asarray(segment == arm_id)
-        obs_arm = float(y_conversion[mask].mean())
-        pred_arm = pp_conv.isel(obs=mask).mean(dim="obs").to_numpy().flatten()
-        axes[arm_id + 1].hist(pred_arm, bins=20, color=f"C{arm_id + 1}")
+        axes[arm_id + 1].hist(
+            pred_conv.sel(segment=arm_id).to_numpy().flatten(),
+            bins=20,
+            color=f"C{arm_id + 1}",
+        )
         axes[arm_id + 1].axvline(
-            obs_arm,
+            obs_conv[arm_id],
             color="red",
             linestyle="--",
             linewidth=2,
-            label=f"Obs: {obs_arm:.3f}",
+            label=f"Obs: {obs_conv[arm_id]:.3f}",
         )
         axes[arm_id + 1].set_title(arm_name)
         axes[arm_id + 1].legend()
@@ -322,99 +340,35 @@ Before estimating treatment effects, we run a posterior predictive check to veri
 The observed rate (red dashed line) falls within the bulk of the posterior predictive distribution for each arm, indicating an adequate fit.
 
 
-Estimating Treatment Effects on Conversion
-------------------------------------------
-
-With the fitted model in hand, we now estimate treatment effects.
-:meth:`~aimz.ImpactModel.estimate_effect` takes two scenarios, each a dict of keyword arguments that would be passed to the underlying prediction method.
-For every posterior draw, it generates predictions under both scenarios, subtracts baseline from intervention, and returns per-observation differences as an :class:`~xarray.DataTree`.
-
-Because ``segment`` is a function argument rather than a :func:`~numpyro.primitives.sample` site, each counterfactual scenario is specified by passing the desired treatment value directly.
-
-.. jupyter-execute::
-
-    effect_conv_mens = im_conv.estimate_effect(
-        args_baseline={
-            "X": X,
-            "segment": jnp.zeros(n_obs, dtype=jnp.int32),
-        },
-        args_intervention={
-            "X": X,
-            "segment": jnp.ones(n_obs, dtype=jnp.int32),
-        },
-        on_batch=True,
-    )
-
-    effect_conv_womens = im_conv.estimate_effect(
-        args_baseline={
-            "X": X,
-            "segment": jnp.zeros(n_obs, dtype=jnp.int32),
-        },
-        args_intervention={
-            "X": X,
-            "segment": 2 * jnp.ones(n_obs, dtype=jnp.int32),
-        },
-        on_batch=True,
-    )
-
-\
-
-Averaging the per-observation differences over all customers gives the ATE posterior, one value per draw, fully propagating parameter uncertainty.
-
-.. jupyter-execute::
-
-    ate_conv_mens = effect_conv_mens.posterior_predictive["y"].mean(dim="obs")
-    ate_conv_womens = effect_conv_womens.posterior_predictive["y"].mean(dim="obs")
-
-\
-
-We plot the ATE posteriors for both campaigns alongside the posterior mean and a zero-effect reference.
-
-.. jupyter-execute::
-
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4), layout="constrained")
-
-    for i, (ax, ate, label) in enumerate(
-        zip(
-            axes,
-            [ate_conv_mens, ate_conv_womens],
-            ["Mens E-Mail vs. No E-Mail", "Womens E-Mail vs. No E-Mail"],
-            strict=True,
-        ),
-    ):
-        pp_ate = ate.to_numpy().flatten()
-        ax.hist(pp_ate, bins=20, color=f"C{i}")
-        mean = pp_ate.mean()
-        ax.axvline(
-            mean,
-            color="red",
-            linestyle="--",
-            linewidth=2,
-            label=f"Mean: {mean:.3f}",
-        )
-        ax.axvline(0, color="gray", linestyle=":")
-        ax.set_title(label)
-        ax.legend()
-
-    fig.supxlabel("ATE (Conversion Rate)")
-    fig.supylabel("Frequency")
-    fig.suptitle(
-        "Treatment Effects: Conversion",
-        fontsize=18,
-        fontweight="bold",
-        y=1.1,
-    );
-
-\
-
-Both posterior distributions sit entirely above zero, providing strong evidence that both campaigns increase conversion relative to the control group.
-The Men's E-Mail effect is somewhat larger, though the posteriors overlap substantially.
-
-
 Model 2: Spend
 --------------
 
 Spend is zero for most customers and right-skewed among buyers.
+
+.. jupyter-execute::
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+
+    # All customers
+    for i, seg in enumerate(segments):
+        subset = df.loc[df["segment"] == i, "spend"]
+        axes[0].hist(subset, label=seg, color=f"C{i}", density=True)
+    axes[0].set(xlabel="Spend", ylabel="Density")
+    axes[0].set_title("Spend Distribution (All Customers)")
+    axes[0].legend()
+
+    # Buyers only
+    for i, seg in enumerate(segments):
+        subset = df.loc[(df["segment"] == i) & (df["spend"] > 0), "spend"]
+        axes[1].hist(subset, label=seg, color=f"C{i}", density=True)
+    axes[1].set(xlabel="Spend", ylabel="Density")
+    axes[1].set_title("Spend Distribution (Buyers Only)")
+    axes[1].legend();
+
+\
+
+The left panel confirms that the spend distribution is heavily zero-inflated: the vast majority of customers do not purchase.
+The right panel, restricted to buyers, shows a right-skewed but roughly continuous distribution across all three segments.
 We use a **hurdle model** with two components: a Bernoulli gate for whether the customer purchases at all, and a log-normal distribution for the spend amount conditional on purchasing.
 
 This model demonstrates how :class:`~aimz.ImpactModel` handles custom likelihoods.
@@ -476,9 +430,31 @@ We fit the hurdle model using the same MCMC configuration as before.
 
     im_spend.fit_on_batch(X, y_spend, segment=segment)
 
+
+Estimating Treatment Effects on Spend
+-------------------------------------
+
+We repeat the same counterfactual procedure as for conversion, now using the spend model.
+Averaging the per-observation spend differences gives the ATE posterior in dollars.
+
+.. jupyter-execute::
+
+    effect_spend = {
+        name: im_spend.estimate_effect(
+            args_baseline={"X": X, "segment": 0},
+            args_intervention={"X": X, "segment": arm},
+            on_batch=True,
+        )
+        for name, arm in campaigns.items()
+    }
+    ate_spend = xr.Dataset(
+        {name: eff.posterior_predictive["y"].mean("obs") for name, eff in effect_spend.items()},
+    )
+    azs.summary(ate_spend, kind="stats", ci_prob=0.95, ci_kind="hdi", round_to=3)
+
 \
 
-MCMC diagnostics:
+MCMC diagnostics and the posterior predictive check follow the same workflow as for the conversion model.
 
 .. jupyter-execute::
 
@@ -486,20 +462,23 @@ MCMC diagnostics:
 
 \
 
-Following the same workflow as the conversion model, we check that the predicted spend matches the observed values per arm.
-
 .. jupyter-execute::
 
     dt_spend = im_spend.predict_on_batch(X, segment=segment)
     pp_spend = dt_spend.posterior_predictive["y"]
+    pred_spend = (
+        pp_spend.assign_coords(segment=("obs", np.asarray(segment)))
+        .groupby("segment")
+        .mean("obs")
+    )
+    obs_spend = df.groupby("segment")["spend"].mean()
 
     fig, axes = plt.subplots(2, 2, figsize=(12, 8), layout="constrained")
     axes = axes.flatten()
 
     # Overall
     obs_overall = float(y_spend.mean())
-    pred_overall = pp_spend.mean(dim="obs").to_numpy().flatten()
-    axes[0].hist(pred_overall, bins=20, color="C0")
+    axes[0].hist(pp_spend.mean("obs").to_numpy().flatten(), bins=20, color="C0")
     axes[0].axvline(
         obs_overall,
         color="red",
@@ -512,16 +491,17 @@ Following the same workflow as the conversion model, we check that the predicted
 
     # Per treatment arm
     for arm_id, arm_name in enumerate(segments):
-        mask = np.asarray(segment == arm_id)
-        obs_arm = float(y_spend[mask].mean())
-        pred_arm = pp_spend.isel(obs=mask).mean(dim="obs").to_numpy().flatten()
-        axes[arm_id + 1].hist(pred_arm, bins=20, color=f"C{arm_id + 1}")
+        axes[arm_id + 1].hist(
+            pred_spend.sel(segment=arm_id).to_numpy().flatten(),
+            bins=20,
+            color=f"C{arm_id + 1}",
+        )
         axes[arm_id + 1].axvline(
-            obs_arm,
+            obs_spend[arm_id],
             color="red",
             linestyle="--",
             linewidth=2,
-            label=f"Obs: {obs_arm:.3f}",
+            label=f"Obs: {obs_spend[arm_id]:.3f}",
         )
         axes[arm_id + 1].set_title(arm_name)
         axes[arm_id + 1].legend()
@@ -536,86 +516,6 @@ Following the same workflow as the conversion model, we check that the predicted
     );
 
 
-Estimating Treatment Effects on Spend
--------------------------------------
-
-We repeat the same counterfactual procedure as for conversion, now using the spend model.
-
-.. jupyter-execute::
-
-    effect_spend_mens = im_spend.estimate_effect(
-        args_baseline={
-            "X": X,
-            "segment": jnp.zeros(n_obs, dtype=jnp.int32),
-        },
-        args_intervention={
-            "X": X,
-            "segment": jnp.ones(n_obs, dtype=jnp.int32),
-        },
-        on_batch=True,
-    )
-
-    effect_spend_womens = im_spend.estimate_effect(
-        args_baseline={
-            "X": X,
-            "segment": jnp.zeros(n_obs, dtype=jnp.int32),
-        },
-        args_intervention={
-            "X": X,
-            "segment": 2 * jnp.ones(n_obs, dtype=jnp.int32),
-        },
-        on_batch=True,
-    )
-
-\
-
-Averaging per-observation spend differences gives the ATE posterior in dollars.
-
-.. jupyter-execute::
-
-    ate_spend_mens = effect_spend_mens.posterior_predictive["y"].mean(dim="obs")
-    ate_spend_womens = effect_spend_womens.posterior_predictive["y"].mean(dim="obs")
-
-\
-
-We visualize the spend ATE posteriors for both campaigns.
-
-.. jupyter-execute::
-
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4), layout="constrained")
-
-    for i, (ax, ate, label) in enumerate(
-        zip(
-            axes,
-            [ate_spend_mens, ate_spend_womens],
-            ["Mens E-Mail vs. No E-Mail", "Womens E-Mail vs. No E-Mail"],
-            strict=True,
-        ),
-    ):
-        pp_ate = ate.to_numpy().flatten()
-        ax.hist(pp_ate, bins=20, color=f"C{i}")
-        mean = pp_ate.mean()
-        ax.axvline(
-            mean,
-            color="red",
-            linestyle="--",
-            linewidth=2,
-            label=f"Mean: {mean:.3f}",
-        )
-        ax.axvline(0, color="gray", linestyle=":")
-        ax.set_title(label)
-        ax.legend()
-
-    fig.supxlabel("ATE (Spend)")
-    fig.supylabel("Frequency")
-    fig.suptitle(
-        "Treatment Effects: Spend",
-        fontsize=18,
-        fontweight="bold",
-        y=1.1,
-    );
-
-
 Comparison
 ----------
 
@@ -625,35 +525,31 @@ We compare treatment effects across both outcomes to check whether the campaigns
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 4), sharey=True)
 
-    # Conversion effects
-    for i, ate in enumerate([ate_conv_mens, ate_conv_womens]):
-        pp_ate = ate.to_numpy().flatten()
-        mean = pp_ate.mean()
-        hdi = azs.hdi(pp_ate)
-        axes[0].errorbar(
-            mean, i,
-            xerr=[[mean - hdi[0]], [hdi[1] - mean]],
-            fmt="o", capsize=5, color="C0", markersize=8,
-        )
-    axes[0].set_yticks(range(2))
-    axes[0].set_yticklabels(["Men's vs. No E-Mail", "Women's vs. No E-Mail"])
-    axes[0].axvline(0, color="gray", linestyle=":")
+    for ax, ate, color, title in zip(
+        axes,
+        [ate_conv, ate_spend],
+        ["C0", "C1"],
+        ["Conversion", "Spend"],
+        strict=True,
+    ):
+        for i, name in enumerate(campaigns):
+            mean = ate[name].mean().item()
+            lower, upper = azs.hdi(ate[name], prob=0.95).values
+            ax.errorbar(
+                mean,
+                i,
+                xerr=[[mean - lower], [upper - mean]],
+                fmt="o",
+                capsize=5,
+                color=color,
+                markersize=8,
+            )
+        ax.axvline(0, color="gray", linestyle=":")
+        ax.set_title(title)
+    axes[0].set_yticks(range(len(campaigns)))
+    axes[0].set_yticklabels([f"{name} vs. No E-Mail" for name in campaigns])
     axes[0].set_xlabel("ATE (Conversion Rate)")
-    axes[0].set_title("Conversion")
-
-    # Spend effects
-    for i, ate in enumerate([ate_spend_mens, ate_spend_womens]):
-        pp_ate = ate.to_numpy().flatten()
-        mean = pp_ate.mean()
-        hdi = azs.hdi(pp_ate)
-        axes[1].errorbar(
-            mean, i,
-            xerr=[[mean - hdi[0]], [hdi[1] - mean]],
-            fmt="o", capsize=5, color="C1", markersize=8,
-        )
-    axes[1].axvline(0, color="gray", linestyle=":")
     axes[1].set_xlabel("ATE (Spend)")
-    axes[1].set_title("Spend")
 
     fig.suptitle("Treatment Effect Comparison", fontsize=18, fontweight="bold");
 
