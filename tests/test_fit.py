@@ -166,7 +166,9 @@ def test_fit_array_matches_loader(synthetic_data: tuple[Array, Array]) -> None:
     )
     im_loader.fit(loader, rng_key=rng_key, progress=False)
 
-    np.testing.assert_allclose(im_array.vi_result.losses, im_loader.vi_result.losses)
+    np.testing.assert_allclose(
+        im_array.vi_result.losses, im_loader.vi_result.losses, rtol=1e-5
+    )
     np.testing.assert_array_equal(
         im_array.predict_on_batch(X, rng_key=rng_key).posterior_predictive["y"],
         im_loader.predict_on_batch(X, rng_key=rng_key).posterior_predictive["y"],

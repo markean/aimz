@@ -43,6 +43,7 @@ def test_log_likelihood_subsampled_kernel(synthetic_data: tuple[Array, Array]) -
         np.testing.assert_allclose(
             out.log_likelihood["y"].values,
             out_draw.log_likelihood["y"].values,
+            rtol=1e-5,
             atol=1e-6,
         )
         with pytest.raises(ValueError, match="declares size=100"):

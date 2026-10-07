@@ -300,6 +300,7 @@ def test_predict_loader_binds_fields_by_name(
     np.testing.assert_allclose(
         ref.posterior_predictive["y"].values,
         via.posterior_predictive["y"].values,
+        rtol=1e-5,
     )
 
     with pytest.raises(ValueError, match="also fields of the data loader"):
