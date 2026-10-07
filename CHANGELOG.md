@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - {meth}`~aimz.ImpactModel.fit` now warns with {class}`~aimz.FitWarning` when it trains on batches smaller than the data and the kernel gives the output site no scale for a batch, so that each batch would be weighed as the whole data, instead of fitting without notice. The check runs on an array input or an {class}`~aimz.utils.data.ArrayLoader`; another data loader has no size to compare with ([#418](https://github.com/markean/aimz/issues/418)).
 - {meth}`~aimz.ImpactModel.set_posterior_sample` now warns with {class}`~aimz.OutputWarning` when the kernel has been traced and the posterior has no draws for one of its latent sample sites ([#426](https://github.com/markean/aimz/issues/426)).
 - {meth}`~aimz.ImpactModel.predict` and {meth}`~aimz.ImpactModel.predict_on_batch` now warn when an intervened site reaches the output only through sites whose values the posterior supplies, so that the draws cannot respond to it, instead of returning them without notice ([#428](https://github.com/markean/aimz/issues/428)).
+- The streaming methods now count the batches that `store="memory"` keeps on the host when they plan the writer queue, and warn with {class}`~aimz.PerformanceWarning` when the whole output exceeds the memory available, instead of planning as if every batch left memory once written ([#435](https://github.com/markean/aimz/issues/435)).
 
 ### Fixed
 

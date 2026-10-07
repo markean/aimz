@@ -26,7 +26,9 @@ import pytest
 from tqdm.auto import tqdm
 from zarr import open_group
 
+from aimz import PerformanceWarning
 from aimz.utils._output import (
+    _PIPELINE_DEPTH,
     _QUEUE_SIZE_MAX,
     _WRITER_COUNT_MAX,
     _WRITER_COUNT_UNBOUNDED,
@@ -92,6 +94,28 @@ class TestPlanWriters:
         )
         assert plan.n_writers == 1
         assert plan.queue_size == 1
+
+    def test_retained_batches_count_against_memory(
+        self,
+        fake_psutil: MagicMock,
+    ) -> None:
+        """Kept batches shrink the queue and warn when they will not fit in memory."""
+        item_nbytes, n_items, room = 1024, 10, 20
+        fake_psutil.virtual_memory.return_value.available = room * item_nbytes
+        kept = _plan_writers(
+            1, n_items=n_items, item_nbytes=item_nbytes, n_sites=1, retained=True
+        )
+        written = _plan_writers(1, n_items=n_items, item_nbytes=item_nbytes, n_sites=1)
+        assert kept.n_writers == written.n_writers == 1
+        # One slot of the batches' room is reserved for the producer to stay ahead
+        assert kept.queue_size == room - n_items - _PIPELINE_DEPTH - 1
+        assert kept.queue_size < written.queue_size
+        fake_psutil.virtual_memory.return_value.available = 3 * item_nbytes
+        with pytest.warns(PerformanceWarning, match="exceeds the memory available"):
+            plan = _plan_writers(
+                1, n_items=n_items, item_nbytes=item_nbytes, n_sites=1, retained=True
+            )
+        assert (plan.n_writers, plan.queue_size) == (1, 1)
 
     def test_absolute_queue_cap_binds(self, fake_psutil: MagicMock) -> None:
         """The absolute queue ceiling binds for huge workloads with tiny items."""

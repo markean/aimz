@@ -26,6 +26,7 @@ from queue import Queue
 from shutil import rmtree
 from threading import Event, Thread
 from typing import TYPE_CHECKING, Protocol, cast, override
+from warnings import warn
 
 import psutil
 from dask import delayed
@@ -33,6 +34,7 @@ from dask.array import concatenate, from_delayed
 from zarr import open_group
 from zarr.codecs import BloscCodec
 
+from aimz._exceptions import _SKIP_FILE_PREFIXES, PerformanceWarning
 from aimz.utils._format import _group_dims
 
 logger = logging.getLogger(__name__)
@@ -151,6 +153,8 @@ def _plan_writers(
     item_nbytes: int,
     n_sites: int,
     requested: int | None = None,
+    *,
+    retained: bool = False,
 ) -> _StreamPlan:
     """Plan the writer pool and shared-queue depth for a streamed write.
 
@@ -159,7 +163,8 @@ def _plan_writers(
 
     - In-flight host bytes (queued items, items being applied, and the pipelined
       producer's :data:`_PIPELINE_DEPTH` pre-collected batches) stay within the
-      memory available at planning time.
+      memory available at planning time, less the room every batch of the call takes
+      when the store keeps them all on the host.
     - The pool never exceeds the strategy's ceiling, the batch count, the CPU-derived
       automatic cap (or the explicit request), or what the memory envelope can feed.
     - Both results are floored at 1, so a bounded queue and at least one writer always
@@ -173,16 +178,32 @@ def _plan_writers(
             batch sizes this is an estimate; the queue remains bounded by item count.
         n_sites: Number of ``(site, payload)`` items each batch enqueues.
         requested: Explicit writer count, or ``None`` to choose automatically.
+        retained: Whether the store keeps every batch on the host for the whole call,
+            as the memory store does, so that the batches to come, rather than only
+            the items in flight, take up the memory.
 
     Returns:
         The writer-pool plan.
+
+    Warns:
+        PerformanceWarning: If the batches the store keeps exceed the memory available
+            at planning time, so the call will swap or fail unless the batches are
+            written out instead.
     """
-    # Batches of headroom the host affords beyond the pipeline's in-flight steps; NOT
-    # clamped by `n_items`, so a small batch count with ample memory still gets a full
-    # pool (every batch can be in flight at once).
-    mem_batches = (
-        psutil.virtual_memory().available // max(1, item_nbytes) - _PIPELINE_DEPTH
-    )
+    available = psutil.virtual_memory().available
+    resident = n_items * item_nbytes if retained and n_items is not None else 0
+    if resident > available:
+        msg = (
+            "The output of this call exceeds the memory available, and "
+            '`store="memory"` keeps all of it on the host; pass `store="persistent"` '
+            "to write it out instead."
+        )
+        warn(msg, category=PerformanceWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
+    # Batches of headroom the host affords beyond the pipeline's in-flight steps and
+    # the batches a memory store keeps; NOT clamped by `n_items`, so a small batch
+    # count with ample memory still gets a full pool (every batch can be in flight at
+    # once).
+    mem_batches = (available - resident) // max(1, item_nbytes) - _PIPELINE_DEPTH
     mem_slots = mem_batches * n_sites
     n_writers = max(
         1,
@@ -968,6 +989,7 @@ def _write_loop(
                     item_nbytes=sum(int(arr.nbytes) for arr in sliced.values()),
                     n_sites=max(1, len(sliced)),
                     requested=num_writers,
+                    retained=isinstance(strategy, _MemoryWriteStrategy),
                 )
                 threads, queue, error_queue, stop = _start_writer_threads(
                     sink=strategy.sink,
