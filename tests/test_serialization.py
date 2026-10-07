@@ -22,14 +22,14 @@ from typing import TYPE_CHECKING, cast
 import cloudpickle
 import jax.numpy as jnp
 import numpy as np
-import numpyro
 import numpyro.distributions as dist
 import pytest
 from jax import Array, random
+from numpyro import plate, sample
 from numpyro.infer import MCMC, NUTS
 
 from aimz import ImpactModel, PerformanceWarning
-from tests.conftest import _make_svi
+from tests.conftest import make_svi
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -37,9 +37,9 @@ if TYPE_CHECKING:
 
 def poisson(X: Array, y: Array | None = None) -> None:
     """Poisson regression model."""
-    b = numpyro.sample("b", dist.Normal())
-    with numpyro.plate("obs", X.shape[0]):
-        numpyro.sample("y", dist.Poisson(jnp.exp(X[:, 0] + b)), obs=y)
+    b = sample("b", dist.Normal())
+    with plate("obs", X.shape[0]):
+        sample("y", dist.Poisson(jnp.exp(X[:, 0] + b)), obs=y)
 
 
 def _load_predict(path: Path, X: Array, y: Array) -> np.ndarray:
@@ -73,10 +73,10 @@ def test_save_load(
     assert im.posterior is not None
     assert im_lm_svi_fitted.posterior is not None
     assert set(im.posterior) == set(im_lm_svi_fitted.posterior)
-    for site, sample in im_lm_svi_fitted.posterior.items():
+    for site, draws in im_lm_svi_fitted.posterior.items():
         np.testing.assert_array_equal(
             np.asarray(im.posterior[site]),
-            np.asarray(sample),
+            np.asarray(draws),
         )
     expected = cast(
         "xr.DataTree",
@@ -100,7 +100,7 @@ def test_load_poisson_new_process(
     """
     X, _ = synthetic_data
     y = random.poisson(random.key(1), 1.0, (len(X),))
-    im = ImpactModel(poisson, rng_key=random.key(42), inference=_make_svi(poisson))
+    im = ImpactModel(poisson, rng_key=random.key(42), inference=make_svi(poisson))
     im.fit_on_batch(X, y, num_steps=10, progress=False)
     p = tmp_path / "model.pkl"
     with p.open("wb") as f:

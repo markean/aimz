@@ -14,55 +14,24 @@
 
 """Tests for the `.sample_prior_predictive_on_batch()` method."""
 
-import jax.numpy as jnp
 import numpy as np
-import numpyro.distributions as dist
-import pytest
 from jax import Array, random
-from numpyro import sample
-from numpyro.infer import SVI, Trace_ELBO
-from numpyro.infer.autoguide import AutoNormal
-from numpyro.optim import Adam
 
 from aimz import ImpactModel
-from aimz._exceptions import KernelValidationError
-from tests.conftest import _make_svi, lm
-
-
-def test_kernel_without_output(synthetic_data: tuple[Array, Array]) -> None:
-    """Kernel without output sample site raises an error."""
-
-    def kernel(X: Array, y: Array | None = None) -> None:
-        sample("z", dist.Delta(y if y is not None else jnp.zeros(len(X))), obs=y)
-
-    X, _ = synthetic_data
-    im = ImpactModel(
-        kernel,
-        rng_key=random.key(42),
-        inference=SVI(
-            kernel,
-            guide=AutoNormal(kernel),
-            optim=Adam(step_size=1e-3),
-            loss=Trace_ELBO(),
-        ),
-    )
-
-    with pytest.raises(KernelValidationError):
-        im.sample_prior_predictive_on_batch(X)
+from tests.conftest import lm, make_svi
 
 
 def test_sample_prior_predictive_on_batch_lm(
     synthetic_data: tuple[Array, Array],
     im_lm_svi_fitted: ImpactModel,
 ) -> None:
-    """Test the `.sample_prior_predictive_on_batch()` method of ImpactModel."""
+    """Prior draws come back as a tree or a dictionary of the requested sites."""
     X, _ = synthetic_data
     samples = im_lm_svi_fitted.sample_prior_predictive_on_batch(
         X=X,
         num_samples=99,
         return_sites="y",
     )
-
     assert samples.prior_predictive["y"].values.shape == (1, 99, len(X))
 
     samples_dict = im_lm_svi_fitted.sample_prior_predictive_on_batch(
@@ -71,7 +40,6 @@ def test_sample_prior_predictive_on_batch_lm(
         return_datatree=False,
         return_sites=["b", "y", "sigma"],
     )
-
     assert isinstance(samples_dict, dict)
     assert samples_dict["y"].shape == (99, len(X))
     assert im_lm_svi_fitted.kernel_spec.traced
@@ -81,7 +49,7 @@ def test_sample_prior_predictive_on_batch_lm(
 def test_sample_prior_predictive_on_batch_intervention() -> None:
     """Prior interventions change downstream draws without fitting the model."""
     X = np.arange(24, dtype=np.float32).reshape(12, 2) / 24
-    im = ImpactModel(lm, rng_key=random.key(0), inference=_make_svi(lm))
+    im = ImpactModel(lm, rng_key=random.key(0), inference=make_svi(lm))
     draws = []
     for value in (0.0, 1.0):
         dt = im.sample_prior_predictive_on_batch(

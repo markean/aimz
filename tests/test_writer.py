@@ -42,6 +42,45 @@ from aimz.utils._output import (
 )
 
 
+class _FinalizeError(RuntimeError):
+    """Test error for a failure while collecting a result."""
+
+
+class _WriteError(RuntimeError):
+    """Test error for a deliberate writer failure."""
+
+
+def _batches(n_batches: int, chunk: int, sites: tuple[str, ...]) -> list[dict]:
+    """Per-site batch dicts; batch ``k`` is filled with ``k`` to verify placement."""
+    return [
+        {site: np.full((chunk, 3), k, dtype=np.float32) for site in sites}
+        for k in range(n_batches)
+    ]
+
+
+def _expected(n_batches: int, chunk: int) -> np.ndarray:
+    """The array `_batches` produces once every batch sits at its own offset."""
+    values = np.repeat(np.arange(n_batches, dtype=np.float32), chunk)
+    return values[:, None] * np.ones(3, dtype=np.float32)
+
+
+def _run_pool(
+    strategy: _SliceWriteStrategy | _AppendWriteStrategy,
+    batches: list[dict],
+    num_writers: int,
+) -> None:
+    """Drive `_write_loop` with items that are already the finalized site dicts."""
+    _write_loop(
+        items=batches,
+        n_items=len(batches),
+        strategy=strategy,
+        dispatch=lambda item: item,
+        finalize=lambda pending: cast("dict[str, np.ndarray]", pending),
+        pbar=MagicMock(),
+        num_writers=num_writers,
+    )
+
+
 @pytest.fixture
 def fake_psutil(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     """Install a fake `psutil` with a controllable `virtual_memory().available`.
@@ -56,98 +95,62 @@ def fake_psutil(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     return fake
 
 
-class TestPlanWriters:
-    """Test class for the writer-pool planner :func:`_plan_writers`."""
-
-    def test_small_item_count_gets_full_parallelism(
-        self,
-        fake_psutil: MagicMock,
-    ) -> None:
-        """Few batches with plentiful memory still get one writer per batch.
-
-        The pipeline reservation applies to the memory bound only; it must not
-        throttle a small batch count when memory is not the binding constraint.
-        """
-        del fake_psutil
-        n_items = 3
+def test_plan_writers_policy(fake_psutil: MagicMock) -> None:
+    """The pool follows the batch count, the memory left, and the queue ceiling."""
+    item_nbytes = 1024
+    # Few batches with plentiful memory still get one writer per batch: the pipeline
+    # reservation applies to the memory bound only
+    n_items = 3
+    plan = _plan_writers(
+        _WRITER_COUNT_UNBOUNDED,
+        n_items=n_items,
+        item_nbytes=item_nbytes,
+        n_sites=1,
+        requested=8,
+    )
+    assert plan.n_writers == n_items
+    assert plan.queue_size >= 1
+    # The absolute queue ceiling binds for huge workloads with tiny items
+    plan = _plan_writers(
+        _WRITER_COUNT_UNBOUNDED, n_items=10**6, item_nbytes=1, n_sites=1
+    )
+    assert plan.queue_size <= _QUEUE_SIZE_MAX
+    # Room for three batches, two of them reserved by the pipeline, collapses to the
+    # floor: one queued, one applying
+    fake_psutil.virtual_memory.return_value.available = 3 * item_nbytes
+    plan = _plan_writers(
+        _WRITER_COUNT_UNBOUNDED,
+        n_items=100,
+        item_nbytes=item_nbytes,
+        n_sites=1,
+        requested=8,
+    )
+    assert (plan.n_writers, plan.queue_size) == (1, 1)
+    # Kept batches shrink the queue, with one slot of their room reserved for the
+    # producer to stay ahead, and warn when they will not fit in memory
+    n_items, room = 10, 20
+    fake_psutil.virtual_memory.return_value.available = room * item_nbytes
+    kept = _plan_writers(
+        1, n_items=n_items, item_nbytes=item_nbytes, n_sites=1, retained=True
+    )
+    written = _plan_writers(1, n_items=n_items, item_nbytes=item_nbytes, n_sites=1)
+    assert kept.n_writers == written.n_writers == 1
+    assert kept.queue_size == room - n_items - _PIPELINE_DEPTH - 1
+    assert kept.queue_size < written.queue_size
+    fake_psutil.virtual_memory.return_value.available = 3 * item_nbytes
+    with pytest.warns(PerformanceWarning, match="exceeds the memory available"):
         plan = _plan_writers(
-            _WRITER_COUNT_UNBOUNDED,
-            n_items=n_items,
-            item_nbytes=1024,
-            n_sites=1,
-            requested=8,
-        )
-        assert plan.n_writers == n_items
-        assert plan.queue_size >= 1
-
-    def test_tight_memory_clamps_pool(self, fake_psutil: MagicMock) -> None:
-        """A tight envelope collapses to the floor: one queued, one applying."""
-        item_nbytes = 1024
-        # Room for three batches; the pipeline reserves two, leaving one slot.
-        fake_psutil.virtual_memory.return_value.available = 3 * item_nbytes
-        plan = _plan_writers(
-            _WRITER_COUNT_UNBOUNDED,
-            n_items=100,
-            item_nbytes=item_nbytes,
-            n_sites=1,
-            requested=8,
-        )
-        assert plan.n_writers == 1
-        assert plan.queue_size == 1
-
-    def test_retained_batches_count_against_memory(
-        self,
-        fake_psutil: MagicMock,
-    ) -> None:
-        """Kept batches shrink the queue and warn when they will not fit in memory."""
-        item_nbytes, n_items, room = 1024, 10, 20
-        fake_psutil.virtual_memory.return_value.available = room * item_nbytes
-        kept = _plan_writers(
             1, n_items=n_items, item_nbytes=item_nbytes, n_sites=1, retained=True
         )
-        written = _plan_writers(1, n_items=n_items, item_nbytes=item_nbytes, n_sites=1)
-        assert kept.n_writers == written.n_writers == 1
-        # One slot of the batches' room is reserved for the producer to stay ahead
-        assert kept.queue_size == room - n_items - _PIPELINE_DEPTH - 1
-        assert kept.queue_size < written.queue_size
-        fake_psutil.virtual_memory.return_value.available = 3 * item_nbytes
-        with pytest.warns(PerformanceWarning, match="exceeds the memory available"):
-            plan = _plan_writers(
-                1, n_items=n_items, item_nbytes=item_nbytes, n_sites=1, retained=True
-            )
-        assert (plan.n_writers, plan.queue_size) == (1, 1)
-
-    def test_absolute_queue_cap_binds(self, fake_psutil: MagicMock) -> None:
-        """The absolute queue ceiling binds for huge workloads with tiny items."""
-        del fake_psutil
-        plan = _plan_writers(
-            _WRITER_COUNT_UNBOUNDED,
-            n_items=10**6,
-            item_nbytes=1,
-            n_sites=1,
-        )
-        assert plan.queue_size <= _QUEUE_SIZE_MAX
+    assert (plan.n_writers, plan.queue_size) == (1, 1)
 
 
-class _FinalizeError(RuntimeError):
-    """Test error for a failure while collecting a result."""
+def test_write_loop_pipelines_in_order(tmp_path: Path) -> None:
+    """Dispatch runs ahead of collection, results land in order, an error cleans up."""
+    n_items, chunk = 4, 2
+    log: list[tuple[str, int]] = []
 
-
-class TestWriteLoop:
-    """Test class for the pipelined :func:`_write_loop`."""
-
-    N_ITEMS = 4
-    CHUNK = 2
-    N_COLS = 5
-
-    def _run(
-        self,
-        artifact_path: Path,
-        log: list[tuple[str, int]],
-        finalize_error_at: int | None = None,
-    ) -> None:
-        """Drive `_write_loop` over draw-style items with recording fakes."""
-
+    def run(artifact_path: Path, finalize_error_at: int | None = None) -> None:
         def dispatch(item: object) -> object:
             log.append(("dispatch", cast("int", item)))
             return item
@@ -156,21 +159,15 @@ class TestWriteLoop:
             log.append(("finalize", cast("int", pending)))
             if pending == finalize_error_at:
                 raise _FinalizeError
-            return {
-                "y": np.full(
-                    (self.CHUNK, self.N_COLS),
-                    fill_value=pending,
-                    dtype=np.float32,
-                ),
-            }
+            return {"y": np.full((chunk, 3), fill_value=pending, dtype=np.float32)}
 
         _write_loop(
-            items=range(self.N_ITEMS),
-            n_items=self.N_ITEMS,
+            items=range(n_items),
+            n_items=n_items,
             strategy=_SliceWriteStrategy(
                 artifact_path=artifact_path,
-                total=self.N_ITEMS * self.CHUNK,
-                batch_size=self.CHUNK,
+                total=n_items * chunk,
+                batch_size=chunk,
                 axis=0,
             ),
             dispatch=dispatch,
@@ -178,93 +175,53 @@ class TestWriteLoop:
             pbar=tqdm(disable=True),
         )
 
-    def test_dispatch_runs_ahead_and_order_is_preserved(self, tmp_path: Path) -> None:
-        """Dispatch runs ahead of collection while results stay in item order."""
-        artifact_path = tmp_path / "out"
-        log: list[tuple[str, int]] = []
+    run(tmp_path / "out")
+    # Pipelining engaged: item 1 was dispatched before item 0 was collected
+    assert log.index(("dispatch", 1)) < log.index(("finalize", 0))
+    # Every item landed at its own offset, FIFO order and the tail drain included
+    written = np.asarray(open_group(tmp_path / "out", mode="r")["y"])
+    np.testing.assert_array_equal(written, _expected(n_items, chunk))
 
-        self._run(artifact_path, log=log)
-
-        # Pipelining engaged: item 1 was dispatched before item 0 was collected.
-        assert log.index(("dispatch", 1)) < log.index(("finalize", 0))
-        # Every item landed at its own offset (FIFO order, including the tail drain).
-        written = np.asarray(open_group(artifact_path, mode="r")["y"])
-        expected = np.repeat(
-            np.arange(self.N_ITEMS, dtype=np.float32),
-            self.CHUNK,
-        )[:, None] * np.ones(self.N_COLS, dtype=np.float32)
-        np.testing.assert_array_equal(written, expected)
-
-    def test_finalize_failure_cleans_output_and_raises(self, tmp_path: Path) -> None:
-        """An error while collecting a result propagates and removes the output."""
-        artifact_path = tmp_path / "out"
-
-        with pytest.raises(_FinalizeError):
-            self._run(artifact_path, log=[], finalize_error_at=1)
-
-        assert not artifact_path.exists()
+    with pytest.raises(_FinalizeError):
+        run(tmp_path / "failed", finalize_error_at=1)
+    assert not (tmp_path / "failed").exists()
 
 
-class TestDetermineWriterCount:
-    """Test class for :func:`_determine_writer_count`."""
-
-    def test_auto_uses_cpu_capped_by_ceiling(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """The automatic count is `min(cpu_count, _WRITER_COUNT_MAX)`, item-bounded."""
-        monkeypatch.setattr("aimz.utils._output.cpu_count", lambda: 1000)
-        # A generous strategy ceiling and many items: the CPU ceiling binds.
-        assert (
-            _determine_writer_count(
-                max_writers=_WRITER_COUNT_UNBOUNDED,
-                num_items=10_000,
-            )
-            == _WRITER_COUNT_MAX
+def test_determine_writer_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The count follows the CPUs, the request, the strategy ceiling, and the items."""
+    # The automatic count is `min(cpu_count, _WRITER_COUNT_MAX)`, bounded by the items
+    monkeypatch.setattr("aimz.utils._output.cpu_count", lambda: 1000)
+    assert (
+        _determine_writer_count(max_writers=_WRITER_COUNT_UNBOUNDED, num_items=10_000)
+        == _WRITER_COUNT_MAX
+    )
+    # An explicit request overrides the automatic cap, never above the item count
+    requested, few_items = 6, 3
+    assert (
+        _determine_writer_count(
+            max_writers=_WRITER_COUNT_UNBOUNDED, num_items=10, requested=requested
         )
-
-    def test_explicit_request_honored_up_to_item_count(self) -> None:
-        """An explicit request overrides the auto cap, bounded by the item count."""
-        requested = 6
-        # Plenty of items: the request is honored.
-        assert (
-            _determine_writer_count(
-                max_writers=_WRITER_COUNT_UNBOUNDED,
-                num_items=10,
-                requested=requested,
-            )
-            == requested
+        == requested
+    )
+    assert (
+        _determine_writer_count(
+            max_writers=_WRITER_COUNT_UNBOUNDED,
+            num_items=few_items,
+            requested=requested,
         )
-        # Fewer items than requested: never more writers than there are items.
-        few_items = 3
-        assert (
-            _determine_writer_count(
-                max_writers=_WRITER_COUNT_UNBOUNDED,
-                num_items=few_items,
-                requested=requested,
-            )
-            == few_items
+        == few_items
+    )
+    # An order-sensitive strategy pins the pool to one worker, and the floor is one
+    assert _determine_writer_count(max_writers=1, num_items=100, requested=8) == 1
+    assert (
+        _determine_writer_count(
+            max_writers=_WRITER_COUNT_UNBOUNDED, num_items=100, requested=0
         )
-
-    def test_strategy_ceiling_binds(self) -> None:
-        """An order-sensitive strategy (`max_writers=1`) pins the pool to one worker."""
-        assert _determine_writer_count(max_writers=1, num_items=100, requested=8) == 1
-        assert _determine_writer_count(max_writers=1, num_items=100) == 1
-
-    def test_floor_binds(self) -> None:
-        """The result never drops below 1, even for a zero/negative request."""
-        assert (
-            _determine_writer_count(
-                max_writers=_WRITER_COUNT_UNBOUNDED,
-                num_items=100,
-                requested=0,
-            )
-            == 1
-        )
-        assert (
-            _determine_writer_count(max_writers=_WRITER_COUNT_UNBOUNDED, num_items=0)
-            == 1
-        )
+        == 1
+    )
+    assert (
+        _determine_writer_count(max_writers=_WRITER_COUNT_UNBOUNDED, num_items=0) == 1
+    )
 
 
 def test_writer_reports_open_group_failure_and_drains_queue(
@@ -306,112 +263,84 @@ def test_writer_reports_open_group_failure_and_drains_queue(
     assert stop.is_set()
 
 
-def _batches(n_batches: int, chunk: int, sites: tuple[str, ...]) -> list[dict]:
-    """Per-site batch dicts; batch ``k`` is filled with ``k`` to verify placement."""
-    return [
-        {site: np.full((chunk, 3), k, dtype=np.float32) for site in sites}
-        for k in range(n_batches)
-    ]
+def test_writer_pool_lands_every_batch(tmp_path: Path) -> None:
+    """Every batch of every site lands at its own offset, under either strategy."""
+    n_batches, chunk = 4, 2
+    strategies = {
+        "slice": _SliceWriteStrategy(
+            artifact_path=tmp_path / "slice",
+            total=n_batches * chunk,
+            batch_size=chunk,
+            axis=0,
+        ),
+        # `max_writers=1` pins the pool to one worker, whose FIFO consumption
+        # preserves the batch order the growing array depends on
+        "append": _AppendWriteStrategy(
+            artifact_path=tmp_path / "append", batch_size=chunk, axis=0
+        ),
+    }
+    for name, strategy in strategies.items():
+        _run_pool(strategy, _batches(n_batches, chunk, ("y", "z")), num_writers=4)
+        # Content equality proves each batch was written exactly once at its own
+        # offset, regardless of the order in which the pool completed the writes
+        group = open_group(tmp_path / name, mode="r")
+        for site in ("y", "z"):
+            np.testing.assert_array_equal(
+                np.asarray(group[site]), _expected(n_batches, chunk)
+            )
 
 
-def _expected(n_batches: int, chunk: int) -> np.ndarray:
-    """The array `_batches` produces once every batch sits at its own offset."""
-    values = np.repeat(np.arange(n_batches, dtype=np.float32), chunk)
-    return values[:, None] * np.ones(3, dtype=np.float32)
-
-
-def _passthrough_finalize(pending: object) -> dict[str, np.ndarray]:
-    """Identity finalize for tests whose dispatched item is already the site dict."""
-    return cast("dict[str, np.ndarray]", pending)
-
-
-def _run_pool(
-    strategy: _SliceWriteStrategy | _AppendWriteStrategy,
-    batches: list[dict],
-    num_writers: int,
+def test_writer_pool_failure_raises_and_cleans_up(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    """Drive `_write_loop` with items that are already the finalized site dicts."""
-    _write_loop(
-        items=batches,
-        n_items=len(batches),
-        strategy=strategy,
-        dispatch=lambda item: item,
-        finalize=_passthrough_finalize,
-        pbar=MagicMock(),
-        num_writers=num_writers,
-    )
+    """A write error propagates and removes the output, even when reporting it fails."""
 
-
-class _WriteError(RuntimeError):
-    """Test error for a deliberate writer failure."""
-
-
-def test_pool_writes_all_items_with_multiple_writers(tmp_path: Path) -> None:
-    """A pool of writers lands every batch of every site at its own offset."""
-    store = tmp_path / "store"
-    n_batches, chunk = 4, 2
-    strategy = _SliceWriteStrategy(
-        artifact_path=store,
-        total=n_batches * chunk,
-        batch_size=chunk,
-        axis=0,
-    )
-
-    _run_pool(strategy, _batches(n_batches, chunk, ("y", "z")), num_writers=4)
-
-    # Content equality proves each batch was written exactly once at its own offset,
-    # regardless of the order in which the pool completed the writes.
-    group = open_group(store, mode="r")
-    for site in ("y", "z"):
-        np.testing.assert_array_equal(
-            np.asarray(group[site]),
-            _expected(n_batches, chunk),
+    def run(
+        name: str,
+        num_writers: int,
+        exc: type[Exception] = _WriteError,
+        match: str | None = None,
+    ) -> None:
+        artifact_path = tmp_path / name
+        strategy = _SliceWriteStrategy(
+            artifact_path=artifact_path, total=8, batch_size=2, axis=0
         )
+        with (
+            patch.object(strategy, "apply", side_effect=_WriteError),
+            pytest.raises(exc, match=match),
+        ):
+            _run_pool(strategy, _batches(4, 2, ("y", "z")), num_writers=num_writers)
+        assert not artifact_path.exists()
 
+    run("plain", num_writers=4)
 
-def test_append_strategy_pinned_to_single_writer(tmp_path: Path) -> None:
-    """The append strategy stays a single consumer even when more are requested."""
-    store = tmp_path / "store"
-    n_batches, chunk = 5, 2
-    strategy = _AppendWriteStrategy(
-        artifact_path=store,
-        batch_size=chunk,
-        axis=0,
+    # A raising log call inside the writer's error handler cannot hang the stream:
+    # the error is enqueued before logging and both are guarded
+    def raising_exception(*args: object, **kwargs: object) -> None:
+        msg = "logging failed"
+        raise MemoryError(msg)
+
+    monkeypatch.setattr("aimz.utils._output.logger.exception", raising_exception)
+    run("logging", num_writers=1)
+
+    # A writer that cannot even report its error leaves the stop event as the only
+    # failure signal, and the write must still fail rather than return partial output.
+    # The error queue is the only unbounded queue the writer creates, so failing `put`
+    # on `maxsize == 0` breaks error reporting while the bounded work queue flows
+    class _BrokenErrorQueue(Queue):
+        def put(self, item: object, *args: object, **kwargs: object) -> None:
+            if self.maxsize == 0:
+                raise MemoryError
+            super().put(item, *args, **kwargs)
+
+    monkeypatch.setattr("aimz.utils._output.Queue", _BrokenErrorQueue)
+    run(
+        "unreported",
+        num_writers=1,
+        exc=RuntimeError,
+        match="without reporting an error",
     )
-
-    # Requested high, but `max_writers=1` pins the pool to one worker, whose FIFO
-    # consumption preserves the batch order the growing array depends on.
-    _run_pool(strategy, _batches(n_batches, chunk, ("y",)), num_writers=8)
-
-    np.testing.assert_array_equal(
-        np.asarray(open_group(store, mode="r")["y"]),
-        _expected(n_batches, chunk),
-    )
-
-
-def test_pool_error_propagates_and_cleans_up(tmp_path: Path) -> None:
-    """A write error in the pool is re-raised with its traceback and cleans up."""
-    artifact_path = tmp_path / "out"
-    n_batches, chunk = 4, 2
-    strategy = _SliceWriteStrategy(
-        artifact_path=artifact_path,
-        total=n_batches * chunk,
-        batch_size=chunk,
-        axis=0,
-    )
-
-    with (
-        patch.object(strategy, "apply", side_effect=_WriteError),
-        pytest.raises(_WriteError),
-    ):
-        _run_pool(
-            strategy,
-            _batches(n_batches, chunk, ("y", "z")),
-            num_writers=4,
-        )
-
-    # On failure the artifact path is removed.
-    assert not artifact_path.exists()
 
 
 def test_partial_pool_startup_unwinds_started_workers(
@@ -455,78 +384,3 @@ def test_partial_pool_startup_unwinds_started_workers(
         thread.name.endswith("(_writer)") and thread.is_alive()
         for thread in threading.enumerate()
     )
-
-
-def test_pool_survives_failing_error_report(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """A raising log call inside the writer's error handler cannot hang the stream.
-
-    The error is enqueued before logging and both are guarded, so the original
-    exception still propagates and the producer never deadlocks on a dead consumer.
-    """
-
-    def raising_exception(*args: object, **kwargs: object) -> None:
-        msg = "logging failed"
-        raise MemoryError(msg)
-
-    monkeypatch.setattr("aimz.utils._output.logger.exception", raising_exception)
-    artifact_path = tmp_path / "out"
-    strategy = _SliceWriteStrategy(
-        artifact_path=artifact_path,
-        total=8,
-        batch_size=2,
-        axis=0,
-    )
-
-    with (
-        patch.object(strategy, "apply", side_effect=_WriteError),
-        pytest.raises(_WriteError),
-    ):
-        _run_pool(strategy, _batches(4, 2, ("y",)), num_writers=1)
-
-    assert not artifact_path.exists()
-
-
-def test_unreported_writer_failure_still_fails_the_write(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """A writer that cannot even report its error must not yield a clean run.
-
-    If `error_queue.put` itself fails (e.g. under memory pressure), the stop event is
-    the only surviving failure signal; the write must raise and clean up rather than
-    return partial output as success.
-    """
-
-    # A targeted override of the module's `Queue` attribute: the error queue is the
-    # only unbounded queue the writer creates, so failing `put` on `maxsize == 0`
-    # breaks error reporting while the bounded work queue keeps flowing.
-    class _BrokenErrorQueue(Queue):
-        def put(
-            self,
-            item: object,
-            block: bool = True,  # noqa: FBT001, FBT002 -- stdlib signature
-            timeout: float | None = None,
-        ) -> None:
-            if self.maxsize == 0:
-                raise MemoryError
-            super().put(item, block, timeout)
-
-    monkeypatch.setattr("aimz.utils._output.Queue", _BrokenErrorQueue)
-    artifact_path = tmp_path / "out"
-    strategy = _SliceWriteStrategy(
-        artifact_path=artifact_path,
-        total=8,
-        batch_size=2,
-        axis=0,
-    )
-
-    with (
-        patch.object(strategy, "apply", side_effect=_WriteError),
-        pytest.raises(RuntimeError, match="without reporting an error"),
-    ):
-        _run_pool(strategy, _batches(4, 2, ("y",)), num_writers=1)
-
-    assert not artifact_path.exists()

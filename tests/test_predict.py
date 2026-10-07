@@ -24,12 +24,12 @@ import numpyro.distributions as dist
 import pytest
 from jax import Array, random
 from numpyro import deterministic, param, plate, sample
-from numpyro.infer import MCMC, NUTS, SVI
 from numpyro.primitives import mutable
 
 from aimz import ImpactModel, OutputWarning, PerformanceWarning
 from aimz.model._streaming import _OutputStreamer, _RuntimeContext
-from tests.conftest import _make_svi, latent_intervention_model, lm_subsample
+from aimz.utils.data import ArrayDataset, ArrayLoader
+from tests.conftest import latent_intervention_model, lm, make_svi
 
 
 def _iter_batches(
@@ -92,42 +92,38 @@ def test_predict_warns_on_unknown_return_site(
         im_lm_svi_fitted.predict(X=X, return_sites="typo", progress=False)
 
 
-@pytest.mark.parametrize("vi", [lm_subsample], indirect=True)
 def test_predict_after_cleanup(
     synthetic_data: tuple[Array, Array],
-    vi: SVI,
     tmp_path: Path,
 ) -> None:
-    """Test `.predict()` recreates tempdir after `.cleanup()`."""
+    """A model recreates its temporary directory after `cleanup`."""
     X, y = synthetic_data
-    im = ImpactModel(lm_subsample, rng_key=random.key(42), inference=vi)
-    im.fit(X=X, y=y, batch_size=3)
+    im = ImpactModel(lm, rng_key=random.key(42), inference=make_svi(lm))
+    im.fit_on_batch(X, y, num_steps=10, num_samples=10, progress=False)
+    # Fifty rows do not split over the three host devices
     msg = (
         r"The `batch_size` \(\d+\) is not divisible by the number of devices \(\d+\)\."
     )
     with pytest.warns(PerformanceWarning, match=msg):
-        im.predict(X=X, batch_size=len(X) // 2, progress=False)
+        im.predict(X, batch_size=len(X) // 2, progress=False)
     temp_dir_before = im.temp_dir
-    str(im)
-    repr(im)
+    assert "Inference method: SVI" in str(im)
+    assert "inference_method=SVI" in repr(im)
     im.cleanup()
-    with pytest.warns(PerformanceWarning, match=msg):
-        im.predict(X=X, batch_size=len(X) // 2, progress=False)
-    temp_dir_after = im.temp_dir
-
-    assert temp_dir_before != temp_dir_after
-
+    im.predict(X, batch_size=99, progress=False)
+    assert im.temp_dir is not None
+    assert im.temp_dir != temp_dir_before
     im.cleanup()
 
     # `.sample_posterior_predictive()` is an alias for `.predict()`.
-    with pytest.warns(PerformanceWarning, match=msg):
-        im.sample_posterior_predictive(
-            X=X,
-            return_sites=["y"],
-            batch_size=len(X) // 2,
-            output_dir=tmp_path,
-            progress=False,
-        )
+    dt = im.sample_posterior_predictive(
+        X,
+        return_sites=["y"],
+        batch_size=99,
+        output_dir=tmp_path,
+        progress=False,
+    )
+    assert set(dt.posterior_predictive.data_vars) == {"y"}
 
 
 def test_predict_per_observation_intervention() -> None:
@@ -136,7 +132,7 @@ def test_predict_per_observation_intervention() -> None:
     im = ImpactModel(
         latent_intervention_model,
         rng_key=random.key(0),
-        inference=_make_svi(latent_intervention_model),
+        inference=make_svi(latent_intervention_model),
     )
     im.set_posterior_sample({"w": np.zeros(5)})
     intervention = {"z": np.linspace(-1.0, 1.0, 20), "w": 0.5}
@@ -188,7 +184,7 @@ def test_predict_param_site(
         mu = deterministic("mu", jnp.dot(X, w) + state["b"])
         sample("y", dist.Normal(mu, sigma), obs=y)
 
-    im = ImpactModel(kernel, rng_key=random.key(42), inference=_make_svi(kernel))
+    im = ImpactModel(kernel, rng_key=random.key(42), inference=make_svi(kernel))
     im.fit_on_batch(X, y, num_steps=10, num_samples=4, progress=False)
     w = im.vi_result.params["w"]
     assert w.any()
@@ -249,37 +245,6 @@ def test_predict_param_site(
     assert not prior["mu"].any()
 
 
-def test_predict_mcmc_keeps_chains(synthetic_data: tuple[Array, Array]) -> None:
-    """Both predictive groups keep the sampler's chains under `shard_axis='obs'`."""
-    X, y = synthetic_data
-
-    def kernel(X: Array, y: Array | None = None) -> None:
-        b = sample("b", dist.Normal(0.0, 1.0))
-        sample("y", dist.Normal(X.sum(axis=-1) + b, 1.0), obs=y)
-
-    im = ImpactModel(
-        kernel,
-        rng_key=random.key(42),
-        inference=MCMC(NUTS(kernel), num_warmup=10, num_samples=5, num_chains=2),
-    )
-    im.fit_on_batch(X, y)
-    b = im.inference.get_samples(group_by_chain=True)["b"]
-    try:
-        for in_sample, group in (
-            (True, "posterior_predictive"),
-            (False, "predictions"),
-        ):
-            # A rerun under `shard_axis='draw'` would warn and bypass the obs path.
-            with warnings.catch_warnings():
-                warnings.simplefilter("error", UserWarning)
-                dt = im.predict(X, in_sample=in_sample, progress=False)
-            np.testing.assert_array_equal(dt.posterior["b"].values, b)
-            sizes = dt[group].sizes
-            assert (sizes["chain"], sizes["draw"]) == (2, 5)
-    finally:
-        im.cleanup()
-
-
 def test_predict_generator_matches_array(
     synthetic_data: tuple[Array, Array],
     im_lm_svi_fitted: ImpactModel,
@@ -305,8 +270,9 @@ def test_predict_generator_matches_array(
 
 
 @pytest.mark.parametrize(
-    ("batches", "exc", "match"),
+    ("X", "exc", "match"),
     [
+        ({"X": np.ones((4, 10))}, TypeError, "must be an array-like or a data loader"),
         ([np.ones((4, 10))], TypeError, "must be an array-like or a data loader"),
         ([], ValueError, "at least one nonempty batch"),
         (
@@ -315,16 +281,40 @@ def test_predict_generator_matches_array(
             "must remain consistent",
         ),
     ],
+    ids=["mapping", "arrays", "empty", "inconsistent"],
 )
 def test_predict_loader_batch_contract(
-    batches: list,
+    X: object,
     exc: type[Exception],
     match: str,
     im_lm_svi_fitted: ImpactModel,
 ) -> None:
-    """A loader yielding non-mappings, nothing, or inconsistent batches raises."""
+    """An input that is neither an array nor a loader of consistent batches raises."""
     with pytest.raises(exc, match=match):
-        im_lm_svi_fitted.predict(iter(batches), store="memory", progress=False)
+        im_lm_svi_fitted.predict(X, store="memory", progress=False)
+
+
+def test_predict_loader_binds_fields_by_name(
+    synthetic_data: tuple[Array, Array],
+    im_lm_with_kwargs_svi_fitted: ImpactModel,
+) -> None:
+    """A loader's extra array field binds by name; misused fields raise."""
+    X, y = synthetic_data
+    im = im_lm_with_kwargs_svi_fitted
+    rng_key = random.key(7)
+    ref = im.predict(X, c=y, rng_key=rng_key, batch_size=3, progress=False)
+    loader = ArrayLoader(ArrayDataset(X=X, c=y), rng_key=random.key(0), batch_size=3)
+    via = im.predict(loader, rng_key=rng_key, progress=False)
+    np.testing.assert_allclose(
+        ref.posterior_predictive["y"].values,
+        via.posterior_predictive["y"].values,
+    )
+
+    with pytest.raises(ValueError, match="also fields of the data loader"):
+        im.predict(loader, c=y, progress=False)
+    no_input = ArrayLoader(ArrayDataset(c=y), rng_key=random.key(0))
+    with pytest.raises(ValueError, match="no field named 'X'"):
+        im.predict(no_input, progress=False)
 
 
 def test_predict_blocked_intervention() -> None:
@@ -339,7 +329,7 @@ def test_predict_blocked_intervention() -> None:
 
     X = np.linspace(-1.0, 1.0, 20).reshape(20, 1)
     y = 3.0 + X[:, 0]
-    im = ImpactModel(centered, rng_key=random.key(0), inference=_make_svi(centered))
+    im = ImpactModel(centered, rng_key=random.key(0), inference=make_svi(centered))
     im.fit_on_batch(X, y, num_steps=10, num_samples=5, progress=False)
     # `z` reaches `y` only through `m`, whose posterior draws do not respond to it,
     # while an intervention on `m` itself takes effect

@@ -14,80 +14,43 @@
 
 """Tests for the `.sample_prior_predictive()` method."""
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import numpy as np
 import pytest
 from jax import Array, random
 
-from aimz import ImpactModel, PerformanceWarning
-from tests.conftest import _make_svi, latent_intervention_model, lm
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
-    from numpyro.infer import SVI
+from aimz import ImpactModel
+from tests.conftest import latent_intervention_model, lm, make_svi
 
 
-@pytest.mark.parametrize("vi", [lm], indirect=True)
-def test_sample_prior_predictive_lm(
+def test_sample_prior_predictive_unfitted(
     synthetic_data: tuple[Array, Array],
-    vi: "SVI",
-    tmp_path: "Path",
+    tmp_path: Path,
 ) -> None:
-    """Test the `.sample_prior_predictive()` method of ImpactModel."""
-    X, y = synthetic_data
-    im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
-    im.fit_on_batch(X, y, num_steps=10, num_samples=10, progress=False)
-    msg = (
-        r"The `batch_size` \(\d+\) is not divisible by the number of devices \(\d+\)\."
-    )
-    with pytest.warns(PerformanceWarning, match=msg):
-        samples = im.sample_prior_predictive(
-            X=X,
-            batch_size=len(X) // 2,
-            num_samples=99,
-        )
-
-    assert samples.prior_predictive["y"].values.shape == (1, 99, len(X))
-
-    # Test with `return_sites`
-    with pytest.warns(PerformanceWarning, match=msg):
-        assert im.sample_prior_predictive(
-            X=X,
-            num_samples=99,
-            batch_size=len(X) // 2,
-            return_sites="y",
-            output_dir=tmp_path,
-        ).prior_predictive["y"].values.shape == (1, 99, len(X))
-
-    im.cleanup()
-
-
-@pytest.mark.parametrize("shard_axis", ["obs", "draw"])
-def test_sample_prior_predictive_unfitted_both_shard_axes(
-    synthetic_data: tuple[Array, Array],
-    shard_axis: str,
-) -> None:
-    """An unfitted model works under both modes (spec built from a one-row probe).
-
-    The probe only drives kernel-spec discovery (before the streamer dispatch), so it
-    is independent of the sharding strategy.
-    """
+    """An unfitted model samples under both strategies, into a given directory too."""
     X, _ = synthetic_data
     num_samples = 10
-    im = ImpactModel(lm, rng_key=random.key(0), inference=_make_svi(lm))
+    im = ImpactModel(lm, rng_key=random.key(0), inference=make_svi(lm))
     try:
+        for shard_axis in ("obs", "draw"):
+            dt = im.sample_prior_predictive(
+                X,
+                num_samples=num_samples,
+                batch_size=99,
+                progress=False,
+                shard_axis=shard_axis,
+            )
+            assert dt.prior_predictive["y"].shape == (1, num_samples, len(X))
         dt = im.sample_prior_predictive(
             X,
             num_samples=num_samples,
-            batch_size=99,
+            return_sites="y",
+            output_dir=tmp_path,
             progress=False,
-            shard_axis=shard_axis,
         )
-        pp = dt["prior_predictive"]
-        assert pp["y"].sizes["draw"] == num_samples
-        assert pp["y"].shape[-1] == len(X)
+        assert set(dt.prior_predictive.data_vars) == {"y"}
+        assert Path(dt.attrs["artifact_path"]).parent == tmp_path.resolve()
     finally:
         im.cleanup()
 
@@ -103,7 +66,7 @@ def test_sample_prior_predictive_intervention(
 ) -> None:
     """Interventions change downstream prior draws across sharding modes."""
     X = np.arange(24, dtype=np.float32).reshape(12, 2) / 24
-    im = ImpactModel(lm, rng_key=random.key(0), inference=_make_svi(lm))
+    im = ImpactModel(lm, rng_key=random.key(0), inference=make_svi(lm))
     draws = []
     for value in (0.0, 1.0):
         inputs = (
@@ -133,7 +96,7 @@ def test_sample_prior_predictive_per_observation_intervention() -> None:
     im = ImpactModel(
         latent_intervention_model,
         rng_key=random.key(0),
-        inference=_make_svi(latent_intervention_model),
+        inference=make_svi(latent_intervention_model),
     )
     intervention = {"z": np.linspace(-1.0, 1.0, 20), "w": 0.5}
     streamed = im.sample_prior_predictive(

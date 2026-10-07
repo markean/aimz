@@ -14,10 +14,8 @@
 
 """Tests for the MLflow integration."""
 
-import logging
 from functools import partial
 from io import StringIO
-from logging.handlers import BufferingHandler
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -30,7 +28,7 @@ from numpyro.optim import Adam
 
 from aimz import FitWarning, ImpactModel
 from aimz.utils.data import ArrayDataset, ArrayLoader
-from tests.conftest import _make_svi, lm, lm_subsample
+from tests.conftest import lm, lm_subsample, make_svi
 
 if TYPE_CHECKING:
     import xarray as xr
@@ -56,14 +54,11 @@ from aimz.mlflow import (
 
 @pytest.fixture(autouse=True)
 def _isolate_mlflow_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep MLflow's file output inside the test's temporary directory.
+    """Pin MLflow's tracking store to the test's temporary directory.
 
-    Saving/loading and autologging create a tracking store (and artifact directory)
-    relative to the working directory; chdir into ``tmp_path`` and pin the tracking URI
-    there so nothing is written into the working tree. Autologging errors are re-raised
-    instead of being logged as warnings, so a failed autolog step fails the test.
+    Autologging errors are re-raised instead of being logged as warnings, so a failed
+    autolog step fails the test.
     """
-    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("MLFLOW_AUTOLOGGING_TESTING", "true")
     monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path}/mlflow.db")
 
@@ -105,36 +100,12 @@ def test_pyfunc_round_trip_predicts(
     assert "artifact_path" not in out.attrs
 
 
-def test_pyfunc_returns_arrays_for_serving(
+def test_pyfunc_serving_params(
     im_lm_svi_fitted: ImpactModel,
     synthetic_data: tuple[Array, Array],
     tmp_path: Path,
 ) -> None:
-    """``return_datatree=False`` returns arrays, which a scoring server serializes."""
-    X, _ = synthetic_data
-    save_model(
-        im_lm_svi_fitted,
-        tmp_path / "model",
-        input_example=(
-            np.asarray(X[:5]),
-            {"progress": False, "return_datatree": False},
-        ),
-    )
-    loaded = mlflow.pyfunc.load_model(str(tmp_path / "model"))
-
-    # The signature records the parameter, so it is the loaded model's default
-    out = cast("dict[str, np.ndarray]", loaded.predict(np.asarray(X)))
-
-    assert out["y"].shape[-1] == len(X)
-    scoring_server.predictions_to_json(out, StringIO())
-
-
-def test_pyfunc_seed_sets_sampling_key(
-    im_lm_svi_fitted: ImpactModel,
-    synthetic_data: tuple[Array, Array],
-    tmp_path: Path,
-) -> None:
-    """A ``seed`` fixes the draws of a call; the recorded seed is the default."""
+    """Recorded params make a served model return arrays and reproduce its draws."""
     X, _ = synthetic_data
     save_model(
         im_lm_svi_fitted,
@@ -146,10 +117,14 @@ def test_pyfunc_seed_sets_sampling_key(
     )
     loaded = mlflow.pyfunc.load_model(str(tmp_path / "model"))
 
-    out = loaded.predict(np.asarray(X))["y"]
-    np.testing.assert_array_equal(out, loaded.predict(np.asarray(X))["y"])
+    # The signature records the parameters, so they are the loaded model's defaults:
+    # arrays, which a scoring server serializes, drawn under the recorded seed
+    out = cast("dict[str, np.ndarray]", loaded.predict(np.asarray(X)))
+    assert out["y"].shape[-1] == len(X)
+    scoring_server.predictions_to_json(out, StringIO())
+    np.testing.assert_array_equal(out["y"], loaded.predict(np.asarray(X))["y"])
     seeded = loaded.predict(np.asarray(X), params={"seed": 1})["y"]
-    assert not np.array_equal(out, seeded)
+    assert not np.array_equal(out["y"], seeded)
 
 
 def test_pyfunc_predict_with_dict_input(
@@ -175,75 +150,44 @@ def test_pyfunc_predict_with_dict_input(
     assert out["posterior_predictive"]["y"].sizes["y_dim_0"] == len(X)
 
 
-def test_save_model_with_conda_env_and_metadata(
+def test_save_model_options(
     im_lm_svi_fitted: ImpactModel,
+    synthetic_data: tuple[Array, Array],
     tmp_path: Path,
 ) -> None:
-    """An explicit ``conda_env`` is accepted and ``metadata`` is recorded."""
+    """Environment, metadata, extra files, and signature options reach the model."""
+    X, _ = synthetic_data
     conda_env = get_default_conda_env(include_cloudpickle=True)
-
+    extra = tmp_path / "notes.txt"
+    extra.write_text("hello")
     save_model(
         im_lm_svi_fitted,
         tmp_path / "model",
         conda_env=conda_env,
         metadata={"key": "value"},
-    )
-
-    model = mlflow.models.Model.load(str(tmp_path / "model"))
-    assert model.metadata == {"key": "value"}
-    assert yaml.safe_load((tmp_path / "model" / "conda.yaml").read_text()) == conda_env
-
-
-def test_save_model_with_extra_files(
-    im_lm_svi_fitted: ImpactModel,
-    tmp_path: Path,
-) -> None:
-    """``extra_files`` are copied into the model and recorded in the flavor config."""
-    extra = tmp_path / "notes.txt"
-    extra.write_text("hello")
-
-    save_model(im_lm_svi_fitted, tmp_path / "model", extra_files=[str(extra)])
-
-    model = mlflow.models.Model.load(str(tmp_path / "model"))
-    (entry,) = model.flavors["aimz"]["extra_files"]
-    assert (tmp_path / "model" / entry["path"]).read_text() == "hello"
-
-
-def test_save_model_with_pip_requirements_and_constraints(
-    im_lm_svi_fitted: ImpactModel,
-    tmp_path: Path,
-) -> None:
-    """Explicit ``pip_requirements`` (with a constraint) write both files."""
-    constraints = tmp_path / "constraints.txt"
-    constraints.write_text("example-package==1.0.0\n")
-
-    save_model(
-        im_lm_svi_fitted,
-        tmp_path / "model",
-        pip_requirements=[f"-c {constraints}", "example-package"],
-    )
-
-    assert "example-package" in (tmp_path / "model" / "requirements.txt").read_text()
-    assert (tmp_path / "model" / "constraints.txt").exists()
-
-
-def test_save_model_signature_false_disables_inference(
-    im_lm_svi_fitted: ImpactModel,
-    synthetic_data: tuple[Array, Array],
-    tmp_path: Path,
-) -> None:
-    """``signature=False`` disables inference even when an example is provided."""
-    X, _ = synthetic_data
-    save_model(
-        im_lm_svi_fitted,
-        tmp_path / "model",
+        extra_files=[str(extra)],
         signature=False,
         input_example=np.asarray(X[:5]),
     )
-
     model = mlflow.models.Model.load(str(tmp_path / "model"))
 
+    assert model.metadata == {"key": "value"}
+    assert yaml.safe_load((tmp_path / "model" / "conda.yaml").read_text()) == conda_env
+    (entry,) = model.flavors["aimz"]["extra_files"]
+    assert (tmp_path / "model" / entry["path"]).read_text() == "hello"
+    # `signature=False` disables inference even when an example is provided
     assert model.signature is None
+
+    # Explicit pip requirements, with a constraint, write both files
+    constraints = tmp_path / "constraints.txt"
+    constraints.write_text("example-package==1.0.0\n")
+    save_model(
+        im_lm_svi_fitted,
+        tmp_path / "pinned",
+        pip_requirements=[f"-c {constraints}", "example-package"],
+    )
+    assert "example-package" in (tmp_path / "pinned" / "requirements.txt").read_text()
+    assert (tmp_path / "pinned" / "constraints.txt").exists()
 
 
 def test_log_model_round_trip_outputs_match(
@@ -273,80 +217,37 @@ def test_log_model_round_trip_outputs_match(
     )
 
 
-def test_load_model_disallowed_when_pickle_deserialization_disabled(
+def test_load_model_guards(
     im_lm_svi_fitted: ImpactModel,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Both loaders raise when ``MLFLOW_ALLOW_PICKLE_DESERIALIZATION`` is disabled.
-
-    No other test exercises the gate: every other load runs with the permissive
-    default, so a dropped gate would otherwise go unnoticed.
-    """
+    """Loading refuses an unknown serialization format and disabled pickle loading."""
     save_model(im_lm_svi_fitted, tmp_path / "model")
+    save_model(im_lm_svi_fitted, tmp_path / "gated")
 
-    monkeypatch.setenv("MLFLOW_ALLOW_PICKLE_DESERIALIZATION", "false")
-
-    with pytest.raises(MlflowException, match="pickle is disallowed"):
-        load_model(str(tmp_path / "model"))
-    with pytest.raises(MlflowException, match="pickle is disallowed"):
-        mlflow.pyfunc.load_model(str(tmp_path / "model"))
-
-
-def test_load_model_rejects_unrecognized_serialization_format(
-    im_lm_svi_fitted: ImpactModel,
-    tmp_path: Path,
-) -> None:
-    """Loading fails fast when the flavor config declares an unknown format.
-
-    Exercises the only reader of the ``serialization_format`` flavor key: a model
-    written by a future aimz version (or a tampered MLmodel file) must raise a
-    structured error instead of blindly unpickling ``model.pkl``.
-    """
-    save_model(im_lm_svi_fitted, tmp_path / "model")
+    # The only reader of the flavor key: a model written by a future aimz version, or
+    # a tampered MLmodel file, must raise instead of blindly unpickling `model.pkl`
     mlmodel = mlflow.models.Model.load(str(tmp_path / "model"))
     mlmodel.flavors["aimz"]["serialization_format"] = "unsupported_format"
     mlmodel.save(str(tmp_path / "model" / "MLmodel"))
-
     with pytest.raises(
         MlflowException,
         match="Unrecognized serialization format",
     ) as exc_info:
         load_model(str(tmp_path / "model"))
-
     assert exc_info.value.error_code == "INVALID_PARAMETER_VALUE"
 
-
-@pytest.mark.parametrize("vi", [lm], indirect=True)
-def test_autolog_logs_model_when_rng_key_passed(
-    synthetic_data: tuple[Array, Array],
-    vi: SVI,
-) -> None:
-    """Autologging still logs the fitted model when ``rng_key`` is passed."""
-    X, y = synthetic_data
-    autolog()
-    try:
-        im = ImpactModel(lm, rng_key=random.key(0), inference=vi)
-        rng_key = random.key_data(im.rng_key)
-        with mlflow.start_run() as run:
-            im.fit_on_batch(X=X, y=y, rng_key=random.key(1), num_steps=10)
-        logged = mlflow.search_logged_models(
-            experiment_ids=[run.info.experiment_id],
-            output_format="list",
-        )
-    finally:
-        autolog(disable=True)
-
-    assert len(logged) == 1
-    assert logged[0].status == LoggedModelStatus.READY
-    # Neither the keyed fit nor signature inference advances the model's key
-    np.testing.assert_array_equal(random.key_data(im.rng_key), rng_key)
+    # Both loaders honour the pickle gate, which no other load exercises
+    monkeypatch.setenv("MLFLOW_ALLOW_PICKLE_DESERIALIZATION", "false")
+    with pytest.raises(MlflowException, match="pickle is disallowed"):
+        load_model(str(tmp_path / "gated"))
+    with pytest.raises(MlflowException, match="pickle is disallowed"):
+        mlflow.pyfunc.load_model(str(tmp_path / "gated"))
 
 
-@pytest.mark.parametrize("vi", [lm], indirect=True)
 def test_autolog_input_example_snapshot_copies_multi_input(
     synthetic_data: tuple[Array, Array],
-    vi: SVI,
 ) -> None:
     """A multi-array fit call yields a dict example copied before training.
 
@@ -355,7 +256,7 @@ def test_autolog_input_example_snapshot_copies_multi_input(
     training) cannot leak into the logged example.
     """
     X, y = synthetic_data
-    im = ImpactModel(lm, rng_key=random.key(0), inference=vi)
+    im = ImpactModel(lm, rng_key=random.key(0), inference=make_svi(lm))
     z = np.zeros(len(X), dtype=np.float32)
 
     example = _get_input_example(
@@ -370,19 +271,20 @@ def test_autolog_input_example_snapshot_copies_multi_input(
     assert example["z"][0] == 0.0
 
 
-@pytest.mark.parametrize("vi", [lm], indirect=True)
 def test_autolog_logs_elbo_history_dataset_and_model_params(
     synthetic_data: tuple[Array, Array],
-    vi: SVI,
 ) -> None:
     """The ELBO curve, training dataset, and params are logged once, model-linked."""
     num_steps = 10
     X, y = synthetic_data
     autolog()
     try:
-        im = ImpactModel(lm, rng_key=random.key(0), inference=vi)
+        im = ImpactModel(lm, rng_key=random.key(0), inference=make_svi(lm))
+        rng_key = random.key_data(im.rng_key)
         with mlflow.start_run() as run:
-            im.fit_on_batch(X=X, y=y, num_steps=num_steps)
+            im.fit_on_batch(
+                X=X, y=y, rng_key=random.key(1), num_steps=num_steps, progress=False
+            )
         client = mlflow.MlflowClient()
         history = client.get_metric_history(run.info.run_id, "elbo_loss")
         run_data = client.get_run(run.info.run_id)
@@ -395,6 +297,10 @@ def test_autolog_logs_elbo_history_dataset_and_model_params(
     finally:
         autolog(disable=True)
 
+    assert len(logged) == 1
+    assert logged[0].status == LoggedModelStatus.READY
+    # Neither the keyed fit nor signature inference advances the model's key
+    np.testing.assert_array_equal(random.key_data(im.rng_key), rng_key)
     # One point per SVI step, with no duplicated final-loss entry
     assert sorted(m.step for m in history) == list(range(num_steps))
     # The metrics are also attached to the logged model entity
@@ -416,16 +322,16 @@ def test_autolog_logs_elbo_history_dataset_and_model_params(
     assert seed.default is None
 
 
-@pytest.mark.parametrize("vi", [lm_subsample], indirect=True)
 def test_autolog_logs_model_with_loader_input(
     synthetic_data: tuple[Array, Array],
-    vi: SVI,
 ) -> None:
     """Autologging logs the fitted model when fitting on a data loader."""
     X, y = synthetic_data
     autolog()
     try:
-        im = ImpactModel(lm_subsample, rng_key=random.key(0), inference=vi)
+        im = ImpactModel(
+            lm_subsample, rng_key=random.key(0), inference=make_svi(lm_subsample)
+        )
         loader = ArrayLoader(
             ArrayDataset(X=X, y=y),
             rng_key=random.key(1),
@@ -446,10 +352,8 @@ def test_autolog_logs_model_with_loader_input(
     assert logged[0].params["batch_size"] == "3"
 
 
-@pytest.mark.parametrize("vi", [lm], indirect=True)
 def test_autolog_manages_run_without_model(
     synthetic_data: tuple[Array, Array],
-    vi: SVI,
 ) -> None:
     """Without an active run, autologging creates, tags, and ends its own run.
 
@@ -458,8 +362,8 @@ def test_autolog_manages_run_without_model(
     X, y = synthetic_data
     autolog(log_models=False, extra_tags={"key": "value"})
     try:
-        im = ImpactModel(lm, rng_key=random.key(0), inference=vi)
-        im.fit_on_batch(X=X, y=y, num_steps=10)
+        im = ImpactModel(lm, rng_key=random.key(0), inference=make_svi(lm))
+        im.fit_on_batch(X=X, y=y, num_steps=10, progress=False)
         run = mlflow.last_active_run()
         assert run is not None
         logged = mlflow.search_logged_models(
@@ -484,7 +388,13 @@ def test_autolog_logs_mcmc_sampler_settings(
         im = ImpactModel(
             lm,
             rng_key=random.key(0),
-            inference=MCMC(NUTS(lm), num_warmup=10, num_samples=5, num_chains=2),
+            inference=MCMC(
+                NUTS(lm),
+                num_warmup=10,
+                num_samples=5,
+                num_chains=2,
+                progress_bar=False,
+            ),
         )
         with mlflow.start_run() as run:
             im.fit_on_batch(X=X, y=y)
@@ -527,7 +437,7 @@ def test_autolog_logs_elbo_when_fit_raises(
             pytest.raises(ValueError, match="invalid loc parameter"),
             mlflow.start_run() as run,
         ):
-            im.fit_on_batch(X=X, y=y, num_steps=num_steps)
+            im.fit_on_batch(X=X, y=y, num_steps=num_steps, progress=False)
         client = mlflow.MlflowClient()
         history = client.get_metric_history(run.info.run_id, "elbo_loss")
         params = client.get_run(run.info.run_id).data.params
@@ -538,59 +448,32 @@ def test_autolog_logs_elbo_when_fit_raises(
     assert params["optimizer"] == "Adam"
 
 
+@pytest.mark.parametrize("silent", [False, True])
 def test_autolog_reports_unreadable_kernel_source(
     synthetic_data: tuple[Array, Array],
+    capsys: pytest.CaptureFixture[str],
+    *,
+    silent: bool,
 ) -> None:
-    """A kernel whose source cannot be read is reported and the model still logged.
-
-    The error goes through MLflow's logger, so it is shown by default like the messages
-    of the built-in flavors.
-    """
+    """A kernel whose source cannot be read is reported, unless muted, and logged."""
     X, y = synthetic_data
     # The source of a partial cannot be retrieved
     kernel = partial(lm)
-    handler = BufferingHandler(capacity=100)
-    handler.setLevel(logging.ERROR)
-    logging.getLogger("mlflow").addHandler(handler)
-    autolog()
+    autolog(silent=silent)
     try:
-        im = ImpactModel(kernel, rng_key=random.key(0), inference=_make_svi(kernel))
+        im = ImpactModel(kernel, rng_key=random.key(0), inference=make_svi(kernel))
         with mlflow.start_run() as run:
-            im.fit_on_batch(X=X, y=y, num_steps=10)
+            im.fit_on_batch(X=X, y=y, num_steps=10, progress=False)
         logged = mlflow.search_logged_models(
             experiment_ids=[run.info.experiment_id],
             output_format="list",
         )
     finally:
         autolog(disable=True)
-        logging.getLogger("mlflow").removeHandler(handler)
 
-    assert any(
-        "Failed to log the kernel source code" in record.getMessage()
-        for record in handler.buffer
-    )
-    assert len(logged) == 1
-    assert logged[0].status == LoggedModelStatus.READY
-
-
-@pytest.mark.parametrize("silent", [False, True])
-def test_autolog_silent_mutes_own_messages(
-    synthetic_data: tuple[Array, Array],
-    capsys: pytest.CaptureFixture[str],
-    *,
-    silent: bool,
-) -> None:
-    """Autologging's own messages are shown by default and muted by ``silent=True``."""
-    X, y = synthetic_data
-    # The source of a partial cannot be retrieved
-    kernel = partial(lm)
-    autolog(log_models=False, silent=silent)
-    try:
-        im = ImpactModel(kernel, rng_key=random.key(0), inference=_make_svi(kernel))
-        with mlflow.start_run():
-            im.fit_on_batch(X=X, y=y, num_steps=10)
-    finally:
-        autolog(disable=True)
-
+    # The message goes through MLflow's logger, shown by default like the messages of
+    # the built-in flavors, and muted by `silent=True`
     shown = "Failed to log the kernel source code" in capsys.readouterr().err
     assert shown is not silent
+    assert len(logged) == 1
+    assert logged[0].status == LoggedModelStatus.READY

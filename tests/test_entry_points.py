@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
 """Tests for the guards shared by the streaming and on-batch entry points."""
 
 from pathlib import Path
@@ -23,9 +22,8 @@ import pytest
 from jax import Array, random
 from numpyro import deterministic, sample
 
-from aimz import ImpactModel
-from aimz._exceptions import NotFittedError
-from tests.conftest import _make_svi, lm
+from aimz import ImpactModel, NotFittedError
+from tests.conftest import lm, make_svi
 
 
 @pytest.mark.parametrize(
@@ -39,7 +37,7 @@ from tests.conftest import _make_svi, lm
 )
 def test_not_fitted(method: str, args: tuple) -> None:
     """An unfitted model rejects the entry points that need a posterior."""
-    im = ImpactModel(lm, rng_key=random.key(42), inference=_make_svi(lm))
+    im = ImpactModel(lm, rng_key=random.key(42), inference=make_svi(lm))
     with pytest.raises(NotFittedError):
         getattr(im, method)(*args)
 
@@ -75,7 +73,7 @@ def test_kernel_argument_binding(
         b = sample("b", dist.Normal(0.0, 1.0))
         sample("y", dist.Normal(b, 1.0), obs=y)
 
-    im = ImpactModel(kernel, rng_key=random.key(42), inference=_make_svi(kernel))
+    im = ImpactModel(kernel, rng_key=random.key(42), inference=make_svi(kernel))
     im.fit_on_batch(X, y, arg=True, num_steps=1, num_samples=10, progress=False)
     with pytest.raises(TypeError, match=match):
         getattr(im, method)(X, **kwargs)
@@ -109,7 +107,7 @@ def test_intervention_on_non_sample_site(
         mu = deterministic("mu", b + X.sum(axis=-1))
         sample("y", dist.Normal(mu, 1.0), obs=y)
 
-    im = ImpactModel(kernel, rng_key=random.key(42), inference=_make_svi(kernel))
+    im = ImpactModel(kernel, rng_key=random.key(42), inference=make_svi(kernel))
     # The prior methods stay unfitted, so their check must follow their own trace.
     if not method.startswith("sample_prior"):
         im.fit_on_batch(X, y, num_steps=1, num_samples=10, progress=False)

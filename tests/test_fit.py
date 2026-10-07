@@ -16,207 +16,57 @@
 
 import warnings
 
-import jax.numpy as jnp
+import numpy as np
 import numpyro.distributions as dist
 import pytest
 from jax import Array, random
-from numpyro import deterministic, sample
-from numpyro.infer import MCMC, SVI, Trace_ELBO
-from numpyro.infer.autoguide import AutoNormal
-from numpyro.optim import Adam
+from numpyro import sample
+from numpyro.infer import MCMC, NUTS
 
-from aimz import AimzWarning, FitWarning, ImpactModel
-from aimz._exceptions import KernelValidationError
+from aimz import FitWarning, ImpactModel
 from aimz.utils.data import ArrayDataset, ArrayLoader
-from tests.conftest import _make_svi, lm, lm_subsample
+from tests.conftest import lm, lm_subsample, make_svi
 
 
-class TestKernelSignatureValidation:
-    """Test class for validating parameter compatibility with the kernel signature."""
-
-    def test_extra_parameters(self) -> None:
-        """Extra parameters not present in the kernel raise an error."""
-
-        def kernel(X: Array, y: Array | None = None) -> None:
-            pass
-
-        with pytest.warns(
-            AimzWarning,
-            match="Legacy `uint32` PRNGKey detected; converting to a typed key array.",
-        ):
-            im = ImpactModel(
-                kernel,
-                rng_key=random.PRNGKey(42),
-                inference=SVI(
-                    kernel,
-                    guide=AutoNormal(kernel),
-                    optim=Adam(step_size=1e-3),
-                    loss=Trace_ELBO(),
-                ),
-            )
-        with pytest.raises(TypeError, match="unexpected keyword argument 'extra'"):
-            im.fit(X=jnp.ones((3, 1)), y=jnp.ones((3,)), batch_size=3, extra=True)
-
-    def test_missing_parameters(self) -> None:
-        """Missing required parameters in the kernel raise an error."""
-
-        def kernel(X: Array, arg: object, y: Array | None = None) -> None:
-            pass
-
-        im = ImpactModel(
-            kernel,
-            rng_key=random.key(42),
-            inference=SVI(
-                kernel,
-                guide=AutoNormal(kernel),
-                optim=Adam(step_size=1e-3),
-                loss=Trace_ELBO(),
-            ),
-        )
-        with pytest.raises(TypeError, match="missing a required argument: 'arg'"):
-            im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)), batch_size=3)
-
-
-class TestKernelBodyValidation:
-    """Test class for validating parameter compatibility with the kernel body."""
-
-    def test_missing_output_site(self) -> None:
-        """Missing output sample site in the kernel raises an error."""
-
-        def kernel(X: Array, y: Array | None = None) -> None:
-            sample("z", dist.Normal(0.0, 1.0), obs=y)
-
-        im = ImpactModel(
-            kernel,
-            rng_key=random.key(42),
-            inference=SVI(
-                kernel,
-                guide=AutoNormal(kernel),
-                optim=Adam(step_size=1e-3),
-                loss=Trace_ELBO(),
-            ),
-        )
-        with pytest.raises(KernelValidationError):
-            im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)), batch_size=3)
-
-    def test_sample_output_site(self) -> None:
-        """Raises error if output site is not a sample site."""
-
-        def kernel(X: Array, y: Array | None = None) -> None:
-            deterministic("y", jnp.zeros_like(y))
-
-        im = ImpactModel(
-            kernel,
-            rng_key=random.key(42),
-            inference=SVI(
-                kernel,
-                guide=AutoNormal(kernel),
-                optim=Adam(step_size=1e-3),
-                loss=Trace_ELBO(),
-            ),
-        )
-        with pytest.raises(KernelValidationError):
-            im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)), batch_size=3)
-
-    def test_unobserved_output_site(self) -> None:
-        """Raises error if output site is not observed."""
-
-        def kernel(X: Array, y: Array | None = None) -> None:
-            sample("y", dist.Normal(0.0, 1.0))
-
-        im = ImpactModel(
-            kernel,
-            rng_key=random.key(42),
-            inference=SVI(
-                kernel,
-                guide=AutoNormal(kernel),
-                optim=Adam(step_size=1e-3),
-                loss=Trace_ELBO(),
-            ),
-        )
-        with pytest.raises(KernelValidationError):
-            im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)), batch_size=3)
-
-    def test_parameter_site_conflict(self) -> None:
-        """Raises an error if a parameter name conflicts with a site name."""
-
-        def kernel(X: Array, y: Array | None = None) -> None:
-            sample("X", dist.Normal(0.0, 1.0))
-            sample("y", dist.Normal(0.0, 1.0), obs=y)
-
-        im = ImpactModel(
-            kernel,
-            rng_key=random.key(42),
-            inference=SVI(
-                kernel,
-                guide=AutoNormal(kernel),
-                optim=Adam(step_size=1e-3),
-                loss=Trace_ELBO(),
-            ),
-        )
-        with pytest.raises(KernelValidationError):
-            im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)))
-
-    def test_kernel_with_invalid_site_name(self) -> None:
-        """Kernel with site names incompatible with xarray.DataTree raises an error."""
-
-        def kernel(X: Array, y: Array | None = None) -> None:
-            mu = sample("x/y", dist.Normal())
-            sigma = sample("sigma", dist.Exponential(1.0))
-            sample("y", dist.Normal(mu, sigma), obs=y)
-
-        im = ImpactModel(
-            kernel,
-            rng_key=random.key(42),
-            inference=SVI(
-                kernel,
-                guide=AutoNormal(kernel),
-                optim=Adam(step_size=1e-3),
-                loss=Trace_ELBO(),
-            ),
-        )
-        with pytest.raises(KernelValidationError):
-            im.fit(X=jnp.ones((10, 1)), y=jnp.ones((10,)))
-
-
-@pytest.mark.parametrize("mcmc", [lm], indirect=True)
-def test_fit_raises_for_mcmc_inference(mcmc: MCMC) -> None:
-    """Calling `.fit()` with MCMC inference raises a TypeError."""
+def test_fit_argument_errors(synthetic_data: tuple[Array, Array]) -> None:
+    """MCMC inference, and kernel arguments that do not bind, are rejected."""
+    X, y = synthetic_data
+    mcmc = MCMC(NUTS(lm), num_warmup=10, num_samples=10, progress_bar=False)
     im = ImpactModel(lm, rng_key=random.key(42), inference=mcmc)
     with pytest.raises(TypeError, match="not supported for MCMC"):
-        im.fit(X=jnp.zeros((3, 2)), y=jnp.zeros((3, 1)), batch_size=3)
+        im.fit(X, y, batch_size=len(X))
+
+    def kernel(X: Array, arg: object, y: Array | None = None) -> None:
+        pass
+
+    im = ImpactModel(kernel, rng_key=random.key(42), inference=make_svi(kernel))
+    with pytest.raises(TypeError, match="missing a required argument: 'arg'"):
+        im.fit(X, y, batch_size=len(X), progress=False)
+    with pytest.raises(TypeError, match="unexpected keyword argument 'extra'"):
+        im.fit(X, y, arg=True, extra=True, batch_size=len(X), progress=False)
 
 
 def test_fit_nan_warning(synthetic_data: tuple[Array, Array]) -> None:
     """A NaN loss warns, then the diverged posterior draw raises."""
     X, y = synthetic_data
-    im = ImpactModel(
-        lm,
-        rng_key=random.key(42),
-        inference=SVI(
-            lm,
-            guide=AutoNormal(lm),
-            optim=Adam(step_size=1e3),
-            loss=Trace_ELBO(),
-        ),
-    )
+    im = ImpactModel(lm, rng_key=random.key(42), inference=make_svi(lm, step_size=1e3))
     with (
         pytest.warns(FitWarning, match="Loss contains NaN or Inf"),
         pytest.raises(ValueError, match="invalid loc parameter"),
     ):
-        im.fit(X, y, batch_size=len(X), epochs=3)
+        im.fit(X, y, batch_size=len(X), epochs=3, progress=False)
 
     with (
         pytest.warns(FitWarning, match="Loss contains NaN or Inf"),
         pytest.raises(ValueError, match="invalid loc parameter"),
     ):
-        im.fit_on_batch(X, y)
+        im.fit_on_batch(X, y, progress=False)
 
 
 def test_fit_warns_on_unscaled_minibatches(synthetic_data: tuple[Array, Array]) -> None:
     """Batches smaller than the data warn unless the kernel scales the output site."""
     X, y = synthetic_data
-    im = ImpactModel(lm, rng_key=random.key(42), inference=_make_svi(lm))
+    im = ImpactModel(lm, rng_key=random.key(42), inference=make_svi(lm))
     msg = "trains on batches of 20 of 100 observations, but the kernel gives the"
 
     # An array input and an `ArrayLoader` are checked on their first batch.
@@ -230,7 +80,7 @@ def test_fit_warns_on_unscaled_minibatches(synthetic_data: tuple[Array, Array]) 
     im_scaled = ImpactModel(
         lm_subsample,
         rng_key=random.key(42),
-        inference=_make_svi(lm_subsample),
+        inference=make_svi(lm_subsample),
     )
     with warnings.catch_warnings():
         warnings.simplefilter("error", FitWarning)
@@ -251,12 +101,7 @@ def test_fit_loader_with_custom_param_names(
     im = ImpactModel(
         kernel,
         rng_key=random.key(42),
-        inference=SVI(
-            kernel,
-            guide=AutoNormal(kernel),
-            optim=Adam(step_size=1e-3),
-            loss=Trace_ELBO(),
-        ),
+        inference=make_svi(kernel),
         param_input="x",
         param_output="obs",
     )
@@ -273,3 +118,56 @@ def test_fit_loader_with_custom_param_names(
         im.fit(ArrayLoader(ArrayDataset(x=X), rng_key=random.key(0)), progress=False)
     with pytest.raises(ValueError, match="no field named 'obs'"):
         im.fit([{"x": X}], progress=False)
+
+
+def test_fit_rejected_call_leaves_state_untouched(
+    synthetic_data: tuple[Array, Array],
+) -> None:
+    """A rejected `fit` changes neither the key nor the draw count."""
+    X, y = synthetic_data
+    num_samples = 5
+    im = ImpactModel(lm, rng_key=random.key(42), inference=make_svi(lm))
+    im.fit(X=X, y=y, num_samples=num_samples, batch_size=len(X), progress=False)
+    key_before = random.key_data(im.rng_key)
+    loader = ArrayLoader(ArrayDataset(X=X, y=y), rng_key=random.key(0))
+
+    with pytest.raises(TypeError, match="must be `None` when `X` is already"):
+        im.fit(X=loader, y=y, progress=False)
+    with pytest.raises(TypeError, match="unexpected keyword argument 'c'"):
+        im.fit(X=X, y=y, c=1.0, progress=False)
+
+    np.testing.assert_array_equal(random.key_data(im.rng_key), key_before)
+    assert im._num_samples == num_samples
+    out = im.predict(X, store="memory", progress=False)
+    assert out.posterior_predictive["y"].sizes["draw"] == num_samples
+
+    # A one-shot iterator is exhausted after its first epoch
+    with pytest.raises(ValueError, match="yielded no batches in epoch 2"):
+        im.fit(iter([{"X": X, "y": y}]), epochs=2, progress=False)
+
+
+def test_fit_array_matches_loader(synthetic_data: tuple[Array, Array]) -> None:
+    """Fitting on arrays or on the equivalent data loader gives the same result."""
+    X, y = synthetic_data
+    rng_key = random.key(1)
+    im_array = ImpactModel(
+        lm_subsample,
+        rng_key=random.key(0),
+        inference=make_svi(lm_subsample),
+    )
+    im_array.fit(X, y, rng_key=rng_key, batch_size=20, shuffle=False, progress=False)
+    loader = ArrayLoader(
+        ArrayDataset(X=X, y=y), rng_key=random.key(0), batch_size=20, shuffle=False
+    )
+    im_loader = ImpactModel(
+        lm_subsample,
+        rng_key=random.key(0),
+        inference=make_svi(lm_subsample),
+    )
+    im_loader.fit(loader, rng_key=rng_key, progress=False)
+
+    np.testing.assert_allclose(im_array.vi_result.losses, im_loader.vi_result.losses)
+    np.testing.assert_array_equal(
+        im_array.predict_on_batch(X, rng_key=rng_key).posterior_predictive["y"],
+        im_loader.predict_on_batch(X, rng_key=rng_key).posterior_predictive["y"],
+    )

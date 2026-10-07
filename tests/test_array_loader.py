@@ -18,290 +18,51 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from jax import Array, random
-from numpyro.infer import SVI
 
-from aimz import AimzWarning, ImpactModel
+from aimz import AimzWarning
 from aimz.utils.data import ArrayDataset, ArrayLoader
-from tests.conftest import lm, lm_subsample
 
 
-class TestArrayDataset:
-    """Tests class to ensure correct initialization and behavior."""
+def test_array_dataset() -> None:
+    """A dataset needs aligned arrays and yields NumPy rows, or JAX rows on request."""
+    with pytest.raises(ValueError, match=r"At least one array must be provided."):
+        ArrayDataset()
+    with pytest.raises(
+        ValueError,
+        match=r"All arrays must have the same leading-axis size.",
+    ):
+        ArrayDataset(X=np.ones((2, 3)), y=np.ones(3))
 
-    def test_empty_array(self) -> None:
-        """Initializing with no arrays raises a ValueError."""
-        with pytest.raises(ValueError, match=r"At least one array must be provided."):
-            ArrayDataset()
-
-    def test_same_lengths(self) -> None:
-        """Validate that all arrays share the same leading-axis size."""
-        X = jnp.array([[1, 2, 3], [4, 5, 6]])
-        y = jnp.array([1, 2, 3])
-        with pytest.raises(
-            ValueError,
-            match=r"All arrays must have the same leading-axis size.",
-        ):
-            ArrayDataset(X=X, y=y)
-
-    def test_no_jax_conversion(self) -> None:
-        """Check that arrays remain NumPy arrays by default."""
-        X = np.array([[1, 2, 3], [4, 5, 6]])
-        y = np.array([1, 2])
-        dataset = ArrayDataset(X=X, y=y)
-        actual = next(iter(dataset))
-        desired = {"X": np.array([1, 2, 3]), "y": np.array(1)}
-        assert actual.keys() == desired.keys()
-        for k in actual:
-            np.testing.assert_array_equal(actual[k], desired[k])
-
-    def test_jax_conversion(self) -> None:
-        """Check that arrays are converted to JAX arrays when `to_jax=True`."""
-        X = np.array([[1, 2, 3], [4, 5, 6]])
-        y = np.array([1, 2])
-        dataset = ArrayDataset(X=X, y=y, to_jax=True)
-        actual = next(iter(dataset))
-        desired = {"X": jnp.array([1, 2, 3]), "y": jnp.array(1)}
-        assert actual.keys() == desired.keys()
-        for k in actual:
-            assert isinstance(actual[k], Array)
-            assert jnp.array_equal(actual[k], desired[k])
+    X, y = np.array([[1, 2, 3], [4, 5, 6]]), np.array([1, 2])
+    row = next(iter(ArrayDataset(X=X, y=y)))
+    assert row.keys() == {"X", "y"}
+    assert isinstance(row["X"], np.ndarray)
+    np.testing.assert_array_equal(row["X"], X[0])
+    np.testing.assert_array_equal(row["y"], y[0])
+    row = next(iter(ArrayDataset(X=X, y=y, to_jax=True)))
+    assert isinstance(row["X"], Array)
+    assert jnp.array_equal(row["X"], X[0])
+    assert jnp.array_equal(row["y"], y[0])
 
 
-class TestArrayLoader:
-    """Tests class to ensure compatibility and correct handling."""
+def test_array_loader() -> None:
+    """A loader checks its batch size, converts a legacy key, and shuffles by key."""
+    y = np.arange(100)
+    with pytest.raises(ValueError, match="`batch_size` should be a positive integer"):
+        ArrayLoader(ArrayDataset(y=y), rng_key=random.key(42), batch_size=0.5)
+    with pytest.warns(AimzWarning, match="Legacy `uint32` PRNGKey detected"):
+        ArrayLoader(ArrayDataset(y=y), rng_key=random.PRNGKey(42))
 
-    @staticmethod
-    def _shuffled_batches(loader: ArrayLoader) -> np.ndarray:
-        """Concatenate one epoch's batches of `y` into a single array."""
-        return np.concatenate([batch["y"] for batch in loader])
-
-    def test_legacy_prng_key(self) -> None:
-        """A legacy uint32 PRNGKey raises an AimzWarning."""
-        y = jnp.array([1, 2, 3])
-        dataset = ArrayDataset(y=y)
-        with pytest.warns(
-            AimzWarning,
-            match="Legacy `uint32` PRNGKey detected; converting to a typed key array.",
-        ):
-            ArrayLoader(dataset, rng_key=random.PRNGKey(42))
-
-    def test_invalid_batch_size(self) -> None:
-        """Invalid `batch_size` raises a ValueError."""
-        with pytest.raises(
-            ValueError,
-            match="`batch_size` should be a positive integer",
-        ):
-            ArrayLoader(
-                dataset=ArrayDataset(X=np.array([[1, 2, 3], [4, 5, 6]])),
-                rng_key=random.key(42),
-                batch_size=0.5,
-            )
-
-    def test_shuffle_is_deterministic_given_key(self) -> None:
-        """Loaders built with the same key yield identical shuffled batches."""
-        y = np.arange(100)
-        loaders = [
-            ArrayLoader(
-                ArrayDataset(y=y),
-                rng_key=random.key(42),
-                batch_size=7,
-                shuffle=True,
-            )
-            for _ in range(2)
-        ]
-
-        np.testing.assert_array_equal(
-            self._shuffled_batches(loaders[0]),
-            self._shuffled_batches(loaders[1]),
+    # Loaders built with the same key yield identical shuffled batches, and each
+    # epoch holds every row exactly once in a fresh order
+    loaders = [
+        ArrayLoader(
+            ArrayDataset(y=y), rng_key=random.key(42), batch_size=7, shuffle=True
         )
-
-    def test_shuffle_epochs_are_distinct_permutations(self) -> None:
-        """Each epoch contains every row exactly once, in a fresh order."""
-        y = np.arange(100)
-        loader = ArrayLoader(
-            ArrayDataset(y=y),
-            rng_key=random.key(42),
-            batch_size=7,
-            shuffle=True,
-        )
-
-        epochs = [self._shuffled_batches(loader) for _ in range(2)]
-
-        for epoch in epochs:
-            np.testing.assert_array_equal(np.sort(epoch), y)
-        assert not np.array_equal(epochs[0], epochs[1])
-
-    @pytest.mark.parametrize("vi", [lm_subsample], indirect=True)
-    def test_fit_dataloader_y_not_none_error(
-        self,
-        synthetic_data: tuple[Array, Array],
-        vi: SVI,
-    ) -> None:
-        """Passing a data loader as `X` and a non-None `y` raises an error."""
-        X, y = synthetic_data
-        im = ImpactModel(lm_subsample, rng_key=random.key(42), inference=vi)
-        dataloader = ArrayLoader(ArrayDataset(X=X, y=y), rng_key=random.key(42))
-        with pytest.raises(
-            TypeError,
-            match="must be `None` when `X` is already a data loader",
-        ):
-            im.fit(X=dataloader, y=y)
-        im.fit(X=dataloader)
-
-    @pytest.mark.parametrize("vi", [lm], indirect=True)
-    def test_rejected_fit_leaves_model_state_untouched(
-        self,
-        synthetic_data: tuple[Array, Array],
-        vi: SVI,
-    ) -> None:
-        """A rejected `fit` changes neither the key nor the draw count."""
-        X, y = synthetic_data
-        num_samples = 5
-        im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
-        im.fit(X=X, y=y, num_samples=num_samples, batch_size=len(X), progress=False)
-        key_before = random.key_data(im.rng_key)
-        loader = ArrayLoader(ArrayDataset(X=X, y=y), rng_key=random.key(0))
-
-        with pytest.raises(TypeError, match="must be `None` when `X` is already"):
-            im.fit(X=loader, y=y, progress=False)
-        with pytest.raises(TypeError, match="unexpected keyword argument 'c'"):
-            im.fit(X=X, y=y, c=1.0, progress=False)
-
-        np.testing.assert_array_equal(random.key_data(im.rng_key), key_before)
-        assert im._num_samples == num_samples
-        out = im.predict(X, store="memory", progress=False)
-        assert out.posterior_predictive["y"].sizes["draw"] == num_samples
-
-    @pytest.mark.parametrize("vi", [lm_subsample], indirect=True)
-    def test_fit_exhausted_data_loader_raises(
-        self,
-        synthetic_data: tuple[Array, Array],
-        vi: SVI,
-    ) -> None:
-        """A data loader that yields no batches in an epoch raises an error."""
-        X, y = synthetic_data
-        im = ImpactModel(lm_subsample, rng_key=random.key(42), inference=vi)
-        # A one-shot iterator is exhausted after the first epoch
-        batches = iter([{"X": X, "y": y}])
-        with pytest.raises(ValueError, match="yielded no batches in epoch 2"):
-            im.fit(batches, epochs=2, progress=False)
-
-    @pytest.mark.parametrize("vi", [lm_subsample], indirect=True)
-    def test_fit_consistency_with_array_and_dataloader(
-        self,
-        synthetic_data: tuple[Array, Array],
-        vi: SVI,
-    ) -> None:
-        """Calling `.fit()` with arrays or a data loader can yield identical results."""
-        X, y = synthetic_data
-
-        # Initialize ImpactModel (passing rng_key here has no effect since we pass one
-        # to `.fit()`).
-        rng_key = random.key(42)
-        rng_key, rng_subkey = random.split(rng_key)
-        rng_key, _ = random.split(rng_subkey)
-        im_without_dataloader = ImpactModel(
-            lm_subsample, rng_key=random.key(0), inference=vi
-        )
-        try:
-            im_without_dataloader.fit(
-                X=X,
-                y=y,
-                rng_key=rng_subkey,
-                batch_size=3,
-                progress=False,
-                shuffle=True,
-            )
-            rng_key, rng_subkey = random.split(rng_key)
-            losses_without_dataloader = im_without_dataloader.vi_result.losses
-            mean_pred_without_dataloader = (
-                im_without_dataloader.predict(X=X, rng_key=rng_subkey, batch_size=3)
-                .posterior_predictive["y"]
-                .mean(["chain", "draw"])
-                .values
-            )
-
-            # Prepare loader and new ImpactModel
-            rng_key = random.key(42)
-            rng_key, rng_subkey = random.split(rng_key)
-            rng_key, rng_loader_key = random.split(rng_subkey)
-            im_with_dataloader = ImpactModel(
-                lm_subsample, rng_key=random.key(0), inference=vi
-            )
-            im_with_dataloader.fit(
-                X=ArrayLoader(
-                    ArrayDataset(X=X, y=y),
-                    rng_key=rng_loader_key,
-                    batch_size=3,
-                    shuffle=True,
-                ),
-                rng_key=rng_subkey,
-                progress=False,
-            )
-            rng_key, rng_subkey = random.split(rng_key)
-
-            losses_with_dataloader = im_with_dataloader.vi_result.losses
-            mean_pred_with_dataloader = (
-                im_with_dataloader.predict(
-                    X=ArrayLoader(
-                        ArrayDataset(X=X),
-                        rng_key=rng_loader_key,
-                        batch_size=3,
-                    ),
-                    rng_key=rng_subkey,
-                )
-                .posterior_predictive["y"]
-                .mean(["chain", "draw"])
-                .values
-            )
-
-            assert np.allclose(losses_without_dataloader, losses_with_dataloader), (
-                "Losses from fitting with raw arrays vs. fitting with a data loader "
-                "can match, if the rng_key is properly set."
-            )
-            assert np.allclose(
-                mean_pred_without_dataloader,
-                mean_pred_with_dataloader,
-            ), (
-                "Posterior predictive samples from fitting with raw arrays vs. "
-                "fitting with a data loader can match, if the rng_key is properly set."
-            )
-        finally:
-            ImpactModel.cleanup_models()
-
-    def test_predict_with_loader_extra_array_binds_by_name(
-        self,
-        synthetic_data: tuple[Array, Array],
-        im_lm_with_kwargs_svi_fitted: ImpactModel,
-    ) -> None:
-        """A loader carrying an extra array field binds it by name, matching kwargs."""
-        X, y = synthetic_data
-        im = im_lm_with_kwargs_svi_fitted
-        rng_key = random.key(7)
-        ref = im.predict(X, c=y, rng_key=rng_key, batch_size=3, progress=False)
-        loader = ArrayLoader(
-            ArrayDataset(X=X, c=y),
-            rng_key=random.key(0),
-            batch_size=3,
-        )
-        via = im.predict(loader, rng_key=rng_key, progress=False)
-
-        assert np.allclose(
-            ref.posterior_predictive["y"].values,
-            via.posterior_predictive["y"].values,
-        )
-
-    def test_predict_loader_binding_guards(
-        self,
-        synthetic_data: tuple[Array, Array],
-        im_lm_with_kwargs_svi_fitted: ImpactModel,
-    ) -> None:
-        """Misusing a data loader's array fields raises clear errors."""
-        X, y = synthetic_data
-        im = im_lm_with_kwargs_svi_fitted
-        loader = ArrayLoader(ArrayDataset(X=X, c=y), rng_key=random.key(0))
-        with pytest.raises(ValueError, match="also fields of the data loader"):
-            im.predict(loader, c=y, progress=False)
-        no_input = ArrayLoader(ArrayDataset(c=y), rng_key=random.key(0))
-        with pytest.raises(ValueError, match="no field named 'X'"):
-            im.predict(no_input, progress=False)
+        for _ in range(2)
+    ]
+    epochs = [np.concatenate([batch["y"] for batch in loader]) for loader in loaders]
+    np.testing.assert_array_equal(epochs[0], epochs[1])
+    second_epoch = np.concatenate([batch["y"] for batch in loaders[0]])
+    np.testing.assert_array_equal(np.sort(second_epoch), y)
+    assert not np.array_equal(second_epoch, epochs[0])

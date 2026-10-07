@@ -15,56 +15,30 @@
 """Tests for the `.cleanup_models()` method."""
 
 import cloudpickle
-import pytest
 from jax import Array, random
-from numpyro.infer import SVI
 
 from aimz import ImpactModel
-from tests.conftest import lm
+from tests.conftest import lm, make_svi
 
 
-@pytest.mark.parametrize("vi", [lm], indirect=True)
-def test_cleanup_models_removes_all_temp_dirs(
+def test_cleanup_models_reaches_every_instance(
     synthetic_data: tuple[Array, Array],
-    vi: SVI,
 ) -> None:
-    """Ensure class-level cleanup removes temporary directories for all instances."""
+    """Class-level cleanup removes the temporary directory of every registered model."""
     X, y = synthetic_data
-
-    im1 = ImpactModel(lm, rng_key=random.key(42), inference=vi)
-    im1.fit_on_batch(X=X, y=y, num_steps=10, num_samples=10, progress=False)
-
-    im2 = ImpactModel(lm, rng_key=random.key(42), inference=vi)
-    im2.fit_on_batch(X=X, y=y, num_steps=10, num_samples=10, progress=False)
-
-    im1.predict(X, batch_size=3, progress=False)
-    im2.predict(X, batch_size=3, progress=False)
-
-    ImpactModel.cleanup_models()
-
-    assert im1.temp_dir is None
-    assert im2.temp_dir is None
-
-
-@pytest.mark.parametrize("vi", [lm], indirect=True)
-def test_cleanup_models_covers_unpickled_instance(
-    synthetic_data: tuple[Array, Array],
-    vi: SVI,
-) -> None:
-    """A cloudpickle-restored model re-registers, so `cleanup_models()` reaches it."""
-    X, y = synthetic_data
-
-    im = ImpactModel(lm, rng_key=random.key(42), inference=vi)
-    im.fit_on_batch(X=X, y=y, num_steps=10, num_samples=10, progress=False)
-
+    models = [
+        ImpactModel(lm, rng_key=random.key(42), inference=make_svi(lm))
+        for _ in range(2)
+    ]
+    for im in models:
+        im.fit_on_batch(X=X, y=y, num_steps=10, num_samples=10, progress=False)
     # cloudpickle bypasses `__init__` (only `__setstate__` runs), so the restored
-    # instance must re-register itself in `_models`.
-    restored = cloudpickle.loads(cloudpickle.dumps(im))
-    assert restored in ImpactModel._models
+    # instance must re-register itself in `_models`
+    models.append(cloudpickle.loads(cloudpickle.dumps(models[0])))
+    assert models[-1] in ImpactModel._models
 
-    restored.predict(X, batch_size=3, progress=False)
-    assert restored.temp_dir is not None
-
+    for im in models:
+        im.predict(X, batch_size=99, progress=False)
+        assert im.temp_dir is not None
     ImpactModel.cleanup_models()
-
-    assert restored.temp_dir is None
+    assert all(im.temp_dir is None for im in models)
