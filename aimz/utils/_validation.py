@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from collections.abc import Set as AbstractSet
 from inspect import Parameter, signature
 from typing import TYPE_CHECKING
 from warnings import warn
@@ -175,6 +176,53 @@ def _validate_intervention(
             f"{', '.join(map(repr, kernel_spec.sample_sites))}."
         )
         raise ValueError(msg)
+
+
+def _warn_unreachable_intervention(
+    intervention: dict | None,
+    *,
+    output: str,
+    parents: Mapping[str, AbstractSet[str]],
+    fixed: AbstractSet[str],
+) -> None:
+    """Warn for the intervened sites whose values cannot reach the output.
+
+    Args:
+        intervention: Mapping from site names to replacement values, or ``None``.
+        output: Name of the output site.
+        parents: For each sample site, the sample sites its distribution depends on.
+        fixed: Sites whose values are taken from the posterior.
+
+    Warns:
+        OutputWarning: If an intervened site reaches the output only through sites
+            whose values are fixed or intervened on, so that the draws do not respond
+            to it.
+    """
+    if not intervention:
+        return
+    # Walk from the output up the sites it depends on, once through every site and
+    # once stopping at the sites whose values are fixed or intervened on. A site the
+    # first walk meets and the second does not reaches the output only through such
+    # sites, which do not pass the intervention on.
+    reached = []
+    for stop in (frozenset(), fixed | intervention.keys()):
+        seen = {output}
+        frontier = [output]
+        edges = set()
+        while frontier:
+            for parent in parents.get(frontier.pop(), ()):
+                edges.add(parent)
+                if parent not in seen and parent not in stop:
+                    seen.add(parent)
+                    frontier.append(parent)
+        reached.append(edges)
+    if blocked := sorted(intervention.keys() & (reached[0] - reached[1])):
+        msg = (
+            f"Intervention site(s) {', '.join(map(repr, blocked))} reach the output "
+            f"site {output!r} only through sites whose values are taken from the "
+            "posterior or intervened on, so the draws do not respond to them."
+        )
+        warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
 
 
 def _validate_shard_axis(

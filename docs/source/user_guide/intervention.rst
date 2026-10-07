@@ -35,6 +35,7 @@ Before fitting, you can explore the model's prior predictions with ``z`` fixed a
     prior = im.sample_prior_predictive_on_batch(X, intervention={"z": 0.0})
 
 After fitting, the same mapping applies the intervention while using posterior samples for the other latent sites.
+A latent site downstream of the intervened one keeps its posterior draws and does not pass the intervention on, which :meth:`~aimz.ImpactModel.predict` warns about with :class:`~aimz.OutputWarning`; :doc:`estimands` shows how to write the kernel so that the path runs through deterministic computations.
 Here, the baseline holds ``z`` at one and the modified scenario holds it at zero, both drawn with the same key:
 
 .. code-block:: python
