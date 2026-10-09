@@ -39,7 +39,7 @@ dev = [
     "pre-commit>=4.6",
     "pytest>=9.1",
     "pytest-cov>=7.1",
-    "ruff>=0.16",
+    "ruff>=0.17",
     "ty>=0.0.84",
 ]
 gpu = ["jax[cuda13]>=0.10"]

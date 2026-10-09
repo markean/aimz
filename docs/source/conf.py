@@ -14,7 +14,7 @@
 
 """Sphinx configuration for aimz documentation."""
 
-import datetime
+import datetime as dt
 import inspect
 import shutil
 import sys
@@ -32,7 +32,7 @@ import aimz
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = "aimz"
-copyright = f"2025-{datetime.datetime.now(tz=datetime.UTC).year}, Eli Lilly and Company"
+copyright = f"2025-{dt.datetime.now(tz=dt.UTC).year}, Eli Lilly and Company"
 author = "Eunseop Kim"
 version = metadata.version("aimz")
 language = "en"

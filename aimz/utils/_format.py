@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-import datetime
+import datetime as dt
 from importlib.metadata import version
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 def _make_attrs() -> dict[str, str]:
     """Return the creation time and the aimz version as attributes."""
     return {
-        "created_at": datetime.datetime.now(datetime.UTC).isoformat(),
+        "created_at": dt.datetime.now(dt.UTC).isoformat(),
         "aimz_version": version("aimz"),
     }
 
