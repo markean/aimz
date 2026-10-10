@@ -37,18 +37,20 @@ def test_fit_on_batch_continues_training(synthetic_data: tuple[Array, Array]) ->
     im.fit_on_batch(X, y, num_steps=1000, num_samples=10, progress=False)
     assert im.vi_result.losses[-1] < first_loss
 
-    # A first loss near the end of the earlier run shows the training continued
-    trained = make_svi(lm).run(
-        random.key(0), num_steps=2000, X=X, y=y, progress_bar=False
-    )
-    for method, kwargs in (
-        ("fit_on_batch", {"num_steps": 20}),
-        ("fit", {"batch_size": len(X)}),
+    # A first loss near the end of the earlier run shows the training continued, from
+    # a fresh SVI object or from the one that trained
+    svi = make_svi(lm)
+    trained = svi.run(random.key(0), num_steps=2000, X=X, y=y, progress_bar=False)
+    for method, inference, kwargs in (
+        ("fit_on_batch", make_svi(lm), {"num_steps": 20}),
+        ("fit", make_svi(lm), {"batch_size": len(X)}),
+        ("fit", svi, {"batch_size": len(X)}),
     ):
-        im = ImpactModel(lm, rng_key=random.key(1), inference=make_svi(lm))
+        im = ImpactModel(lm, rng_key=random.key(1), inference=inference)
         im.vi_result = trained
         getattr(im, method)(X, y, num_samples=10, progress=False, **kwargs)
         assert im.vi_result.losses[0] < trained.losses[-50:].mean() * 1.2
+        assert im.kernel_spec.output_observed
 
 
 def test_fit_on_batch_mcmc_keeps_chains(synthetic_data: tuple[Array, Array]) -> None:

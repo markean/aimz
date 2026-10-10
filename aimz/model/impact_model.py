@@ -1115,11 +1115,14 @@ class ImpactModel(BaseModel):
         batch = {self.param_input: X, self.param_output: y, **kwargs}
 
         svi = cast("SVI", self.inference)
-        if self._vi_state is None or svi.constrain_fn is None:
+        # A result set through `vi_result` may come with an SVI object that needs no
+        # initialization, so the trace does not depend on it
+        if not (self._kernel_spec and self._kernel_spec.output_observed):
             self._build_kernel_spec(
                 signature(self.kernel).bind(**batch).arguments,
                 with_output=True,
             )
+        if self._vi_state is None or svi.constrain_fn is None:
             if rng_key is None:
                 self._rng_key, rng_key = random.split(self._rng_key)
             state = svi.init(rng_key, **batch)
