@@ -58,7 +58,7 @@ def _pin_subsample_indices(msg: Message) -> Array | None:
 def _substitute_latent(msg: Message, sample: dict[str, Array]) -> Array | None:
     """Return the posterior value of a latent sample site, else ``None``.
 
-    Deterministic sites are recomputed and observed sites score the data, so neither
+    Deterministic sites are recomputed and observed sites keep their data, so neither
     takes a value from the posterior.
     """
     if msg["type"] == "deterministic" or msg.get("is_observed", False):
