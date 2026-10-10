@@ -20,7 +20,7 @@ import numpy as np
 import numpyro.distributions as dist
 import pytest
 from jax import Array, random
-from numpyro import sample
+from numpyro import deterministic, sample
 from numpyro.infer import MCMC, NUTS
 
 from aimz import ImpactModel
@@ -59,7 +59,9 @@ def test_fit_on_batch_mcmc_keeps_chains(synthetic_data: tuple[Array, Array]) -> 
 
     def kernel(X: Array, y: Array | None = None) -> None:
         b = sample("b", dist.Normal(0.0, 1.0))
-        sample("y", dist.Normal(X.sum(axis=-1) + b, 1.0), obs=y)
+        # Kept in the posterior with a value per observation, but recomputed
+        mu = deterministic("mu", X.sum(axis=-1) + b)
+        sample("y", dist.Normal(mu, 1.0), obs=y)
 
     mcmc = MCMC(NUTS(kernel), num_warmup=10, num_samples=5, num_chains=2)
     im = ImpactModel(kernel, rng_key=random.key(42), inference=mcmc)

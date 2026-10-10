@@ -564,8 +564,9 @@ class ImpactModel(BaseModel):
 
         A posterior site shaped ``(num_samples, n_obs, ...)`` cannot be split with the
         observation axis: only a whole-input batch on a single device keeps it intact,
-        so the call otherwise runs draw-parallel, with a warning. Observed and
-        deterministic sites are exempt, since they take no values from the posterior.
+        so the call otherwise runs draw-parallel, with a warning. Deterministic sites
+        are exempt, since the kernel recomputes them, but observed sites are not, since
+        a call without their data takes their draws.
 
         Args:
             X: Input array, or a data loader, which batches itself.
@@ -585,11 +586,11 @@ class ImpactModel(BaseModel):
         row_nbytes, rest_nbytes = nbytes
         min_aligned_ndim = 2
         spec = cast("KernelSpec", self._kernel_spec)
-        skip = self._observed_sites | (set(spec.return_sites) - set(spec.sample_sites))
+        deterministic = set(spec.return_sites) - set(spec.sample_sites)
         if shard_axis == "obs" and any(
             v.ndim >= min_aligned_ndim and v.shape[1] == n_obs
             for site, v in (posterior or {}).items()
-            if site not in skip
+            if site not in deterministic
         ):
             if (
                 self._num_devices == 1
