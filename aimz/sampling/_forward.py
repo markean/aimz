@@ -16,14 +16,16 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from functools import partial
+from typing import TYPE_CHECKING
 
 from jax import Array, lax, vmap
 from jax.core import Tracer
 from numpyro.handlers import do, mask, seed, substitute, trace
 
+from aimz.utils._log_likelihood import _substitute_latent
+
 if TYPE_CHECKING:
-    from collections import OrderedDict
     from collections.abc import Callable, Mapping
 
 
@@ -39,10 +41,10 @@ def _sample_forward(
 ) -> dict[str, Array]:
     """Draw forward samples from a model, one trace per key in ``rng_keys``.
 
-    Each draw conditions on its row of ``samples``, deterministic sites excepted. Under
-    a trace the draws run as one :external:func:`jax.lax.map` loop; eagerly they are
-    vectorized with :external:func:`jax.vmap`, since an eager ``lax.map`` would cache a
-    program per call.
+    Each draw conditions on its row of ``samples``, deterministic and observed sites
+    excepted. Under a trace the draws run as one :external:func:`jax.lax.map` loop;
+    eagerly they are vectorized with :external:func:`jax.vmap`, since an eager
+    ``lax.map`` would cache a program per call.
 
     Args:
         model: A probabilistic model with NumPyro primitives.
@@ -67,14 +69,10 @@ def _sample_forward(
         sample_input: tuple[Array, dict[str, Array]],
     ) -> dict[str, Array]:
         rng_key, sample = sample_input
-
-        def _exclude_deterministic(msg: OrderedDict[str, Any]) -> Array | None:
-            return sample.get(msg["name"]) if msg["type"] != "deterministic" else None
-
         masked_model = mask(model, mask=False)
         substituted_model = substitute(
             masked_model,
-            substitute_fn=_exclude_deterministic,
+            substitute_fn=partial(_substitute_latent, sample=sample),
         )
         model_trace = trace(seed(substituted_model, rng_seed=rng_key)).get_trace(
             **(model_kwargs or {}),
