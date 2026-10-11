@@ -47,8 +47,8 @@ from jax import (
 from jax.sharding import AxisType, NamedSharding, PartitionSpec
 from jax.typing import ArrayLike
 from numpyro.distributions import Distribution, Independent
-from numpyro.handlers import seed, trace
-from numpyro.infer import MCMC, SVI
+from numpyro.handlers import seed, substitute, trace
+from numpyro.infer import MCMC, SVI, init_to_sample
 from numpyro.infer.inspect import get_dependencies
 from numpyro.infer.svi import SVIRunResult, SVIState
 from tqdm.auto import tqdm
@@ -401,9 +401,12 @@ class ImpactModel(BaseModel):
                     return
             elif self._kernel_spec.traced:
                 return
-        model_trace = trace(seed(self.kernel, rng_seed=self.rng_key)).get_trace(
-            **args_bound,
-        )
+        model_trace = trace(
+            substitute(
+                seed(self.kernel, rng_seed=self.rng_key),
+                substitute_fn=init_to_sample,
+            ),
+        ).get_trace(**args_bound)
         _validate_kernel_body(
             self.kernel,
             param_output=self.param_output,
@@ -1386,7 +1389,12 @@ class ImpactModel(BaseModel):
             }
             # The first batch already rejected an output site that is not observed
             site = (
-                trace(seed(self.kernel, rng_seed=self.rng_key))
+                trace(
+                    substitute(
+                        seed(self.kernel, rng_seed=self.rng_key),
+                        substitute_fn=init_to_sample,
+                    ),
+                )
                 .get_trace(**batch, **kwargs_extra)
                 .get(self.param_output, {})
             )
