@@ -70,7 +70,7 @@ Draw-parallel sharding does not lift the static-shape requirement, so :external:
 A local latent's posterior applies only to the observations the model was fitted on.
 For an array input with another number of observations, prediction and :meth:`~aimz.ImpactModel.log_likelihood` raise a ``ValueError`` that names the site, unless the site is intervened on.
 The fitted values are reused without notice for an input with the same number of observations, and, under ``shard_axis="obs"``, for one split into device batches with exactly the fitted number of rows, padding included.
-A data loader is checked one batch at a time, so a batch with the fitted number of rows passes too.
+A data loader is checked one device batch at a time, so a loader batch that gives each device exactly the fitted number of rows passes too.
 To predict other observations, draw the site from the prior: set a posterior without it, or, if it is the only latent site, use :meth:`~aimz.ImpactModel.sample_prior_predictive`.
 
 A model with nested plates whose :external:func:`~numpyro.primitives.sample` sites are all observed (``obs=``) or whose latent shapes are fixed remains compatible; a model with a single plate containing one unobserved :external:func:`~numpyro.primitives.sample` site triggers the draw-parallel rerun.
