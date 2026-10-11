@@ -102,7 +102,8 @@ aimz treats the leading axis as the observation axis and assumes observations ar
 :meth:`~aimz.ImpactModel.fit` shuffles the rows by default and trains on batches of them.
 The streaming methods (:meth:`~aimz.ImpactModel.predict`, :meth:`~aimz.ImpactModel.sample_posterior_predictive`, :meth:`~aimz.ImpactModel.sample_prior_predictive`, and :meth:`~aimz.ImpactModel.log_likelihood`) process the input in batches and, under the default ``shard_axis="obs"``, split each batch across devices.
 A kernel that computes across observations, for example through a cumulative sum, a moving average, a value from a previous row, or a statistic such as the mean over all rows, then sees only part of the rows or sees them out of order.
-This happens without an error or a warning.
+This happens without an error or a warning, unless the kernel's trace shows the dependence: a site recorded by :external:func:`~numpyro.contrib.control_flow.scan`, or a site drawn as one event over all the rows, such as a :external:class:`~numpyro.distributions.continuous.MultivariateNormal` over the observations.
+For such a kernel and an array input, the streaming methods warn with a :class:`~aimz.PerformanceWarning` and rerun under ``shard_axis="draw"``, which keeps the rows whole and in order, while :meth:`~aimz.ImpactModel.fit` and a data loader still split them.
 Whether a split happens depends on the input size, ``batch_size``, and the number of devices, so such a kernel can give correct results on a small input on one device and wrong results on a larger input or on several devices.
 
 There are two ways to make such a kernel safe:

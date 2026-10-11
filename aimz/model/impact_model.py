@@ -46,6 +46,7 @@ from jax import (
 )
 from jax.sharding import AxisType, NamedSharding, PartitionSpec
 from jax.typing import ArrayLike
+from numpyro.distributions import Distribution, Independent
 from numpyro.handlers import seed, trace
 from numpyro.infer import MCMC, SVI
 from numpyro.infer.inspect import get_dependencies
@@ -152,6 +153,7 @@ class ImpactModel(BaseModel):
         self._dims: dict[str, tuple[str, ...]] = {}
         self._site_sizes: dict[str, tuple[int, int]] = {}
         self._observed_sites: set[str] = set()
+        self._coupled_sites: set[str] = set()
         self._site_parents: dict[str, set[str]] = {}
         if isinstance(rng_key, Array) and rng_key.dtype == jnp.uint32:
             msg = "Legacy `uint32` PRNGKey detected; converting to a typed key array."
@@ -275,6 +277,7 @@ class ImpactModel(BaseModel):
         self.__dict__.setdefault("_dims", {})
         self.__dict__.setdefault("_site_sizes", {})
         self.__dict__.setdefault("_observed_sites", set())
+        self.__dict__.setdefault("_coupled_sites", set())
         self.__dict__.setdefault("_site_parents", {})
         self._init_runtime_attrs()
         inference = self._inference
@@ -455,6 +458,17 @@ class ImpactModel(BaseModel):
                 )
             if v.get("is_observed"):
                 self._observed_sites.add(k)
+            # A site recorded by a scan, or drawn as one event over the rows, computes
+            # across observations.
+            fn = v.get("fn")
+            if v.get("_control_flow_done") or (
+                isinstance(fn, Distribution)
+                and not isinstance(fn, Independent)
+                and not fn.batch_shape
+                and rows != (1,)
+                and fn.event_shape[:1] == rows
+            ):
+                self._coupled_sites.add(k)
         deps = get_dependencies(self.kernel, model_kwargs=dict(args_bound))
         for k, v in cast("Mapping[str, Mapping]", deps["prior_dependencies"]).items():
             self._site_parents[k] = set(v) - {k}
@@ -563,10 +577,11 @@ class ImpactModel(BaseModel):
         """Choose the sharding strategy and the batch size of a streamed call.
 
         A posterior site shaped ``(num_samples, n_obs, ...)`` cannot be split with the
-        observation axis: only a whole-input batch on a single device keeps it intact,
-        so the call otherwise runs draw-parallel, with a warning. Deterministic sites
-        are exempt, since the kernel recomputes them, but observed sites are not, since
-        a call without their data takes their draws.
+        observation axis, nor can a kernel that computes across observations: only a
+        whole-input batch on a single device keeps them intact, so the call otherwise
+        runs draw-parallel, with a warning. Deterministic posterior sites are exempt,
+        since the kernel recomputes them, but observed ones are not, since a call
+        without their data takes their draws.
 
         Args:
             X: Input array, or a data loader, which batches itself.
@@ -587,10 +602,13 @@ class ImpactModel(BaseModel):
         min_aligned_ndim = 2
         spec = cast("KernelSpec", self._kernel_spec)
         deterministic = set(spec.return_sites) - set(spec.sample_sites)
-        if shard_axis == "obs" and any(
-            v.ndim >= min_aligned_ndim and v.shape[1] == n_obs
-            for site, v in (posterior or {}).items()
-            if site not in deterministic
+        if shard_axis == "obs" and (
+            self._coupled_sites
+            or any(
+                v.ndim >= min_aligned_ndim and v.shape[1] == n_obs
+                for site, v in (posterior or {}).items()
+                if site not in deterministic
+            )
         ):
             if (
                 self._num_devices == 1
@@ -599,9 +617,16 @@ class ImpactModel(BaseModel):
             ):
                 batch_size = n_obs
             elif self._num_devices > 1 or batch_size is None or batch_size < n_obs:
+                reason = (
+                    "The kernel computes across observations at site(s) "
+                    f"{', '.join(map(repr, sorted(self._coupled_sites)))}, which "
+                    "`shard_axis='obs'` would split"
+                    if self._coupled_sites
+                    else "One or more posterior sample shapes are not compatible with "
+                    "`shard_axis='obs'`"
+                )
                 msg = (
-                    "One or more posterior sample shapes are not compatible with "
-                    "`shard_axis='obs'`; rerunning with `shard_axis='draw'`. Pass "
+                    f"{reason}; rerunning with `shard_axis='draw'`. Pass "
                     "`shard_axis='draw'` to silence this warning."
                 )
                 warn(
