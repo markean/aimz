@@ -328,7 +328,6 @@ def _validate_kernel_signature(
 
 
 def _validate_kernel_body(
-    kernel: Callable,
     *,
     param_output: str,
     model_trace: OrderedDict[str, dict],
@@ -337,9 +336,8 @@ def _validate_kernel_body(
     """Raise for a trace without a usable output site.
 
     Raises:
-        KernelValidationError: If a site name holds ``/``, the output site is missing,
-            is not an observed sample site when ``with_output`` is set, or a kernel
-            parameter shares the name of a site other than a plate or an observed site.
+        KernelValidationError: If a site name holds ``/``, or the output site is
+            missing or, when ``with_output`` is set, is not an observed sample site.
     """
     invalid_site = [site for site in model_trace if "/" in site]
     if invalid_site:
@@ -373,21 +371,6 @@ def _validate_kernel_body(
         msg = (
             f"Expected {param_output!r} to have type 'sample' or 'deterministic', "
             f"got {site['type']!r}."
-        )
-        raise KernelValidationError(msg)
-
-    params = list(signature(kernel).parameters)
-    params.remove(param_output)
-    conflicts = set(params) & {
-        k
-        for k, v in model_trace.items()
-        if v["type"] != "plate" and not v.get("is_observed")
-    }
-    if conflicts:
-        msg = (
-            f"Kernel parameters conflict with model sites: "
-            f"{', '.join(repr(k) for k in sorted(conflicts))}. "
-            "Rename parameters or revise the model to avoid shadowing."
         )
         raise KernelValidationError(msg)
 
