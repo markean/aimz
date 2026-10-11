@@ -49,6 +49,7 @@ When the posterior sample shape is observation-aligned (the hallmark of a **loca
 Rather than failing, :meth:`~aimz.ImpactModel.predict` and :meth:`~aimz.ImpactModel.log_likelihood` detect this, emit a warning, and rerun under ``shard_axis="draw"``, keeping results streamed to disk and memory-bounded.
 The rerun chooses its own draw chunk size, since a ``batch_size`` given for ``shard_axis="obs"`` counts observations, not draws.
 Passing ``shard_axis="draw"`` explicitly skips the warning.
+The streaming methods, :meth:`~aimz.ImpactModel.sample_prior_predictive` included, rerun the same way for a kernel that computes across observations at a site recorded by :external:func:`~numpyro.contrib.control_flow.scan` or drawn as one event over all the rows (see :ref:`faq-cross-observation`).
 See :ref:`faq-model-compatibility` for the model patterns that trigger a rerun and those that stay unsupported.
 The kernels below contrast a compatible model with one that triggers the rerun; a runnable version is in :doc:`streaming_and_on_batch`.
 

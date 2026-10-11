@@ -18,8 +18,11 @@ import warnings
 
 import jax.numpy as jnp
 import numpy as np
+import numpyro.distributions as dist
 import pytest
 from jax import Array, local_device_count, random
+from numpyro import deterministic, sample
+from numpyro.contrib.control_flow import scan
 
 from aimz import ImpactModel, PerformanceWarning
 from aimz.utils.data import ArrayDataset, ArrayLoader
@@ -105,6 +108,38 @@ def test_predict_data_reruns_draw_on_rank3_local_latent(
         assert pp["z"].shape == (1, _n_draws(im), len(X), 2)
     finally:
         im.cleanup()
+
+
+def test_kernel_across_observations_reruns_under_draw(
+    synthetic_data: tuple[Array, Array],
+) -> None:
+    """A kernel that carries values across rows through a scan keeps them whole."""
+    X, y = synthetic_data
+
+    def kernel(X: Array, y: Array | None = None) -> None:
+        a = sample("a", dist.Normal())
+
+        def step(level: Array, x: Array) -> tuple[Array, Array]:
+            level = deterministic("level", level + a * x[0])
+            return level, level
+
+        _, levels = scan(step, 0.0, X)
+        sample("y", dist.Normal(levels, 1.0), obs=y)
+
+    im = ImpactModel(kernel, rng_key=random.key(0), inference=make_svi(kernel))
+    im.fit_on_batch(X, y, num_steps=10, num_samples=10, progress=False)
+    expected = im.predict_on_batch(X, return_sites="level").posterior_predictive
+    match = "computes across observations at site"
+    with pytest.warns(PerformanceWarning, match=match):
+        dt = im.predict(X, return_sites="level", store="memory", progress=False)
+    np.testing.assert_allclose(
+        dt.posterior_predictive["level"], expected["level"], rtol=1e-6
+    )
+    with pytest.warns(PerformanceWarning, match=match):
+        dt = im.sample_prior_predictive(
+            X, num_samples=10, store="memory", progress=False
+        )
+    assert dt.prior_predictive.attrs["shard_axis"] == "draw"
 
 
 @pytest.mark.filterwarnings("ignore:One or more posterior sample shapes")
