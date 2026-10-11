@@ -1686,8 +1686,9 @@ class ImpactModel(BaseModel):
             TypeError: If :attr:`~aimz.ImpactModel.param_input` or
                 :attr:`~aimz.ImpactModel.param_output` is passed as an argument.
             ValueError: If ``intervention`` names a site that is not a sample site of
-                the kernel, or a posterior site does not fit the input, as a site with
-                one value per observation does not fit other observations.
+                the kernel, or a posterior site that is not intervened on does not fit
+                the rows being evaluated, as a site with one value per observation does
+                not fit other observations.
 
         Warns:
             OutputWarning: If an intervened site reaches the output only through sites
@@ -1802,9 +1803,9 @@ class ImpactModel(BaseModel):
             ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``, ``store`` is
                 not ``"persistent"`` or ``"memory"``, ``output_dir`` is passed with
                 ``store="memory"``, ``X`` is 0-D or empty, ``intervention`` names a
-                site that is not a sample site of the kernel, or a posterior site does
-                not fit the input, as a site with one value per observation does not
-                fit other observations.
+                site that is not a sample site of the kernel, or a posterior site that
+                is not intervened on does not fit the rows being evaluated, as a site
+                with one value per observation does not fit other observations.
             NotImplementedError: If a return site's axis-1 size does not match the
                 input batch size (``shard_axis="obs"`` only).
 
@@ -1925,8 +1926,9 @@ class ImpactModel(BaseModel):
                 provided, if neither ``output_intervention`` nor
                 ``args_intervention`` is provided, if an ``intervention`` passed
                 through ``args_baseline`` or ``args_intervention`` names a site that
-                is not a sample site of the kernel, if a posterior site does not fit a
-                scenario's input, or if the scenarios do not share a predictive group.
+                is not a sample site of the kernel, if a posterior site that is not
+                intervened on does not fit the rows a scenario evaluates, or if the
+                scenarios do not share a predictive group.
 
         Warns:
             OutputWarning: If the scenarios differ in dimension sizes or coordinate
@@ -2096,8 +2098,8 @@ class ImpactModel(BaseModel):
                 not ``"persistent"`` or ``"memory"``, ``output_dir`` is passed with
                 ``store="memory"``, ``y`` is missing when ``X`` is array-like, ``y``
                 does not share ``X``'s leading-axis size, or a posterior site does not
-                fit the input, as a site with one value per observation does not fit
-                other observations.
+                fit the rows being evaluated, as a site with one value per observation
+                does not fit other observations.
             NotImplementedError: If a return site's axis-1 size does not match the
                 input batch size (``shard_axis="obs"`` only).
         """

@@ -56,7 +56,7 @@ The two most common are:
 * **Local latent variables**
 
   A :external:func:`~numpyro.primitives.sample` call inside a :external:class:`~numpyro.primitives.plate` without ``obs=`` produces a posterior whose shape grows with the plate size along its second (observation) axis, for example ``(num_samples, n_obs)``, or ``(num_samples, n_obs, k)`` for a multi-output site.
-  The default observation-sharded execution gives each device only part of the observations, so such a posterior, which covers all of them, cannot be replicated there.
+  The default observation-sharded execution splits the observations between batches and devices, so such a posterior, which covers all of them, cannot be replicated there.
 
 * **The** :external:func:`~numpyro.contrib.control_flow.scan` **primitive**
 
@@ -68,8 +68,10 @@ For **local latent variables**, :meth:`~aimz.ImpactModel.predict` and :meth:`~ai
 See :ref:`user-guide-sharding` for how the two sharding strategies differ, when to choose each, and a worked comparison of a compatible kernel and one that triggers the rerun.
 Draw-parallel sharding does not lift the static-shape requirement, so :external:func:`~numpyro.contrib.control_flow.scan`-based models remain unsupported.
 A local latent's posterior applies only to the observations the model was fitted on.
-For an input with another number of observations, prediction and :meth:`~aimz.ImpactModel.log_likelihood` raise a ``ValueError`` that names the site, unless ``shard_axis="obs"`` gives each device exactly as many rows as the fit had; an input with the same number of observations reuses the fitted values.
-To predict other observations, set a posterior without the site, so that it is drawn from the prior.
+For an array input with another number of observations, prediction and :meth:`~aimz.ImpactModel.log_likelihood` raise a ``ValueError`` that names the site, unless the site is intervened on.
+The fitted values are reused without notice for an input with the same number of observations, and, under ``shard_axis="obs"``, for one split into device batches with exactly the fitted number of rows, padding included.
+A data loader is checked one batch at a time, so a batch with the fitted number of rows passes too.
+To predict other observations, draw the site from the prior: set a posterior without it, or, if it is the only latent site, use :meth:`~aimz.ImpactModel.sample_prior_predictive`.
 
 A model with nested plates whose :external:func:`~numpyro.primitives.sample` sites are all observed (``obs=``) or whose latent shapes are fixed remains compatible; a model with a single plate containing one unobserved :external:func:`~numpyro.primitives.sample` site triggers the draw-parallel rerun.
 

@@ -77,8 +77,8 @@ def _substitute_latent(msg: Message, sample: dict[str, Array]) -> Array | None:
                 f"{jnp.shape(value)}, which does not fit the shape {shape} the site "
                 "has for the rows being evaluated, as when a site has one value per "
                 "observation and the input has other observations. To predict other "
-                "observations, set a posterior without the site, so that it is drawn "
-                "from the prior."
+                "observations, draw the site from the prior: set a posterior without "
+                "it, or, if it is the only latent site, use `sample_prior_predictive`."
             )
             raise ValueError(err_msg)
 
