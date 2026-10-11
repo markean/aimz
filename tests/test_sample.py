@@ -14,9 +14,11 @@
 
 """Tests for the `.sample()` method."""
 
+import numpyro
 import pytest
 from jax import Array, random
-from numpyro.infer import MCMC, NUTS
+from numpyro.infer import MCMC, NUTS, SVI, Trace_ELBO
+from numpyro.infer.autoguide import AutoMultivariateNormal
 
 from aimz import ImpactModel
 from tests.conftest import lm, make_svi
@@ -26,8 +28,12 @@ def test_sample(synthetic_data: tuple[Array, Array]) -> None:
     """`sample` draws from the guide, or continues the chain, in the number asked."""
     X, y = synthetic_data
     num_samples = 7
-    im = ImpactModel(lm, rng_key=random.key(42), inference=make_svi(lm))
+    # The guide draws all latent sites as one vector, a site of its own, which neither
+    # the posterior nor `sample` keeps
+    svi = SVI(lm, AutoMultivariateNormal(lm), numpyro.optim.Adam(1e-3), Trace_ELBO())
+    im = ImpactModel(lm, rng_key=random.key(42), inference=svi)
     im.fit_on_batch(X, y, num_steps=10, num_samples=10, progress=False)
+    assert im.posterior.keys() == {"w", "b", "sigma"}
     posterior = im.sample(
         num_samples=num_samples, rng_key=random.key(42), return_sites="b", X=X, y=y
     ).posterior
@@ -35,7 +41,6 @@ def test_sample(synthetic_data: tuple[Array, Array]) -> None:
     samples = im.sample(
         num_samples=num_samples,
         rng_key=random.key(42),
-        return_sites=["w", "b", "sigma"],
         return_datatree=False,
         X=X,
         y=y,

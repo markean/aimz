@@ -988,7 +988,8 @@ class ImpactModel(BaseModel):
             num_samples: The number of posterior samples to draw.
             rng_key: A pseudo-random number generator key, split from an internal key by
                 default. Ignored for MCMC, which continues its chain.
-            return_sites: Names of the sites to return; by default all latent sites.
+            return_sites: Names of the sites to return; by default the kernel's latent
+                sites, or every site the guide draws if the kernel has not been traced.
                 Ignored for MCMC.
             return_datatree: Return an :external:class:`~xarray.DataTree`, or a
                 :class:`dict` if ``False``.
@@ -1051,6 +1052,13 @@ class ImpactModel(BaseModel):
                     raise TypeError(msg)
                 rng_key, rng_init = random.split(rng_key)
                 self.inference.init(rng_init, **args_bound)
+            spec = self._kernel_spec
+            if return_sites is None and spec is not None and spec.traced:
+                return_sites = tuple(
+                    site
+                    for site in spec.sample_sites
+                    if site not in self._observed_sites
+                )
             posterior_samples = device_get(
                 _sample_forward(
                     self.inference.guide,
@@ -1269,7 +1277,11 @@ class ImpactModel(BaseModel):
             self._posterior = _sample_forward(
                 self.inference.guide,
                 rng_keys=random.split(rng_subkey, num=num_samples),
-                return_sites=None,
+                return_sites=tuple(
+                    site
+                    for site in cast("KernelSpec", self._kernel_spec).sample_sites
+                    if site not in self._observed_sites
+                ),
                 samples=None,
                 params={
                     **self.vi_result.params,
@@ -1489,7 +1501,11 @@ class ImpactModel(BaseModel):
         self._posterior = _sample_forward(
             self.inference.guide,
             rng_keys=random.split(rng_subkey, num=num_samples),
-            return_sites=None,
+            return_sites=tuple(
+                site
+                for site in cast("KernelSpec", self._kernel_spec).sample_sites
+                if site not in self._observed_sites
+            ),
             samples=None,
             params={
                 **cast("SVIRunResult", self.vi_result).params,

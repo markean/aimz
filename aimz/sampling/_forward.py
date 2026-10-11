@@ -49,9 +49,8 @@ def _sample_forward(
     Args:
         model: A probabilistic model with NumPyro primitives.
         rng_keys: Per-draw keys with shape ``(num_samples,)``.
-        return_sites: Names of the sites to return; by default every deterministic site
-            and every sample site not conditioned on, except the auxiliary sites
-            internal to a guide.
+        return_sites: Names of the sites to return; by default every sample site not
+            conditioned on and every deterministic site.
         samples: Samples to condition on, with the draws on the leading axis.
         params: Values of the model's ``param`` sites and mutable state, shared by all
             draws.
@@ -83,11 +82,7 @@ def _sample_forward(
             sites = {
                 k
                 for k, site in model_trace.items()
-                if (
-                    site["type"] == "sample"
-                    and k not in sample
-                    and not site["infer"].get("is_auxiliary")
-                )
+                if (site["type"] == "sample" and k not in sample)
                 or (site["type"] == "deterministic")
             }
         else:
