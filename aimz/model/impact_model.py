@@ -46,6 +46,7 @@ from jax import (
 )
 from jax.sharding import AxisType, NamedSharding, PartitionSpec
 from jax.typing import ArrayLike
+from numpyro import validation_enabled
 from numpyro.distributions import Distribution, Independent
 from numpyro.handlers import seed, substitute, trace
 from numpyro.infer import MCMC, SVI, init_to_sample
@@ -401,12 +402,13 @@ class ImpactModel(BaseModel):
                     return
             elif self._kernel_spec.traced:
                 return
-        model_trace = trace(
-            substitute(
-                seed(self.kernel, rng_seed=self.rng_key),
-                substitute_fn=init_to_sample,
-            ),
-        ).get_trace(**args_bound)
+        with validation_enabled(is_validate=False):
+            model_trace = trace(
+                substitute(
+                    seed(self.kernel, rng_seed=self.rng_key),
+                    substitute_fn=init_to_sample,
+                ),
+            ).get_trace(**args_bound)
         _validate_kernel_body(
             self.kernel,
             param_output=self.param_output,
@@ -1388,16 +1390,17 @@ class ImpactModel(BaseModel):
                 for k, v in dataloader.dataset.arrays.items()
             }
             # The first batch already rejected an output site that is not observed
-            site = (
-                trace(
-                    substitute(
-                        seed(self.kernel, rng_seed=self.rng_key),
-                        substitute_fn=init_to_sample,
-                    ),
+            with validation_enabled(is_validate=False):
+                site = (
+                    trace(
+                        substitute(
+                            seed(self.kernel, rng_seed=self.rng_key),
+                            substitute_fn=init_to_sample,
+                        ),
+                    )
+                    .get_trace(**batch, **kwargs_extra)
+                    .get(self.param_output, {})
                 )
-                .get_trace(**batch, **kwargs_extra)
-                .get(self.param_output, {})
-            )
             if site.get("is_observed") and (
                 site.get("scale") is None or np.all(site["scale"] == 1)
             ):
