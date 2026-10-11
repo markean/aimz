@@ -1925,8 +1925,8 @@ class ImpactModel(BaseModel):
                 provided, if neither ``output_intervention`` nor
                 ``args_intervention`` is provided, if an ``intervention`` passed
                 through ``args_baseline`` or ``args_intervention`` names a site that
-                is not a sample site of the kernel, or if the scenarios do not share a
-                predictive group.
+                is not a sample site of the kernel, if a posterior site does not fit a
+                scenario's input, or if the scenarios do not share a predictive group.
 
         Warns:
             OutputWarning: If the scenarios differ in dimension sizes or coordinate

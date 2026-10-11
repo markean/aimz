@@ -56,7 +56,7 @@ The two most common are:
 * **Local latent variables**
 
   A :external:func:`~numpyro.primitives.sample` call inside a :external:class:`~numpyro.primitives.plate` without ``obs=`` produces a posterior whose shape grows with the plate size along its second (observation) axis, for example ``(num_samples, n_obs)``, or ``(num_samples, n_obs, k)`` for a multi-output site.
-  Because ``n_obs`` can differ between training and prediction, such a posterior cannot be replicated under the default observation-sharded execution.
+  The default observation-sharded execution gives each device only part of the observations, so such a posterior, which covers all of them, cannot be replicated there.
 
 * **The** :external:func:`~numpyro.contrib.control_flow.scan` **primitive**
 
@@ -67,7 +67,9 @@ For **local latent variables**, :meth:`~aimz.ImpactModel.predict` and :meth:`~ai
 :meth:`~aimz.ImpactModel.sample_prior_predictive` has no posterior to replicate and needs no rerun: under ``shard_axis="obs"`` it draws local latents within each batch and shares only the global latents across batches.
 See :ref:`user-guide-sharding` for how the two sharding strategies differ, when to choose each, and a worked comparison of a compatible kernel and one that triggers the rerun.
 Draw-parallel sharding does not lift the static-shape requirement, so :external:func:`~numpyro.contrib.control_flow.scan`-based models remain unsupported.
-A local latent's posterior applies only to the observations the model was fitted on: for an input with other observations, prediction and :meth:`~aimz.ImpactModel.log_likelihood` raise a ``ValueError`` that names the site, and setting a posterior without the site draws it from the prior instead.
+A local latent's posterior applies only to the observations the model was fitted on.
+For an input with another number of observations, prediction and :meth:`~aimz.ImpactModel.log_likelihood` raise a ``ValueError`` that names the site, unless ``shard_axis="obs"`` gives each device exactly as many rows as the fit had; an input with the same number of observations reuses the fitted values.
+To predict other observations, set a posterior without the site, so that it is drawn from the prior.
 
 A model with nested plates whose :external:func:`~numpyro.primitives.sample` sites are all observed (``obs=``) or whose latent shapes are fixed remains compatible; a model with a single plate containing one unobserved :external:func:`~numpyro.primitives.sample` site triggers the draw-parallel rerun.
 

@@ -38,7 +38,7 @@ def test_local_latent_model(
     synthetic_data: tuple[Array, Array],
     im_latent_var_svi_fitted: ImpactModel,
 ) -> None:
-    """A local latent streams under `draw`; `obs` warns and reruns under it."""
+    """A local latent reruns under `draw` and fits its own rows unless intervened on."""
     X, y = synthetic_data
     im = im_latent_var_svi_fitted
     n = _n_draws(im)
@@ -67,6 +67,8 @@ def test_local_latent_model(
     assert ll["log_likelihood"]["y"].shape == (1, n, len(X))
     with pytest.raises(ValueError, match="site 'z' has shape"):
         im.predict_on_batch(X[:5])
+    dt = im.predict_on_batch(X[:5], intervention={"z": 0.0})
+    assert dt["posterior_predictive"]["y"].shape == (1, n, 5)
 
     # Under the prior each chunk draws a fresh local latent, varying across rows
     z = np.asarray(
