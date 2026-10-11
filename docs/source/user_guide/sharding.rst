@@ -30,7 +30,7 @@ It does require a **replicable** posterior: every sample site must have a static
 Draw parallelism (``shard_axis="draw"``)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 The drawn samples are sharded across devices in chunks of ``batch_size`` draws, while the whole input is held **resident** on every device, so it must be an in-memory array rather than a data loader.
-Because the observation axis is never split, a posterior whose shape grows with the observations (a local latent of shape ``(num_samples, n_obs)`` or higher rank) always matches the full input, however it is written.
+Because the observation axis is never split, a posterior whose shape grows with the observations (a local latent of shape ``(num_samples, n_obs)`` or higher rank) always matches the full input it was fitted on, however it is written.
 
 
 Choosing a Strategy

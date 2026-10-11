@@ -65,6 +65,8 @@ def test_local_latent_model(
     with pytest.warns(PerformanceWarning, match="rerunning with"):
         ll = im.log_likelihood(X, y, batch_size=len(X), progress=False)
     assert ll["log_likelihood"]["y"].shape == (1, n, len(X))
+    with pytest.raises(ValueError, match="site 'z' has shape"):
+        im.predict_on_batch(X[:5])
 
     # Under the prior each chunk draws a fresh local latent, varying across rows
     z = np.asarray(
