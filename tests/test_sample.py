@@ -43,6 +43,16 @@ def test_sample(synthetic_data: tuple[Array, Array]) -> None:
     assert {k: v.shape[0] for k, v in samples.items()} == dict.fromkeys(
         ("w", "b", "sigma"), num_samples
     )
+    # A guide that has not run yet is set up from the arguments, the output included,
+    # and training continues afterwards
+    vi_result = make_svi(lm).run(random.key(0), 10, X=X, y=y, progress_bar=False)
+    im = ImpactModel(lm, rng_key=random.key(42), inference=make_svi(lm))
+    im.vi_result = vi_result
+    with pytest.raises(TypeError, match="must be provided"):
+        im.sample(X=X)
+    samples = im.sample(num_samples=num_samples, return_datatree=False, X=X, y=y)
+    assert samples.keys() == {"w", "b", "sigma"}
+    im.fit_on_batch(X, y, num_steps=10, num_samples=10, progress=False)
 
     num_samples_fit = 10
     mcmc = MCMC(

@@ -1004,7 +1004,8 @@ class ImpactModel(BaseModel):
                 completed MCMC run, or no ``vi_result`` when the inference method
                 is SVI).
             TypeError: If :attr:`~aimz.ImpactModel.param_output` is not passed as an
-                argument when the inference method is MCMC.
+                argument when the inference method is MCMC, or SVI whose guide has not
+                run yet.
         """
         if isinstance(self.inference, MCMC):
             if self.inference.last_state is None:
@@ -1042,6 +1043,15 @@ class ImpactModel(BaseModel):
                 raise NotFittedError(msg)
             if rng_key is None:
                 self._rng_key, rng_key = random.split(self._rng_key)
+            # A guide that has not run yet is set up before the draws, with the output
+            # observed as in training
+            if self.inference.constrain_fn is None:
+                args_bound = signature(self.kernel).bind(**kwargs).arguments
+                if self.param_output not in args_bound:
+                    msg = f"{self.param_output!r} must be provided in `.sample()`."
+                    raise TypeError(msg)
+                rng_key, rng_init = random.split(rng_key)
+                self.inference.init(rng_init, **args_bound)
             posterior_samples = device_get(
                 _sample_forward(
                     self.inference.guide,
@@ -1050,7 +1060,10 @@ class ImpactModel(BaseModel):
                     if return_sites is not None
                     else None,
                     samples=None,
-                    params=self.vi_result.params,
+                    params={
+                        **self.vi_result.params,
+                        **(getattr(self.vi_result.state, "mutable_state", None) or {}),
+                    },
                     intervention=None,
                     model_kwargs=kwargs,
                 ),
@@ -1259,7 +1272,10 @@ class ImpactModel(BaseModel):
                 rng_keys=random.split(rng_subkey, num=num_samples),
                 return_sites=None,
                 samples=None,
-                params=self.vi_result.params,
+                params={
+                    **self.vi_result.params,
+                    **(getattr(self.vi_result.state, "mutable_state", None) or {}),
+                },
                 intervention=None,
                 model_kwargs=args_bound,
             )
@@ -1295,9 +1311,10 @@ class ImpactModel(BaseModel):
         """Fit the model with variational inference over minibatches.
 
         The data is iterated in minibatches for a number of epochs, then posterior
-        samples are drawn from the guide, called with the arguments of the last batch.
-        Training continues from an existing SVI state; create a new model to start
-        over.
+        samples are drawn from the guide, called with the data in input order. With a
+        data loader, the guide gets the last batch instead, so a latent drawn per
+        observation covers only that batch. Training continues from an existing SVI
+        state; create a new model to start over.
 
         Args:
             X: Input array with observations on the leading axis, or a data loader
@@ -1475,9 +1492,16 @@ class ImpactModel(BaseModel):
             rng_keys=random.split(rng_subkey, num=num_samples),
             return_sites=None,
             samples=None,
-            params=cast("SVIRunResult", self.vi_result).params,
+            params={
+                **cast("SVIRunResult", self.vi_result).params,
+                **(getattr(self._vi_state, "mutable_state", None) or {}),
+            },
             intervention=None,
-            model_kwargs={**batch, **kwargs_extra},
+            model_kwargs=(
+                {self.param_input: X, self.param_output: y, **kwargs}
+                if isinstance(X, ArrayLike)
+                else {**batch, **kwargs_extra}
+            ),
         )
         self._num_samples = num_samples
         self._is_fitted = True
