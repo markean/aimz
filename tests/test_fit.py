@@ -16,12 +16,14 @@
 
 import warnings
 
+import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
 import pytest
 from jax import Array, random
-from numpyro import sample
-from numpyro.infer import MCMC, NUTS
+from numpyro import param, plate, sample
+from numpyro.infer import MCMC, NUTS, SVI, Trace_ELBO
+from numpyro.optim import Adam
 
 from aimz import FitWarning, ImpactModel
 from aimz.utils.data import ArrayDataset, ArrayLoader
@@ -173,3 +175,27 @@ def test_fit_array_matches_loader(synthetic_data: tuple[Array, Array]) -> None:
         im_array.predict_on_batch(X, rng_key=rng_key).posterior_predictive["y"],
         im_loader.predict_on_batch(X, rng_key=rng_key).posterior_predictive["y"],
     )
+
+
+def test_fit_draws_guide_on_data_in_order(synthetic_data: tuple[Array, Array]) -> None:
+    """The guide draws the posterior from the data in input order, not shuffled."""
+    X, y = synthetic_data
+
+    def kernel(X: Array, y: Array | None = None) -> None:
+        w = sample("w", dist.Normal().expand([X.shape[1]]).to_event(1))
+        with plate("obs", X.shape[0]):
+            z = sample("z", dist.Normal())
+            sample("y", dist.Normal(X @ w + z, 0.1), obs=y)
+
+    # Each row's latent comes from that row's data
+    def guide(X: Array, y: Array | None = None) -> None:
+        w_loc = param("w_loc", jnp.zeros(X.shape[1]))
+        sample("w", dist.Normal(w_loc, 0.01).to_event(1))
+        with plate("obs", X.shape[0]):
+            sample("z", dist.Normal(y - X @ w_loc, 0.01))
+
+    svi = SVI(kernel, guide, Adam(0.01), Trace_ELBO())
+    im = ImpactModel(kernel, rng_key=random.key(0), inference=svi)
+    im.fit(X, y, num_samples=20, progress=False)
+    w_loc = im.vi_result.params["w_loc"]
+    np.testing.assert_allclose(im.posterior["z"].mean(axis=0), y - X @ w_loc, atol=0.02)
