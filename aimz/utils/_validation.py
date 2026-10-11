@@ -339,7 +339,7 @@ def _validate_kernel_body(
     Raises:
         KernelValidationError: If a site name holds ``/``, the output site is missing,
             is not an observed sample site when ``with_output`` is set, or a kernel
-            parameter shares a site's name.
+            parameter shares the name of a site other than a plate or an observed site.
     """
     invalid_site = [site for site in model_trace if "/" in site]
     if invalid_site:
@@ -378,7 +378,11 @@ def _validate_kernel_body(
 
     params = list(signature(kernel).parameters)
     params.remove(param_output)
-    conflicts = set(params) & set(model_trace.keys())
+    conflicts = set(params) & {
+        k
+        for k, v in model_trace.items()
+        if v["type"] != "plate" and not v.get("is_observed")
+    }
     if conflicts:
         msg = (
             f"Kernel parameters conflict with model sites: "
