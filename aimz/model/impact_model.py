@@ -993,7 +993,8 @@ class ImpactModel(BaseModel):
                 Ignored for MCMC.
             return_datatree: Return an :external:class:`~xarray.DataTree`, or a
                 :class:`dict` if ``False``.
-            **kwargs: Additional arguments passed to the model. Only used for MCMC.
+            **kwargs: Arguments passed to the model under MCMC, and to the guide under
+                SVI.
 
         Returns:
             Posterior samples.
@@ -1051,7 +1052,7 @@ class ImpactModel(BaseModel):
                     samples=None,
                     params=self.vi_result.params,
                     intervention=None,
-                    model_kwargs=None,
+                    model_kwargs=kwargs,
                 ),
             )
 
@@ -1260,7 +1261,7 @@ class ImpactModel(BaseModel):
                 samples=None,
                 params=self.vi_result.params,
                 intervention=None,
-                model_kwargs=None,
+                model_kwargs=args_bound,
             )
             self._num_samples = num_samples
         elif isinstance(self.inference, MCMC):
@@ -1294,8 +1295,9 @@ class ImpactModel(BaseModel):
         """Fit the model with variational inference over minibatches.
 
         The data is iterated in minibatches for a number of epochs, then posterior
-        samples are drawn from the guide. Training continues from an existing SVI
-        state; create a new model to start over.
+        samples are drawn from the guide, called with the arguments of the last batch.
+        Training continues from an existing SVI state; create a new model to start
+        over.
 
         Args:
             X: Input array with observations on the leading axis, or a data loader
@@ -1475,7 +1477,7 @@ class ImpactModel(BaseModel):
             samples=None,
             params=cast("SVIRunResult", self.vi_result).params,
             intervention=None,
-            model_kwargs=None,
+            model_kwargs={**batch, **kwargs_extra},
         )
         self._num_samples = num_samples
         self._is_fitted = True
