@@ -63,20 +63,22 @@ def _substitute_latent(msg: Message, sample: dict[str, Array]) -> Array | None:
 
     Raises:
         ValueError: If the value has as many dimensions as the site but another shape,
-            as for a site with one value per observation and other observations.
+            as for a site with one value per observation and other observations,
+            unless the site is intervened on.
     """
     if msg["type"] == "deterministic" or msg.get("is_observed", False):
         return None
     value = sample.get(msg["name"])
-    if value is not None and msg["type"] == "sample":
+    if value is not None and msg["type"] == "sample" and "_intervener_id" not in msg:
         shape = msg["fn"].shape(msg["kwargs"]["sample_shape"])
         if jnp.ndim(value) == len(shape) and jnp.shape(value) != shape:
             err_msg = (
                 f"Each posterior draw of site {msg['name']!r} has shape "
-                f"{jnp.shape(value)}, but the site has shape {shape} for the rows "
-                "being evaluated. A site with one value per observation applies only "
-                "to the observations it was fitted on; to predict others, set a "
-                "posterior without it, so that it is drawn from the prior."
+                f"{jnp.shape(value)}, which does not fit the shape {shape} the site "
+                "has for the rows being evaluated, as when a site has one value per "
+                "observation and the input has other observations. To predict other "
+                "observations, set a posterior without the site, so that it is drawn "
+                "from the prior."
             )
             raise ValueError(err_msg)
 
