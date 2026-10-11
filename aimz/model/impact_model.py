@@ -459,16 +459,19 @@ class ImpactModel(BaseModel):
             if v.get("is_observed"):
                 self._observed_sites.add(k)
             # A site recorded by a scan, or drawn as one event over the rows, computes
-            # across observations.
+            # across observations. Each trace decides anew for the sites it records, so
+            # a trace over all the rows clears a one-element event that a one-row trace
+            # took for one over the rows.
             fn = v.get("fn")
             if v.get("_control_flow_done") or (
                 isinstance(fn, Distribution)
                 and not isinstance(fn, Independent)
-                and not fn.batch_shape
-                and rows != (1,)
+                and fn.batch_shape[:1] != rows
                 and fn.event_shape[:1] == rows
             ):
                 self._coupled_sites.add(k)
+            else:
+                self._coupled_sites.discard(k)
         deps = get_dependencies(self.kernel, model_kwargs=dict(args_bound))
         for k, v in cast("Mapping[str, Mapping]", deps["prior_dependencies"]).items():
             self._site_parents[k] = set(v) - {k}
@@ -2040,7 +2043,9 @@ class ImpactModel(BaseModel):
                 traced and the rest static.
 
         Returns:
-            Log-likelihood values. Posterior samples are included if available.
+            Log-likelihood values, one per draw and observation, or one per draw when
+            the output is drawn as one event over all the observations. Posterior
+            samples are included if available.
 
         Raises:
             NotFittedError: If the model is not fitted.
