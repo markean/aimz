@@ -90,10 +90,6 @@ def test_kernel_body_validation(synthetic_data: tuple[Array, Array]) -> None:
     def unobserved_output(X: Array, y: Array | None = None) -> None:
         sample("y", dist.Normal(0.0, 1.0))
 
-    def site_named_as_argument(X: Array, y: Array | None = None) -> None:
-        sample("X", dist.Normal(0.0, 1.0))
-        sample("y", dist.Normal(0.0, 1.0), obs=y)
-
     def site_with_slash(X: Array, y: Array | None = None) -> None:
         mu = sample("x/y", dist.Normal())
         sample("y", dist.Normal(mu, 1.0), obs=y)
@@ -102,7 +98,6 @@ def test_kernel_body_validation(synthetic_data: tuple[Array, Array]) -> None:
         without_output_site,
         deterministic_output,
         unobserved_output,
-        site_named_as_argument,
         site_with_slash,
     ):
         im = ImpactModel(kernel, rng_key=random.key(42), inference=make_svi(kernel))

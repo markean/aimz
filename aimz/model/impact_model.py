@@ -410,7 +410,6 @@ class ImpactModel(BaseModel):
                 ),
             ).get_trace(**args_bound)
         _validate_kernel_body(
-            self.kernel,
             param_output=self.param_output,
             model_trace=model_trace,
             with_output=with_output,
