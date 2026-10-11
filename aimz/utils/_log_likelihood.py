@@ -60,11 +60,27 @@ def _substitute_latent(msg: Message, sample: dict[str, Array]) -> Array | None:
 
     Deterministic sites are recomputed and observed sites keep their data, so neither
     takes a value from the posterior.
+
+    Raises:
+        ValueError: If the value has as many dimensions as the site but another shape,
+            as for a site with one value per observation and other observations.
     """
     if msg["type"] == "deterministic" or msg.get("is_observed", False):
         return None
+    value = sample.get(msg["name"])
+    if value is not None and msg["type"] == "sample":
+        shape = msg["fn"].shape(msg["kwargs"]["sample_shape"])
+        if jnp.ndim(value) == len(shape) and jnp.shape(value) != shape:
+            err_msg = (
+                f"Each posterior draw of site {msg['name']!r} has shape "
+                f"{jnp.shape(value)}, but the site has shape {shape} for the rows "
+                "being evaluated. A site with one value per observation applies only "
+                "to the observations it was fitted on; to predict others, set a "
+                "posterior without it, so that it is drawn from the prior."
+            )
+            raise ValueError(err_msg)
 
-    return sample.get(msg["name"])
+    return value
 
 
 def _log_likelihood(

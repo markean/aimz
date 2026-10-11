@@ -1686,7 +1686,8 @@ class ImpactModel(BaseModel):
             TypeError: If :attr:`~aimz.ImpactModel.param_input` or
                 :attr:`~aimz.ImpactModel.param_output` is passed as an argument.
             ValueError: If ``intervention`` names a site that is not a sample site of
-                the kernel.
+                the kernel, or a posterior site does not fit the input, as a site with
+                one value per observation does not fit other observations.
 
         Warns:
             OutputWarning: If an intervened site reaches the output only through sites
@@ -1800,8 +1801,10 @@ class ImpactModel(BaseModel):
                 ``shard_axis="draw"`` is used with a data loader ``X``.
             ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``, ``store`` is
                 not ``"persistent"`` or ``"memory"``, ``output_dir`` is passed with
-                ``store="memory"``, ``X`` is 0-D or empty, or ``intervention`` names
-                a site that is not a sample site of the kernel.
+                ``store="memory"``, ``X`` is 0-D or empty, ``intervention`` names a
+                site that is not a sample site of the kernel, or a posterior site does
+                not fit the input, as a site with one value per observation does not
+                fit other observations.
             NotImplementedError: If a return site's axis-1 size does not match the
                 input batch size (``shard_axis="obs"`` only).
 
@@ -2091,8 +2094,10 @@ class ImpactModel(BaseModel):
                 passed with a data loader ``X``.
             ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``, ``store`` is
                 not ``"persistent"`` or ``"memory"``, ``output_dir`` is passed with
-                ``store="memory"``, ``y`` is missing when ``X`` is array-like, or
-                ``y`` does not share ``X``'s leading-axis size.
+                ``store="memory"``, ``y`` is missing when ``X`` is array-like, ``y``
+                does not share ``X``'s leading-axis size, or a posterior site does not
+                fit the input, as a site with one value per observation does not fit
+                other observations.
             NotImplementedError: If a return site's axis-1 size does not match the
                 input batch size (``shard_axis="obs"`` only).
         """
