@@ -1474,11 +1474,11 @@ class ImpactModel(BaseModel):
         Warns:
             FitWarning: If the batches are smaller than the data and the kernel gives
                 the output site no scale for a batch, so that each batch is weighed as
-                the whole data. The check runs on the first ``batch_size``
-                observations of an array input or of an
+                the whole data, or has a latent site per observation or a site that
+                computes across observations, which the batches split. The checks run
+                on the first ``batch_size`` observations of an array input or of an
                 :class:`~aimz.utils.data.ArrayLoader`; another data loader has no size
-                to compare with. Nothing else about the kernel's support for
-                subsampling is checked.
+                to compare with.
         """
         _validate_aligned_inputs(X, y=y)
         if y is None and isinstance(X, ArrayLike):
@@ -1553,6 +1553,36 @@ class ImpactModel(BaseModel):
                     f"output site {self.param_output!r} no scale, so each batch is "
                     "weighed as the whole data. Scale it in the kernel, or fit with "
                     "`fit_on_batch`."
+                )
+                warn(msg, category=FitWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
+            # Batches split a latent site in the output's plate, whose guide parameters
+            # then miss the batch rows, and a site that computes across observations
+            self._build_kernel_spec(
+                signature(self.kernel)
+                .bind(**_to_jax({**batch, **kwargs_extra}))
+                .arguments,
+                with_output=True,
+            )
+            plates = self._dims.get(self.param_output, ())[:1]
+            split = sorted(
+                {
+                    *self._coupled_sites,
+                    *(
+                        k
+                        for k in cast("KernelSpec", self._kernel_spec).sample_sites
+                        if k not in self._observed_sites
+                        and set(plates) & set(self._dims.get(k, ()))
+                    ),
+                },
+            )
+            if split:
+                msg = (
+                    f"`fit` trains on batches of {dataloader.batch_size} of "
+                    f"{len(dataloader.dataset)} observations, but site(s) "
+                    f"{', '.join(map(repr, split))} have a latent value per "
+                    "observation or compute across observations, which the batches "
+                    "split. Fit with `fit_on_batch`, or with a `batch_size` that "
+                    "covers the data."
                 )
                 warn(msg, category=FitWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
 
