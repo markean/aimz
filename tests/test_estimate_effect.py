@@ -143,7 +143,7 @@ def test_estimate_effect_lazy_args_share_rng_key(
     assert effect.posterior_predictive["y"].equals(expected)
 
     # A scenario that reruns under `draw` takes the other along, keeping them paired,
-    # whichever of the two it is
+    # whichever of the two it is and whether the key is shared or given to both
     def kernel(X: Array, y: Array | None = None) -> None:
         s = sample("s", dist.Normal())
         deterministic("s2", 2 * s)
@@ -155,7 +155,11 @@ def test_estimate_effect_lazy_args_share_rng_key(
     im.set_posterior_sample({"s": jnp.linspace(-1.0, 1.0, 5)})
     args = {"X": X, "return_sites": ["s2", "mu", "y"], "progress": False}
     per_row = {**args, "intervention": {"s": jnp.zeros(len(X))}}
-    for args_baseline, args_intervention in ((args, per_row), (per_row, args)):
+    key = {"rng_key": random.key(1)}
+    for args_baseline, args_intervention in (
+        (args, per_row),
+        ({**per_row, **key}, {**args, **key}),
+    ):
         with (
             pytest.warns(PerformanceWarning, match="'s2' have no observation axis"),
             pytest.warns(OutputWarning, match="different dimension sizes"),
