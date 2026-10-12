@@ -64,6 +64,7 @@ The two most common are:
   The number of sites it creates typically grows with the sequence length, making the trace shape dynamic for the same reason.
 
 For **local latent variables**, :meth:`~aimz.ImpactModel.predict` and :meth:`~aimz.ImpactModel.log_likelihood` detect the incompatible posterior shape, warn, and automatically rerun under draw-parallel sharding (``shard_axis="draw"``), which never splits the observation axis.
+:meth:`~aimz.ImpactModel.fit` with a ``batch_size`` smaller than the input warns with a :class:`~aimz.FitWarning`, since its batches split such a site.
 :meth:`~aimz.ImpactModel.sample_prior_predictive` has no posterior to replicate and needs no rerun: under ``shard_axis="obs"`` it draws local latents within each batch and shares only the global latents across batches.
 See :ref:`user-guide-sharding` for how the two sharding strategies differ, when to choose each, and a worked comparison of a compatible kernel and one that triggers the rerun.
 Draw-parallel sharding does not lift the static-shape requirement, so :external:func:`~numpyro.contrib.control_flow.scan`-based models remain unsupported.
@@ -108,7 +109,7 @@ aimz treats the leading axis as the observation axis and assumes observations ar
 The streaming methods (:meth:`~aimz.ImpactModel.predict`, :meth:`~aimz.ImpactModel.sample_posterior_predictive`, :meth:`~aimz.ImpactModel.sample_prior_predictive`, and :meth:`~aimz.ImpactModel.log_likelihood`) process the input in batches and, under the default ``shard_axis="obs"``, split each batch across devices.
 A kernel that computes across observations, for example through a cumulative sum, a moving average, a value from a previous row, or a statistic such as the mean over all rows, then sees only part of the rows or sees them out of order.
 This happens without an error or a warning, unless the kernel's trace shows the dependence: a site recorded by :external:func:`~numpyro.contrib.control_flow.scan`, or a site drawn as one event over all the rows, such as a :external:class:`~numpyro.distributions.continuous.MultivariateNormal` over the observations.
-For such a kernel and an array input, the streaming methods warn with a :class:`~aimz.PerformanceWarning` and rerun under ``shard_axis="draw"``, which keeps the rows whole and in order, while :meth:`~aimz.ImpactModel.fit` with a ``batch_size`` smaller than the input, and a data loader, still split them.
+For such a kernel and an array input, the streaming methods warn with a :class:`~aimz.PerformanceWarning` and rerun under ``shard_axis="draw"``, which keeps the rows whole and in order, while a data loader still splits them, and so does :meth:`~aimz.ImpactModel.fit` with a ``batch_size`` smaller than the input, which warns with a :class:`~aimz.FitWarning`.
 Whether a split happens depends on the input size, ``batch_size``, and the number of devices, so such a kernel can give correct results on a small input on one device and wrong results on a larger input or on several devices.
 
 There are two ways to make such a kernel safe:

@@ -65,8 +65,8 @@ def test_fit_nan_warning(synthetic_data: tuple[Array, Array]) -> None:
         im.fit_on_batch(X, y, progress=False)
 
 
-def test_fit_warns_on_unscaled_minibatches(synthetic_data: tuple[Array, Array]) -> None:
-    """Batches smaller than the data warn unless the kernel scales the output site."""
+def test_fit_minibatch_warnings(synthetic_data: tuple[Array, Array]) -> None:
+    """Batches warn for an unscaled output site and for a latent site per row."""
     X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), inference=make_svi(lm))
     msg = "trains on batches of 20 of 100 observations, but the kernel gives the"
@@ -77,6 +77,16 @@ def test_fit_warns_on_unscaled_minibatches(synthetic_data: tuple[Array, Array]) 
     loader = ArrayLoader(ArrayDataset(X=X, y=y), rng_key=random.key(0), batch_size=20)
     with pytest.warns(FitWarning, match=msg):
         im.fit(loader, epochs=1, progress=False)
+
+    # A scaled kernel with a latent site per row warns, since the batches split it.
+    def per_row(X: Array, y: Array | None = None) -> None:
+        with plate("data", size=100, subsample_size=X.shape[0]):
+            z = sample("z", dist.Normal())
+            sample("y", dist.Normal(X[:, 0] + z, 1.0), obs=y)
+
+    im_rows = ImpactModel(per_row, rng_key=random.key(42), inference=make_svi(per_row))
+    with pytest.warns(FitWarning, match="'z' have a latent value per observation"):
+        im_rows.fit(X, y, batch_size=20, epochs=1, progress=False)
 
     # The whole data as one batch, and a kernel that scales the batch, pass silently.
     im_scaled = ImpactModel(
