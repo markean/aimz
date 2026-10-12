@@ -74,7 +74,7 @@ from aimz.utils._format import (
     _build_datatree,
     _dict_to_datatree,
 )
-from aimz.utils._kwargs import _combine, _group_kwargs, _partition
+from aimz.utils._kwargs import _combine, _group_kwargs, _partition, _to_jax
 from aimz.utils._validation import (
     _check_is_fitted,
     _validate_aligned_inputs,
@@ -921,16 +921,11 @@ class ImpactModel(BaseModel):
         # Trace a one-row probe of the per-observation arguments, on JAX arrays as the
         # sampling step runs the kernel
         if not (self._kernel_spec and self._kernel_spec.traced):
-            leaves, static = _partition(
-                {
-                    k: (cast("Any", v)[:1] if k in obs_names else v)
-                    for k, v in args_bound.items()
-                },
-            )
-            self._build_kernel_spec(
-                _combine(map(jnp.asarray, leaves), static),
-                with_output=False,
-            )
+            probe = {
+                k: (jnp.asarray(cast("Any", v)[:1]) if k in obs_names else v)
+                for k, v in args_bound.items()
+            }
+            self._build_kernel_spec(_to_jax(probe), with_output=False)
         _validate_intervention(intervention, kernel_spec=self._kernel_spec)
 
         return_sites = self._coerce_return_sites(return_sites)
@@ -1173,9 +1168,7 @@ class ImpactModel(BaseModel):
                 :attr:`~aimz.ImpactModel.param_output` is passed as an argument.
         """
         _group_kwargs(kwargs, forbid=(self.param_input, self.param_output))
-        leaves, static = _partition(
-            {self.param_input: X, self.param_output: y, **kwargs},
-        )
+        batch = {self.param_input: X, self.param_output: y, **kwargs}
 
         svi = cast("SVI", self.inference)
         # The setup runs the kernel outside the compiled step, on JAX arrays as the step
@@ -1184,15 +1177,13 @@ class ImpactModel(BaseModel):
         # trace does not depend on it
         if not (self._kernel_spec and self._kernel_spec.output_observed):
             self._build_kernel_spec(
-                signature(self.kernel)
-                .bind(**_combine(map(jnp.asarray, leaves), static))
-                .arguments,
+                signature(self.kernel).bind(**_to_jax(batch)).arguments,
                 with_output=True,
             )
         if self._vi_state is None or svi.constrain_fn is None:
             if rng_key is None:
                 self._rng_key, rng_key = random.split(self._rng_key)
-            state = svi.init(rng_key, **_combine(map(jnp.asarray, leaves), static))
+            state = svi.init(rng_key, **_to_jax(batch))
             self._vi_state = state if self._vi_state is None else self._vi_state
         # Array leaves are traced; every other value is static
         if self._fn_vi_update is None:
@@ -1206,6 +1197,7 @@ class ImpactModel(BaseModel):
                 return svi.update(state, **_combine(leaves, static))
 
             self._fn_vi_update = jit(update, static_argnums=2)
+        leaves, static = _partition(batch)
         self._vi_state, loss = self._fn_vi_update(self._vi_state, leaves, static)
 
         return self._vi_state, loss
@@ -1422,8 +1414,6 @@ class ImpactModel(BaseModel):
                 k: v[: dataloader.batch_size]
                 for k, v in dataloader.dataset.arrays.items()
             }
-            # On JAX arrays, as the training step runs the kernel
-            leaves, static = _partition({**batch, **kwargs_extra})
             # The first batch already rejected an output site that is not observed
             with validation_enabled(is_validate=False):
                 site = (
@@ -1433,7 +1423,7 @@ class ImpactModel(BaseModel):
                             substitute_fn=init_to_sample,
                         ),
                     )
-                    .get_trace(**_combine(map(jnp.asarray, leaves), static))
+                    .get_trace(**_to_jax({**batch, **kwargs_extra}))
                     .get(self.param_output, {})
                 )
             if site.get("is_observed") and (

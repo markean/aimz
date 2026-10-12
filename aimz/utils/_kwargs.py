@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
+import jax.numpy as jnp
 import numpy as np
 from jax import Array, tree
 
@@ -114,6 +115,22 @@ def _combine(leaves: Iterable[object], static: tuple) -> dict:
         )
         for name, treedef, template in static
     }
+
+
+def _to_jax(kwargs: Mapping[str, object]) -> dict:
+    """Return the call constants with their arrays as JAX arrays, scalars as given.
+
+    A kernel run outside the compiled step then sees the arrays as the step does. A
+    scalar stays as given: a site parameter computed from a JAX scalar, such as a
+    likelihood scale, becomes a traced value in the dependency trace, which breaks a
+    later trace of the kernel.
+    """
+    leaves, static = _partition(kwargs)
+
+    return _combine(
+        (jnp.asarray(leaf) if np.ndim(leaf) else leaf for leaf in leaves),
+        static,
+    )
 
 
 def _split_intervention(
