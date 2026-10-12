@@ -38,6 +38,7 @@ from jax import (
     Array,
     default_backend,
     device_get,
+    eval_shape,
     jit,
     local_device_count,
     local_devices,
@@ -48,7 +49,7 @@ from jax.sharding import AxisType, NamedSharding, PartitionSpec
 from jax.typing import ArrayLike
 from numpyro import validation_enabled
 from numpyro.distributions import Distribution, Independent
-from numpyro.handlers import seed, substitute, trace
+from numpyro.handlers import do, seed, substitute, trace
 from numpyro.infer import MCMC, SVI, init_to_sample
 from numpyro.infer.inspect import get_dependencies
 from numpyro.infer.svi import SVIRunResult, SVIState
@@ -581,6 +582,8 @@ class ImpactModel(BaseModel):
         nbytes: tuple[int, int],
         posterior: dict[str, Array] | None,
         return_sites: tuple[str, ...] = (),
+        kwargs: Mapping[str, object] | None = None,
+        intervention: dict | None = None,
     ) -> tuple[Literal["obs", "draw"], int | None]:
         """Choose the sharding strategy and the batch size of a streamed call.
 
@@ -598,8 +601,10 @@ class ImpactModel(BaseModel):
             num_samples: Number of draws the call produces.
             nbytes: Output bytes per draw, as :meth:`_output_nbytes` returns them.
             posterior: The posterior samples the call conditions on, if any.
-            return_sites: The sites the call returns; one that the trace recorded
-                without the observation axis makes the call run draw-parallel.
+            return_sites: The sites the call returns; one without the observation axis
+                for the call's arguments makes it run draw-parallel.
+            kwargs: The call's other kernel arguments.
+            intervention: The call's intervention.
 
         Returns:
             The sharding strategy and the batch size, ``None`` for a data loader.
@@ -645,20 +650,39 @@ class ImpactModel(BaseModel):
                     skip_file_prefixes=_SKIP_FILE_PREFIXES,
                 )
                 shard_axis, batch_size = "draw", None
-        # A site the trace recorded without the observation axis, such as a global
-        # deterministic site, has no rows to split
-        whole = sorted(s for s in return_sites if self._site_sizes.get(s, (1, 0))[1])
-        if shard_axis == "obs" and whole:
-            msg = (
-                f"Return site(s) {', '.join(map(repr, whole))} have no observation "
-                "axis, so `shard_axis='obs'` cannot split them; rerunning with "
-                "`shard_axis='draw'`. Pass `shard_axis='draw'`, or leave the site(s) "
-                "out of `return_sites`, to silence this warning."
-            )
-            warn(
-                msg, category=PerformanceWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES
-            )
-            shard_axis, batch_size = "draw", None
+        if shard_axis == "obs" and return_sites:
+            # A site without the observation axis, such as a global deterministic site,
+            # has no rows to split. The shapes come from an abstract trace of this call,
+            # since an earlier trace may have had other arguments.
+            leaves, static = _partition({self.param_input: X, **(kwargs or {})})
+            model = do(self.kernel, data=intervention) if intervention else self.kernel
+
+            def values(*leaves: object) -> dict[str, object]:
+                model_trace = trace(
+                    substitute(
+                        seed(model, rng_seed=self.rng_key),
+                        substitute_fn=init_to_sample,
+                    ),
+                ).get_trace(**_combine(leaves, static))
+
+                return {
+                    k: v["value"] for k, v in model_trace.items() if k in return_sites
+                }
+
+            shapes = eval_shape(values, *leaves)
+            if whole := sorted(k for k, v in shapes.items() if v.shape[:1] != (n_obs,)):
+                msg = (
+                    f"Return site(s) {', '.join(map(repr, whole))} have no observation "
+                    "axis, so `shard_axis='obs'` cannot split them; rerunning with "
+                    "`shard_axis='draw'`. Pass `shard_axis='draw'`, or leave the "
+                    "site(s) out of `return_sites`, to silence this warning."
+                )
+                warn(
+                    msg,
+                    category=PerformanceWarning,
+                    skip_file_prefixes=_SKIP_FILE_PREFIXES,
+                )
+                shard_axis, batch_size = "draw", None
         if (
             shard_axis == "obs"
             and batch_size is not None
@@ -894,8 +918,12 @@ class ImpactModel(BaseModel):
                 ``store="memory"``, ``X`` is 0-D or empty, or ``intervention`` names
                 a site that is not a sample site of the kernel.
             NotImplementedError: If a return site's axis-1 size does not match the
-                input batch size (``shard_axis="obs"`` with a data loader only; an
-                array input reruns under ``shard_axis="draw"``).
+                input batch size (``shard_axis="obs"`` with a data loader only).
+
+        Warns:
+            PerformanceWarning: If ``shard_axis="obs"`` cannot split an array input,
+                as for a return site without an observation axis, so the call reruns
+                under ``shard_axis="draw"``.
 
         See Also:
             :meth:`~aimz.ImpactModel.sample_prior_predictive_on_batch` for a
@@ -955,6 +983,8 @@ class ImpactModel(BaseModel):
             nbytes=self._output_nbytes(return_sites),
             posterior=None,
             return_sites=return_sites,
+            kwargs=kwargs,
+            intervention=intervention,
         )
 
         if rng_key is None:
@@ -1832,13 +1862,16 @@ class ImpactModel(BaseModel):
                 is not intervened on does not fit the rows being evaluated, as a site
                 with one value per observation does not fit other observations.
             NotImplementedError: If a return site's axis-1 size does not match the
-                input batch size (``shard_axis="obs"`` with a data loader, or before
-                the kernel is traced).
+                input batch size (``shard_axis="obs"`` with a data loader only).
 
         Warns:
             OutputWarning: If an intervened site reaches the output only through sites
                 whose values are taken from the posterior or intervened on, so that
                 the draws do not respond to it.
+            PerformanceWarning: If ``shard_axis="obs"`` cannot split an array input,
+                as for a return site without an observation axis or a latent site with
+                one value per observation, so the call reruns under
+                ``shard_axis="draw"``.
         """
         _check_is_fitted(self)
         _validate_intervention(intervention, kernel_spec=self._kernel_spec)
@@ -1852,9 +1885,6 @@ class ImpactModel(BaseModel):
         _validate_batch_size(batch_size, X=X)
         _validate_store(store, output_dir=output_dir)
         _validate_aligned_inputs(X, y=None)
-        # Without a posterior there is nothing to shard by draw
-        if not self.posterior:
-            shard_axis = "obs"
 
         if isinstance(X, ArrayLike):
             _ = self._bind_kernel_args(X, kwargs=kwargs)
@@ -1868,6 +1898,8 @@ class ImpactModel(BaseModel):
             nbytes=self._output_nbytes(return_sites),
             posterior=self.posterior,
             return_sites=return_sites,
+            kwargs=kwargs,
+            intervention=intervention,
         )
 
         if rng_key is None:
