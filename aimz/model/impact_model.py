@@ -695,7 +695,7 @@ class ImpactModel(BaseModel):
                 }
 
             rows = {
-                k: eval_shape(jnp.asarray, v)
+                k: ShapeDtypeStruct(np.shape(v), jnp.asarray(cast("Any", v)[:1]).dtype)
                 for k, v in {self.param_input: X, **kwargs_rows, **fields}.items()
             }
 
@@ -2090,15 +2090,14 @@ class ImpactModel(BaseModel):
         overrides = {"return_datatree": True} if on_batch else {}
 
         # Lazily generated scenarios share one sampling key
-        shared = (
+        if (
             output_baseline is None
             and output_intervention is None
             and args_baseline is not None
             and args_intervention is not None
             and args_baseline.get("rng_key") is None
             and args_intervention.get("rng_key") is None
-        )
-        if shared:
+        ):
             self._rng_key, rng_key = random.split(self._rng_key)
             args_baseline = {**args_baseline, "rng_key": rng_key}
             args_intervention = {**args_intervention, "rng_key": rng_key}
@@ -2116,24 +2115,30 @@ class ImpactModel(BaseModel):
 
         group = _validate_group(dt_baseline, dt_intervention=dt_intervention)
         # A scenario reruns under `shard_axis="draw"` when its own sites cannot be split
-        # by observation. The other shared-key scenario follows it with an array input,
-        # so that their draws stay paired, and its first output is removed.
+        # by observation. A scenario drawn here with the other's key and an array input
+        # follows it, so that their draws stay paired, and its first output is removed.
         axes = (
             dt_baseline[group].attrs.get("shard_axis"),
             dt_intervention[group].attrs.get("shard_axis"),
         )
+        same_key = np.array_equal(
+            np.asarray(dt_baseline[group].attrs.get("rng_key")),
+            np.asarray(dt_intervention[group].attrs.get("rng_key")),
+        )
         rerun = {"shard_axis": "draw", "batch_size": None}
         stale = None
         if (
-            shared
+            same_key
             and axes == ("obs", "draw")
+            and output_baseline is None
             and isinstance(cast("dict", args_baseline)["X"], ArrayLike)
         ):
             stale = dt_baseline
             dt_baseline = _predict(**{**cast("dict", args_baseline), **rerun})
         elif (
-            shared
+            same_key
             and axes == ("draw", "obs")
+            and output_intervention is None
             and isinstance(cast("dict", args_intervention)["X"], ArrayLike)
         ):
             stale = dt_intervention
