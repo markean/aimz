@@ -918,13 +918,19 @@ class ImpactModel(BaseModel):
             )
             obs_names = {self.param_input, *batch}
 
-        # Trace a one-row probe of the per-observation arguments
+        # Trace a one-row probe of the per-observation arguments, on JAX arrays as the
+        # sampling step runs the kernel
         if not (self._kernel_spec and self._kernel_spec.traced):
-            probe = {
-                k: (jnp.asarray(cast("Any", v)[:1]) if k in obs_names else v)
-                for k, v in args_bound.items()
-            }
-            self._build_kernel_spec(probe, with_output=False)
+            leaves, static = _partition(
+                {
+                    k: (cast("Any", v)[:1] if k in obs_names else v)
+                    for k, v in args_bound.items()
+                },
+            )
+            self._build_kernel_spec(
+                _combine(map(jnp.asarray, leaves), static),
+                with_output=False,
+            )
         _validate_intervention(intervention, kernel_spec=self._kernel_spec)
 
         return_sites = self._coerce_return_sites(return_sites)
@@ -1416,6 +1422,8 @@ class ImpactModel(BaseModel):
                 k: v[: dataloader.batch_size]
                 for k, v in dataloader.dataset.arrays.items()
             }
+            # On JAX arrays, as the training step runs the kernel
+            leaves, static = _partition({**batch, **kwargs_extra})
             # The first batch already rejected an output site that is not observed
             with validation_enabled(is_validate=False):
                 site = (
@@ -1425,7 +1433,7 @@ class ImpactModel(BaseModel):
                             substitute_fn=init_to_sample,
                         ),
                     )
-                    .get_trace(**batch, **kwargs_extra)
+                    .get_trace(**_combine(map(jnp.asarray, leaves), static))
                     .get(self.param_output, {})
                 )
             if site.get("is_observed") and (
@@ -1574,9 +1582,8 @@ class ImpactModel(BaseModel):
 
         Args:
             posterior_sample: Posterior samples by site name, with the draws along the
-                leading axis of each array. Include only latent sample sites: the
-                output site is removed with a warning, and a deterministic site would
-                override the values :meth:`~aimz.ImpactModel.log_likelihood` recomputes.
+                leading axis of each array. A deterministic site is kept, but the kernel
+                computes its values instead of taking them from the posterior.
             num_chains: Number of chains the draws are stacked from, chain by chain.
                 Output trees then keep the chains along their ``chain`` dimension.
 

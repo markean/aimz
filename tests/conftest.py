@@ -54,7 +54,7 @@ def lm(X: Array, y: Array | None = None) -> None:
     n_features = X.shape[1]
     w = sample("w", dist.Normal(jnp.zeros(n_features), jnp.ones(n_features)))
     b = sample("b", dist.Normal(0, 1))
-    mu = jnp.dot(X, w) + b
+    mu = X.dot(w) + b
     sigma = sample("sigma", dist.Exponential(1.0))
     sample("y", dist.Normal(mu, sigma), obs=y)
 
@@ -87,7 +87,7 @@ def lm_subsample(X: Array, y: Array | None = None) -> None:
     b = sample("b", dist.Normal(0, 1))
     sigma = sample("sigma", dist.Exponential(1.0))
     with plate("data", size=100, subsample_size=X.shape[0]):
-        mu = jnp.dot(X, w) + b
+        mu = X.dot(w) + b
         sample("y", dist.Normal(mu, sigma), obs=y)
 
 
