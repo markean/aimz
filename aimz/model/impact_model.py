@@ -695,7 +695,10 @@ class ImpactModel(BaseModel):
                 }
 
             rows = {
-                k: ShapeDtypeStruct(np.shape(v), jnp.asarray(cast("Any", v)[:1]).dtype)
+                k: ShapeDtypeStruct(
+                    np.shape(v),
+                    jnp.result_type(v if hasattr(v, "dtype") else np.asarray(v)),
+                )
                 for k, v in {self.param_input: X, **kwargs_rows, **fields}.items()
             }
 
