@@ -195,7 +195,7 @@ def _setup_inputs(
             ArrayDataset(**kwargs_array),
             rng_key=rng_key,
             batch_size=batch_size,
-            shuffle=shuffle,
+            shuffle=shuffle and batch_size < len(X),
         )
     elif isinstance(X, Iterable) and not isinstance(X, (str, bytes, Mapping)):
         if y is not None:

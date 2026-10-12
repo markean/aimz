@@ -104,11 +104,11 @@ Can my kernel compute across observations?
 ------------------------------------------
 Only when the observation axis stays whole and in order.
 aimz treats the leading axis as the observation axis and assumes observations are independent given the model parameters, so it may split and reorder that axis to scale.
-:meth:`~aimz.ImpactModel.fit` shuffles the rows by default and trains on batches of them.
+:meth:`~aimz.ImpactModel.fit` trains on batches of the rows and, when ``batch_size`` splits them, shuffles them by default.
 The streaming methods (:meth:`~aimz.ImpactModel.predict`, :meth:`~aimz.ImpactModel.sample_posterior_predictive`, :meth:`~aimz.ImpactModel.sample_prior_predictive`, and :meth:`~aimz.ImpactModel.log_likelihood`) process the input in batches and, under the default ``shard_axis="obs"``, split each batch across devices.
 A kernel that computes across observations, for example through a cumulative sum, a moving average, a value from a previous row, or a statistic such as the mean over all rows, then sees only part of the rows or sees them out of order.
 This happens without an error or a warning, unless the kernel's trace shows the dependence: a site recorded by :external:func:`~numpyro.contrib.control_flow.scan`, or a site drawn as one event over all the rows, such as a :external:class:`~numpyro.distributions.continuous.MultivariateNormal` over the observations.
-For such a kernel and an array input, the streaming methods warn with a :class:`~aimz.PerformanceWarning` and rerun under ``shard_axis="draw"``, which keeps the rows whole and in order, while :meth:`~aimz.ImpactModel.fit` and a data loader still split them.
+For such a kernel and an array input, the streaming methods warn with a :class:`~aimz.PerformanceWarning` and rerun under ``shard_axis="draw"``, which keeps the rows whole and in order, while :meth:`~aimz.ImpactModel.fit` with a ``batch_size`` smaller than the input, and a data loader, still split them.
 Whether a split happens depends on the input size, ``batch_size``, and the number of devices, so such a kernel can give correct results on a small input on one device and wrong results on a larger input or on several devices.
 
 There are two ways to make such a kernel safe:
@@ -120,7 +120,7 @@ There are two ways to make such a kernel safe:
 
 * **Keep the observation axis whole and in order**
 
-  Train with :meth:`~aimz.ImpactModel.fit_on_batch`, or with :meth:`~aimz.ImpactModel.fit` using ``shuffle=False`` and a ``batch_size`` that covers the whole input.
+  Train with :meth:`~aimz.ImpactModel.fit_on_batch`, or with :meth:`~aimz.ImpactModel.fit` and a ``batch_size`` that covers the whole input, as the default does.
   For the other methods, use the ``*_on_batch`` variants or pass ``shard_axis="draw"`` to the streaming methods, which then split the draws instead of the observations and require an array input.
 
 

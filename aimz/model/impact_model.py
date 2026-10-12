@@ -1454,8 +1454,8 @@ class ImpactModel(BaseModel):
             batch_size: Observations per optimization step; the whole data if ``None``.
                 Ignored for a data loader, which batches itself.
             epochs: The number of passes over the data.
-            shuffle: Whether to shuffle the data at each epoch. Ignored for a data
-                loader.
+            shuffle: Whether to shuffle the data at each epoch when it is split into
+                batches. Ignored for a data loader.
             **kwargs: Additional arguments passed to the model. Arrays aligned with
                 ``X`` are batched with it; other values are passed whole, arrays
                 traced and the rest static.
