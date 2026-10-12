@@ -346,9 +346,10 @@ class _OutputStreamer:
             rng_key, rng_subkey = random.split(rng_key)
             rng_keys = random.split(rng_subkey, num=req.num_samples)
 
-            # The probe runs the kernel on JAX arrays, keeping the placement of the
-            # constants as passed
+            # The probe runs the kernel on JAX arrays, intervention values included,
+            # keeping the placement of the constants as passed
             kwargs_probe = _to_jax(kwargs_extra)
+            intervention_probe = _to_jax(intervention)
 
             def probe(batch: Mapping[str, object]) -> dict[str, Array]:
                 model_kwargs, fields = _split_intervention_fields(batch)
@@ -358,7 +359,7 @@ class _OutputStreamer:
                     return_sites=None,
                     samples=None,
                     params=params,
-                    intervention={**intervention, **fields},
+                    intervention={**intervention_probe, **fields},
                     model_kwargs={**model_kwargs, **kwargs_probe},
                 )
 
