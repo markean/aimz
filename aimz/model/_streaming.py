@@ -33,10 +33,10 @@ from tqdm.auto import tqdm
 
 from aimz.sampling._forward import _sample_forward
 from aimz.utils._kwargs import (
-    _combine,
     _partition,
     _split_intervention,
     _split_intervention_fields,
+    _to_jax,
 )
 from aimz.utils._output import (
     _create_slice_strategy,
@@ -346,9 +346,9 @@ class _OutputStreamer:
             rng_key, rng_subkey = random.split(rng_key)
             rng_keys = random.split(rng_subkey, num=req.num_samples)
 
-            # The probe runs the kernel on JAX arrays, with the constants placed as the
-            # sampling step gets them
-            kwargs_probe = _combine(kwargs_const, kwargs_static)
+            # The probe runs the kernel on JAX arrays, keeping the placement of the
+            # constants as passed
+            kwargs_probe = _to_jax(kwargs_extra)
 
             def probe(batch: Mapping[str, object]) -> dict[str, Array]:
                 model_kwargs, fields = _split_intervention_fields(batch)
