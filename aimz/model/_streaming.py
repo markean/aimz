@@ -26,6 +26,7 @@ from dataclasses import dataclass, field, replace
 from itertools import chain
 from typing import TYPE_CHECKING, Literal, NamedTuple, cast
 
+import jax.numpy as jnp
 from jax import Array, device_get, device_put, eval_shape, random, tree
 from jax.typing import ArrayLike
 from tqdm.auto import tqdm
@@ -356,7 +357,7 @@ class _OutputStreamer:
                     model_kwargs={**model_kwargs, **kwargs_extra},
                 )
 
-            samples = probe({name: arr[:1] for name, arr in first.items()})
+            samples = probe({name: jnp.asarray(arr[:1]) for name, arr in first.items()})
             # A site whose shape follows the row count is per observation, so each
             # batch draws it
             shapes = eval_shape(

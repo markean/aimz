@@ -921,7 +921,7 @@ class ImpactModel(BaseModel):
         # Trace a one-row probe of the per-observation arguments
         if not (self._kernel_spec and self._kernel_spec.traced):
             probe = {
-                k: (cast("Any", v)[:1] if k in obs_names else v)
+                k: (jnp.asarray(cast("Any", v)[:1]) if k in obs_names else v)
                 for k, v in args_bound.items()
             }
             self._build_kernel_spec(probe, with_output=False)
@@ -1167,20 +1167,26 @@ class ImpactModel(BaseModel):
                 :attr:`~aimz.ImpactModel.param_output` is passed as an argument.
         """
         _group_kwargs(kwargs, forbid=(self.param_input, self.param_output))
-        batch = {self.param_input: X, self.param_output: y, **kwargs}
+        leaves, static = _partition(
+            {self.param_input: X, self.param_output: y, **kwargs},
+        )
 
         svi = cast("SVI", self.inference)
-        # A result set through `vi_result` may come with an SVI object that needs no
-        # initialization, so the trace does not depend on it
+        # The setup runs the kernel outside the compiled step, on JAX arrays as the step
+        # sees them, since `fit` keeps its data in NumPy. A result set through
+        # `vi_result` may come with an SVI object that needs no initialization, so the
+        # trace does not depend on it
         if not (self._kernel_spec and self._kernel_spec.output_observed):
             self._build_kernel_spec(
-                signature(self.kernel).bind(**batch).arguments,
+                signature(self.kernel)
+                .bind(**_combine(map(jnp.asarray, leaves), static))
+                .arguments,
                 with_output=True,
             )
         if self._vi_state is None or svi.constrain_fn is None:
             if rng_key is None:
                 self._rng_key, rng_key = random.split(self._rng_key)
-            state = svi.init(rng_key, **batch)
+            state = svi.init(rng_key, **_combine(map(jnp.asarray, leaves), static))
             self._vi_state = state if self._vi_state is None else self._vi_state
         # Array leaves are traced; every other value is static
         if self._fn_vi_update is None:
@@ -1194,7 +1200,6 @@ class ImpactModel(BaseModel):
                 return svi.update(state, **_combine(leaves, static))
 
             self._fn_vi_update = jit(update, static_argnums=2)
-        leaves, static = _partition(batch)
         self._vi_state, loss = self._fn_vi_update(self._vi_state, leaves, static)
 
         return self._vi_state, loss
