@@ -47,12 +47,12 @@ def _iter_batches(
         start += size
 
 
-def test_predict_rejects_unsupported_size(
+def test_predict_site_without_observation_axis(
     synthetic_data: tuple[Array, Array],
     im_lm_svi_fitted: ImpactModel,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A site without an observation axis, like `sigma`, cannot stream under `obs`."""
+    """A site without an observation axis reruns under `draw`; a loader raises."""
     X, _ = synthetic_data
     # A mesh-less streamer forces the single-device path
     monkeypatch.setattr(
@@ -69,11 +69,18 @@ def test_predict_rejects_unsupported_size(
             ),
         ),
     )
-    with pytest.raises(NotImplementedError, match="match the input batch size"):
-        im_lm_svi_fitted.predict(
+    with pytest.warns(PerformanceWarning, match="'sigma' have no observation axis"):
+        dt = im_lm_svi_fitted.predict(
             X=X,
             return_sites="sigma",
             batch_size=3,
+            progress=False,
+        )
+    assert dt.posterior_predictive["sigma"].dims == ("chain", "draw")
+    with pytest.raises(NotImplementedError, match="match the input batch size"):
+        im_lm_svi_fitted.predict(
+            X=_iter_batches(X, [3, len(X) - 3]),
+            return_sites="sigma",
             progress=False,
         )
 

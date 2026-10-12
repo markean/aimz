@@ -50,6 +50,8 @@ Rather than failing, :meth:`~aimz.ImpactModel.predict` and :meth:`~aimz.ImpactMo
 The rerun chooses its own draw chunk size, since a ``batch_size`` given for ``shard_axis="obs"`` counts observations, not draws.
 Passing ``shard_axis="draw"`` explicitly skips the warning.
 The streaming methods, :meth:`~aimz.ImpactModel.sample_prior_predictive` included, rerun the same way for a kernel that computes across observations at a site recorded by :external:func:`~numpyro.contrib.control_flow.scan` or drawn as one event over all the rows (see :ref:`faq-cross-observation`).
+:meth:`~aimz.ImpactModel.predict` and :meth:`~aimz.ImpactModel.sample_prior_predictive` also rerun when a return site has no observation axis, such as a global deterministic site that a reparameterization creates, since such a site cannot be split with the rows.
+A data loader cannot rerun, so these calls raise for it instead.
 See :ref:`faq-model-compatibility` for the model patterns that trigger a rerun and those that stay unsupported.
 The kernels below contrast a compatible model with one that triggers the rerun; a runnable version is in :doc:`streaming_and_on_batch`.
 
