@@ -78,6 +78,7 @@ per-file-ignores = { "aimz/model/_core.py" = [
     "ANN001", # missing-type-function-argument
     "ANN003", # missing-type-kwargs
 ], "aimz/model/impact_model.py" = [
+    "BLE001",  # blind-except
     "C901",    # complex-structure
     "PLR0912", # too-many-branches
     "PLR0915", # too-many-statements

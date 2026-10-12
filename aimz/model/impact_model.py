@@ -666,6 +666,7 @@ class ImpactModel(BaseModel):
             # the row count.
             kwargs_rows, kwargs_const = _group_kwargs(kwargs or {}, n_obs=n_obs)
             constants, fields = _split_intervention(intervention, n_obs)
+            constants = _to_jax(constants)
             leaves, static = _partition(kwargs_const)
 
             def values(rows: dict[str, object], leaves: list) -> dict[str, object]:
@@ -693,15 +694,16 @@ class ImpactModel(BaseModel):
                     k: v["value"] for k, v in model_trace.items() if k in return_sites
                 }
 
-            rows = {self.param_input: X, **kwargs_rows, **fields}
+            rows = {
+                k: eval_shape(jnp.asarray, v)
+                for k, v in {self.param_input: X, **kwargs_rows, **fields}.items()
+            }
 
             def shapes_at(size: int) -> dict[str, ShapeDtypeStruct]:
                 return eval_shape(
                     values,
                     {
-                        k: ShapeDtypeStruct(
-                            (size, *np.shape(v)[1:]), jnp.result_type(v)
-                        )
+                        k: ShapeDtypeStruct((size, *v.shape[1:]), v.dtype)
                         for k, v in rows.items()
                     },
                     leaves,
@@ -718,7 +720,7 @@ class ImpactModel(BaseModel):
                     }
             # A kernel that does not run on fewer rows, such as one whose plate size is
             # a fixed count, cannot be split either
-            except (IndexError, TypeError, ValueError):
+            except Exception:
                 msg = (
                     "The kernel does not run on fewer rows than the input, so "
                     "`shard_axis='obs'` cannot split it; rerunning with "
@@ -2088,14 +2090,15 @@ class ImpactModel(BaseModel):
         overrides = {"return_datatree": True} if on_batch else {}
 
         # Lazily generated scenarios share one sampling key
-        if (
+        shared = (
             output_baseline is None
             and output_intervention is None
             and args_baseline is not None
             and args_intervention is not None
             and args_baseline.get("rng_key") is None
             and args_intervention.get("rng_key") is None
-        ):
+        )
+        if shared:
             self._rng_key, rng_key = random.split(self._rng_key)
             args_baseline = {**args_baseline, "rng_key": rng_key}
             args_intervention = {**args_intervention, "rng_key": rng_key}
@@ -2113,19 +2116,30 @@ class ImpactModel(BaseModel):
 
         group = _validate_group(dt_baseline, dt_intervention=dt_intervention)
         # A scenario reruns under `shard_axis="draw"` when its own sites cannot be split
-        # by observation; the other scenario follows it so that their draws stay paired
+        # by observation. The other shared-key scenario follows it with an array input,
+        # so that their draws stay paired, and its first output is removed.
         axes = (
             dt_baseline[group].attrs.get("shard_axis"),
             dt_intervention[group].attrs.get("shard_axis"),
         )
-        if axes == ("obs", "draw") and output_baseline is None:
-            dt_baseline = _predict(
-                **{**cast("dict", args_baseline), "shard_axis": "draw"}
-            )
-        elif axes == ("draw", "obs") and output_intervention is None:
-            dt_intervention = _predict(
-                **{**cast("dict", args_intervention), "shard_axis": "draw"},
-            )
+        rerun = {"shard_axis": "draw", "batch_size": None}
+        stale = None
+        if (
+            shared
+            and axes == ("obs", "draw")
+            and isinstance(cast("dict", args_baseline)["X"], ArrayLike)
+        ):
+            stale = dt_baseline
+            dt_baseline = _predict(**{**cast("dict", args_baseline), **rerun})
+        elif (
+            shared
+            and axes == ("draw", "obs")
+            and isinstance(cast("dict", args_intervention)["X"], ArrayLike)
+        ):
+            stale = dt_intervention
+            dt_intervention = _predict(**{**cast("dict", args_intervention), **rerun})
+        if stale is not None and "artifact_path" in stale.attrs:
+            rmtree(stale.attrs["artifact_path"], ignore_errors=True)
 
         out = xr.DataTree(name="root")
         out[group] = dt_intervention[group] - dt_baseline[group]
