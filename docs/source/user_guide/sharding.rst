@@ -85,7 +85,7 @@ The kernels below contrast a compatible model with one that triggers the rerun; 
 When There Is No Posterior to Shard
 -----------------------------------
 
-* For :meth:`~aimz.ImpactModel.predict` and :meth:`~aimz.ImpactModel.log_likelihood`, a model with no posterior samples has nothing to shard along the draw axis, so the data-parallel path runs regardless of ``shard_axis``.
+* For :meth:`~aimz.ImpactModel.log_likelihood`, a model with no posterior samples has nothing to shard along the draw axis, so the data-parallel path runs regardless of ``shard_axis``.
 * :meth:`~aimz.ImpactModel.sample_prior_predictive` has no posterior to shard: under ``shard_axis="draw"`` it shards the prior draws instead, drawing a fresh prior sample per chunk against the whole input (request latent sites via ``return_sites``); under ``shard_axis="obs"`` it streams over observations.
 
 

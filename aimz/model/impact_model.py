@@ -36,6 +36,7 @@ import numpy.typing as npt
 import xarray as xr
 from jax import (
     Array,
+    ShapeDtypeStruct,
     default_backend,
     device_get,
     eval_shape,
@@ -75,7 +76,14 @@ from aimz.utils._format import (
     _build_datatree,
     _dict_to_datatree,
 )
-from aimz.utils._kwargs import _combine, _group_kwargs, _partition, _to_jax
+from aimz.utils._kwargs import (
+    _combine,
+    _group_kwargs,
+    _partition,
+    _split_intervention,
+    _split_intervention_fields,
+    _to_jax,
+)
 from aimz.utils._validation import (
     _check_is_fitted,
     _validate_aligned_inputs,
@@ -652,36 +660,90 @@ class ImpactModel(BaseModel):
                 shard_axis, batch_size = "draw", None
         if shard_axis == "obs" and return_sites:
             # A site without the observation axis, such as a global deterministic site,
-            # has no rows to split. The shapes come from an abstract trace of this call,
-            # since an earlier trace may have had other arguments.
-            leaves, static = _partition({self.param_input: X, **(kwargs or {})})
-            model = do(self.kernel, data=intervention) if intervention else self.kernel
+            # has no rows to split. Abstract traces of this call, at its rows and at one
+            # row fewer, as in a device batch, tell the sites that follow the rows: an
+            # earlier trace may have had other arguments, and a global site may match
+            # the row count.
+            kwargs_rows, kwargs_const = _group_kwargs(kwargs or {}, n_obs=n_obs)
+            constants, fields = _split_intervention(intervention, n_obs)
+            leaves, static = _partition(kwargs_const)
 
-            def values(*leaves: object) -> dict[str, object]:
+            def values(rows: dict[str, object], leaves: list) -> dict[str, object]:
+                model_kwargs, intervention_rows = _split_intervention_fields(rows)
+                model = (
+                    do(
+                        self.kernel,
+                        data=cast("dict", {**constants, **intervention_rows}),
+                    )
+                    if intervention
+                    else self.kernel
+                )
                 model_trace = trace(
                     substitute(
                         seed(model, rng_seed=self.rng_key),
-                        substitute_fn=init_to_sample,
+                        # A site that already holds a value, as under `substitute`,
+                        # keeps it
+                        substitute_fn=lambda msg: (
+                            None if msg["value"] is not None else init_to_sample(msg)
+                        ),
                     ),
-                ).get_trace(**_combine(leaves, static))
+                ).get_trace(**model_kwargs, **_combine(leaves, static))
 
                 return {
                     k: v["value"] for k, v in model_trace.items() if k in return_sites
                 }
 
-            shapes = eval_shape(values, *leaves)
-            if whole := sorted(k for k, v in shapes.items() if v.shape[:1] != (n_obs,)):
+            rows = {self.param_input: X, **kwargs_rows, **fields}
+
+            def shapes_at(size: int) -> dict[str, ShapeDtypeStruct]:
+                return eval_shape(
+                    values,
+                    {
+                        k: ShapeDtypeStruct(
+                            (size, *np.shape(v)[1:]), jnp.result_type(v)
+                        )
+                        for k, v in rows.items()
+                    },
+                    leaves,
+                )
+
+            shapes = shapes_at(n_obs)
+            per_row = {k for k, v in shapes.items() if v.shape[:1] == (n_obs,)}
+            msg, category = None, PerformanceWarning
+            try:
+                if n_obs > 1:
+                    fewer = shapes_at(n_obs - 1)
+                    per_row &= {
+                        k for k, v in fewer.items() if v.shape[:1] == (n_obs - 1,)
+                    }
+            # A kernel that does not run on fewer rows, such as one whose plate size is
+            # a fixed count, cannot be split either
+            except (IndexError, TypeError, ValueError):
                 msg = (
-                    f"Return site(s) {', '.join(map(repr, whole))} have no observation "
-                    "axis, so `shard_axis='obs'` cannot split them; rerunning with "
-                    "`shard_axis='draw'`. Pass `shard_axis='draw'`, or leave the "
-                    "site(s) out of `return_sites`, to silence this warning."
+                    "The kernel does not run on fewer rows than the input, so "
+                    "`shard_axis='obs'` cannot split it; rerunning with "
+                    "`shard_axis='draw'`. Pass `shard_axis='draw'` to silence this "
+                    "warning."
                 )
-                warn(
-                    msg,
-                    category=PerformanceWarning,
-                    skip_file_prefixes=_SKIP_FILE_PREFIXES,
-                )
+            else:
+                whole = sorted(shapes.keys() - per_row)
+                if self.param_output in whole:
+                    msg = (
+                        f"The output site {self.param_output!r} does not have one "
+                        "value per row of the input, so `shard_axis='obs'` cannot "
+                        "split it; rerunning with `shard_axis='draw'`."
+                    )
+                    category = OutputWarning
+                elif whole:
+                    msg = (
+                        f"Return site(s) {', '.join(map(repr, whole))} have no "
+                        "observation axis, so `shard_axis='obs'` cannot split them; "
+                        "rerunning with `shard_axis='draw'`. Pass `shard_axis='draw'`, "
+                        "or leave the site(s) out of `return_sites`, to silence this "
+                        "warning."
+                    )
+            if msg is not None:
+                warn(msg, category=category, skip_file_prefixes=_SKIP_FILE_PREFIXES)
                 shard_axis, batch_size = "draw", None
         if (
             shard_axis == "obs"
@@ -921,6 +983,8 @@ class ImpactModel(BaseModel):
                 input batch size (``shard_axis="obs"`` with a data loader only).
 
         Warns:
+            OutputWarning: If the output site does not have one value per row of an
+                array input, so the call reruns under ``shard_axis="draw"``.
             PerformanceWarning: If ``shard_axis="obs"`` cannot split an array input,
                 as for a return site without an observation axis, so the call reruns
                 under ``shard_axis="draw"``.
@@ -1828,8 +1892,7 @@ class ImpactModel(BaseModel):
                 deterministic sites.
             shard_axis: ``"obs"`` shards the input across devices and replicates the
                 posterior; ``"draw"`` shards the posterior and replicates the input,
-                which must then be an array. Without posterior samples, ``"obs"`` is
-                used.
+                which must then be an array.
             batch_size: Observations per batch under ``"obs"``, draws per batch under
                 ``"draw"``, and the chunk size of the stored results. Chosen
                 automatically if ``None``; ignored for a data loader.
@@ -1867,7 +1930,9 @@ class ImpactModel(BaseModel):
         Warns:
             OutputWarning: If an intervened site reaches the output only through sites
                 whose values are taken from the posterior or intervened on, so that
-                the draws do not respond to it.
+                the draws do not respond to it, or if the output site does not have one
+                value per row of an array input, so the call reruns under
+                ``shard_axis="draw"``.
             PerformanceWarning: If ``shard_axis="obs"`` cannot split an array input,
                 as for a return site without an observation axis or a latent site with
                 one value per observation, so the call reruns under
@@ -2047,6 +2112,20 @@ class ImpactModel(BaseModel):
         )
 
         group = _validate_group(dt_baseline, dt_intervention=dt_intervention)
+        # A scenario reruns under `shard_axis="draw"` when its own sites cannot be split
+        # by observation; the other scenario follows it so that their draws stay paired
+        axes = (
+            dt_baseline[group].attrs.get("shard_axis"),
+            dt_intervention[group].attrs.get("shard_axis"),
+        )
+        if axes == ("obs", "draw") and output_baseline is None:
+            dt_baseline = _predict(
+                **{**cast("dict", args_baseline), "shard_axis": "draw"}
+            )
+        elif axes == ("draw", "obs") and output_intervention is None:
+            dt_intervention = _predict(
+                **{**cast("dict", args_intervention), "shard_axis": "draw"},
+            )
 
         out = xr.DataTree(name="root")
         out[group] = dt_intervention[group] - dt_baseline[group]
