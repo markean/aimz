@@ -18,10 +18,13 @@ import warnings
 from pathlib import Path
 
 import jax.numpy as jnp
+import numpy as np
+import numpyro.distributions as dist
 import pytest
 from jax import Array, random
+from numpyro import deterministic, plate, sample
 
-from aimz import ImpactModel, OutputWarning
+from aimz import ImpactModel, OutputWarning, PerformanceWarning
 from tests.conftest import latent_intervention_model, lm, make_svi
 
 
@@ -138,6 +141,31 @@ def test_estimate_effect_lazy_args_share_rng_key(
         - im.predict_on_batch(X, rng_key=random.key(0)).posterior_predictive["y"]
     )
     assert effect.posterior_predictive["y"].equals(expected)
+
+    # A scenario that reruns under `draw` takes the other along, keeping them paired
+    def kernel(X: Array, y: Array | None = None) -> None:
+        s = sample("s", dist.Normal())
+        deterministic("s2", 2 * s)
+        with plate("obs", X.shape[0]):
+            mu = deterministic("mu", s * X[:, 0])
+            sample("y", dist.Normal(mu, 1.0), obs=y)
+
+    im = ImpactModel(kernel, rng_key=random.key(0), inference=make_svi(kernel))
+    im.set_posterior_sample({"s": jnp.linspace(-1.0, 1.0, 5)})
+    args = {"X": X, "return_sites": ["s2", "mu", "y"], "progress": False}
+    with (
+        pytest.warns(PerformanceWarning, match="'s2' have no observation axis"),
+        pytest.warns(OutputWarning, match="different dimension sizes"),
+    ):
+        effect = im.estimate_effect(
+            args_baseline=args,
+            args_intervention={**args, "intervention": {"s": jnp.zeros(len(X))}},
+        )
+    np.testing.assert_allclose(
+        effect.posterior_predictive["y"],
+        effect.posterior_predictive["mu"],
+        atol=1e-5,
+    )
 
 
 def test_estimate_effect_scenario_compatibility(

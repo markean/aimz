@@ -52,7 +52,7 @@ def test_predict_site_without_observation_axis(
     im_lm_svi_fitted: ImpactModel,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A site without an observation axis reruns under `draw`; a loader raises."""
+    """What `obs` cannot split reruns under `draw`; a loader raises instead."""
     X, _ = synthetic_data
     # A mesh-less streamer forces the single-device path
     monkeypatch.setattr(
@@ -83,6 +83,22 @@ def test_predict_site_without_observation_axis(
             return_sites="sigma",
             progress=False,
         )
+
+    def counted(X: Array, y: Array | None = None, n: int = 100) -> None:
+        mu = sample("mu", dist.Normal())
+        with plate("obs", n):
+            sample("y", dist.Normal(mu + X[:n, 0], 1.0), obs=y)
+
+    im = ImpactModel(counted, rng_key=random.key(0), inference=make_svi(counted))
+    im.set_posterior_sample({"mu": jnp.zeros(5)})
+    # A plate sized by the number of rows does not run on fewer rows
+    with pytest.warns(PerformanceWarning, match="does not run on fewer rows"):
+        dt = im.predict(X, progress=False)
+    assert dt.posterior_predictive.attrs["shard_axis"] == "draw"
+    # An output sized by another count does not follow the rows
+    with pytest.warns(OutputWarning, match="'y' does not have one value per row"):
+        dt = im.predict(X, n=3, progress=False)
+    assert dt.posterior_predictive["y"].shape == (1, 5, 3)
 
 
 def test_predict_warns_on_unknown_return_site(

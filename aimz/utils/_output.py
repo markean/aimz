@@ -213,8 +213,8 @@ def _validate_streamed_axis_size(
             f"{requirement}. Site {site!r} emitted shape {arr.shape} for a batch "
             f"of size {chunk_size}. "
         ) + (
-            'Pass `shard_axis="draw"`, or leave the site out of `return_sites` where '
-            "the method takes it."
+            'Pass an array input with `shard_axis="draw"`, or leave the site out of '
+            "`return_sites` where the method takes it."
             if axis == 1
             else "This kernel is not currently supported under streaming."
         )
