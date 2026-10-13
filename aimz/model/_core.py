@@ -17,8 +17,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from functools import update_wrapper
-from inspect import unwrap
+from functools import partial, update_wrapper
 from typing import TYPE_CHECKING, Self
 
 from numpyro.primitives import Messenger
@@ -39,10 +38,16 @@ class BaseModel(ABC):
         param_output: str = "y",
     ) -> None:
         """Validate the kernel's signature and record the parameter names."""
-        handlers, fn = [], unwrap(kernel)
-        while isinstance(fn, Messenger) and fn.fn is not None:
-            handlers.append(fn)
-            fn = unwrap(fn.fn)
+        handlers, fn, seen = [], kernel, set()
+        while id(fn) not in seen:
+            seen.add(id(fn))
+            if isinstance(fn, Messenger) and fn.fn is not None:
+                handlers.append(fn)
+                fn = fn.fn
+            elif isinstance(fn, partial):
+                fn = fn.func
+            else:
+                fn = getattr(fn, "__wrapped__", fn)
         for handler in reversed(handlers):
             update_wrapper(handler, handler.fn, updated=())
         self._kernel = kernel
