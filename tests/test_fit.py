@@ -84,8 +84,8 @@ def test_fit_minibatch_warnings(synthetic_data: tuple[Array, Array]) -> None:
             z = sample("z", dist.Normal())
             sample("y", dist.Normal(X[:, 0] + z, 1.0), obs=y)
 
-    # Raised as an error, the warning leaves the model as it was, so the fit it names
-    # works on the same model.
+    # Raised as an error, the warning leaves a model with an automatic guide as it was,
+    # so the fit it names works on the same model.
     im_rows = ImpactModel(per_row, rng_key=random.key(42), inference=make_svi(per_row))
     with warnings.catch_warnings():
         warnings.simplefilter("error", FitWarning)
@@ -107,7 +107,10 @@ def test_fit_minibatch_warnings(synthetic_data: tuple[Array, Array]) -> None:
         rng_key=random.key(42),
         inference=make_svi(coupled),
     )
-    with pytest.warns(FitWarning, match="computes across observations at site"):
+    with (
+        pytest.warns(FitWarning, match=msg),
+        pytest.warns(FitWarning, match="computes across observations at site"),
+    ):
         im_coupled.fit(X, y, batch_size=20, epochs=1, progress=False)
     im_global = ImpactModel(
         global_event,
