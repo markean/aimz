@@ -15,6 +15,7 @@
 """Tests for kernel validation and site discovery."""
 
 import warnings
+from functools import partial
 
 import jax.numpy as jnp
 import numpyro
@@ -79,7 +80,8 @@ def test_kernel_signature_validation() -> None:
     def decorated(X: Array, y: Array | None = None) -> None:
         lm(X, y)
 
-    im = ImpactModel(decorated, rng_key=random.key(42), inference=make_svi(decorated))
+    kernel = partial(decorated)
+    im = ImpactModel(kernel, rng_key=random.key(42), inference=make_svi(kernel))
     assert im.describe()["arguments"] == ["X", "y"]
     with pytest.raises(TypeError, match="Unsupported inference object"):
         ImpactModel(lm, rng_key=random.key(42), inference=None)
