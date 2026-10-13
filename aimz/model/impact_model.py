@@ -43,6 +43,7 @@ from jax import (
     jit,
     local_device_count,
     local_devices,
+    make_jaxpr,
     make_mesh,
     random,
 )
@@ -1474,11 +1475,12 @@ class ImpactModel(BaseModel):
         Warns:
             FitWarning: If the batches are smaller than the data and the kernel gives
                 the output site no scale for a batch, so that each batch is weighed as
-                the whole data, or has a latent site per observation or a site that
-                computes across observations, which the batches split. The checks run
-                on the first ``batch_size`` observations of an array input or of an
-                :class:`~aimz.utils.data.ArrayLoader`; another data loader has no size
-                to compare with.
+                the whole data, or has a site that computes across observations, or a
+                latent site per observation that the guide does not compute from the
+                batch, such as one kept per position or plate index, which the batches
+                split. The checks run on the first ``batch_size`` observations of an
+                array input or of an :class:`~aimz.utils.data.ArrayLoader`; another
+                data loader has no size to compare with.
         """
         _validate_aligned_inputs(X, y=y)
         if y is None and isinstance(X, ArrayLike):
@@ -1523,6 +1525,7 @@ class ImpactModel(BaseModel):
         # Commit model state only once the inputs are accepted
         self._rng_key = rng_key_model
 
+        rng_key, rng_subkey = random.split(rng_key)
         # The scale a batch gives the output site tells whether the kernel scales it to
         # the whole data
         if isinstance(dataloader, ArrayLoader) and dataloader.batch_size < len(
@@ -1555,8 +1558,11 @@ class ImpactModel(BaseModel):
                     "`fit_on_batch`."
                 )
                 warn(msg, category=FitWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
-            # Batches split a latent site in the output's plate, whose guide parameters
-            # then miss the batch rows, and a site that computes across observations
+            # Batches split a site that computes across observations, and a latent site
+            # in the output's plate whose guide value reads none of the batch arrays:
+            # kept per row position or plate index, it trains on whichever rows a batch
+            # brings. The guide is traced, not run, with the parameters of the first
+            # step's setup fixed, so a value that depends on an input reads the rows.
             self._build_kernel_spec(
                 signature(self.kernel)
                 .bind(**_to_jax({**batch, **kwargs_extra}))
@@ -1564,31 +1570,62 @@ class ImpactModel(BaseModel):
                 with_output=True,
             )
             plates = self._dims.get(self.param_output, ())[:1]
-            split = sorted(
-                {
-                    *self._coupled_sites,
-                    *(
-                        k
-                        for k in cast("KernelSpec", self._kernel_spec).sample_sites
-                        if k not in self._observed_sites
-                        and set(plates) & set(self._dims.get(k, ()))
-                    ),
-                },
-            )
+            latent = {
+                k
+                for k in cast("KernelSpec", self._kernel_spec).sample_sites
+                if k not in self._observed_sites
+                and set(plates) & set(self._dims.get(k, ()))
+            }
+            if latent:
+                svi = cast("SVI", self.inference)
+                if self._vi_state is None or svi.constrain_fn is None:
+                    state = svi.init(rng_subkey, **_to_jax({**batch, **kwargs_extra}))
+                    self._vi_state = state if self._vi_state is None else self._vi_state
+                params = {
+                    **svi.get_params(self._vi_state),
+                    **(getattr(self._vi_state, "mutable_state", None) or {}),
+                }
+                closed, values = make_jaxpr(
+                    lambda rows, idx: {
+                        k: v["value"]
+                        for k, v in trace(
+                            seed(
+                                substitute(svi.guide, data={**params, plates[0]: idx}),
+                                self.rng_key,
+                            ),
+                        )
+                        .get_trace(**rows, **_to_jax(kwargs_extra))
+                        .items()
+                        if k in latent and v["type"] == "sample"
+                    },
+                    return_shape=True,
+                )(_to_jax(batch), jnp.arange(dataloader.batch_size))
+                reads = {id(v) for v in closed.jaxpr.invars[:-1]}
+                follows = {id(closed.jaxpr.invars[-1])}
+                for eqn in closed.jaxpr.eqns:
+                    for seen in (reads, follows):
+                        if any(id(v) in seen for v in eqn.invars):
+                            seen.update(map(id, eqn.outvars))
+                latent = {
+                    k
+                    for k, v in zip(sorted(values), closed.jaxpr.outvars, strict=True)
+                    if id(v) not in reads or id(v) in follows
+                }
+            split = sorted({*self._coupled_sites, *latent})
             if split:
                 msg = (
                     f"`fit` trains on batches of {dataloader.batch_size} of "
                     f"{len(dataloader.dataset)} observations, but site(s) "
                     f"{', '.join(map(repr, split))} have a latent value per "
-                    "observation or compute across observations, which the batches "
-                    "split. Fit with `fit_on_batch`, or with a `batch_size` that "
-                    "covers the data."
+                    "observation that the guide does not compute from the batch, or "
+                    "compute across observations, which the batches split. Fit with "
+                    "`fit_on_batch`, with a `batch_size` that covers the data, or "
+                    "with a guide that computes such a site from the batch."
                 )
                 warn(msg, category=FitWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
 
         logger.info("Performing variational inference optimization")
         losses: list[npt.NDArray] = []
-        rng_key, rng_subkey = random.split(rng_key)
         for epoch in range(epochs):
             losses_epoch: list[npt.NDArray] = []
             pbar = tqdm(
