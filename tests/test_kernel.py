@@ -52,6 +52,9 @@ def test_kernel_signature_validation() -> None:
     def with_kwargs(X: Array, y: Array | None = None, **kwargs: object) -> None:
         pass
 
+    def positional_only(X: Array, /, y: Array | None = None) -> None:
+        pass
+
     def without_input(x: Array, y: Array | None = None) -> None:
         pass
 
@@ -67,6 +70,7 @@ def test_kernel_signature_validation() -> None:
     for kernel in (
         with_args,
         with_kwargs,
+        positional_only,
         without_input,
         without_output,
         input_with_default,
