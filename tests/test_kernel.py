@@ -21,7 +21,7 @@ import numpyro
 import numpyro.distributions as dist
 import pytest
 from jax import Array, random
-from numpyro import deterministic, sample
+from numpyro import deterministic, handlers, sample
 
 from aimz import ImpactModel, KernelValidationError
 from tests.conftest import lm, make_svi
@@ -73,6 +73,14 @@ def test_kernel_signature_validation() -> None:
     ):
         with pytest.raises(KernelValidationError):
             ImpactModel(kernel, rng_key=random.key(42), inference=make_svi(kernel))
+
+    @handlers.scale(scale=1.0)
+    @handlers.condition(data={})
+    def decorated(X: Array, y: Array | None = None) -> None:
+        lm(X, y)
+
+    im = ImpactModel(decorated, rng_key=random.key(42), inference=make_svi(decorated))
+    assert im.describe()["arguments"] == ["X", "y"]
     with pytest.raises(TypeError, match="Unsupported inference object"):
         ImpactModel(lm, rng_key=random.key(42), inference=None)
 
