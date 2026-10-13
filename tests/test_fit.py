@@ -66,7 +66,7 @@ def test_fit_nan_warning(synthetic_data: tuple[Array, Array]) -> None:
 
 
 def test_fit_minibatch_warnings(synthetic_data: tuple[Array, Array]) -> None:
-    """Batches warn for an unscaled output site and for a latent site per row."""
+    """Batches warn for an unscaled output site and a guide that ignores the rows."""
     X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), inference=make_svi(lm))
     msg = "trains on batches of 20 of 100 observations, but the kernel gives the"
@@ -88,6 +88,18 @@ def test_fit_minibatch_warnings(synthetic_data: tuple[Array, Array]) -> None:
     with pytest.warns(FitWarning, match="'z' have a latent value per observation"):
         im_rows.fit(X, y, batch_size=20, epochs=1, progress=False)
 
+    # A guide that computes the site from each row's inputs trains on batches.
+    def amortized(X: Array, y: Array | None = None) -> None:
+        w = param("w", jnp.zeros(X.shape[1]))
+        with plate("data", size=100, subsample_size=X.shape[0]):
+            sample("z", dist.Normal(X @ w, 1.0))
+
+    im_amortized = ImpactModel(
+        per_row,
+        rng_key=random.key(42),
+        inference=SVI(per_row, amortized, Adam(1e-3), Trace_ELBO()),
+    )
+
     # The whole data as one batch, and a kernel that scales the batch, pass silently.
     im_scaled = ImpactModel(
         lm_subsample,
@@ -98,6 +110,7 @@ def test_fit_minibatch_warnings(synthetic_data: tuple[Array, Array]) -> None:
         warnings.simplefilter("error", FitWarning)
         im.fit(X, y, batch_size=len(X), epochs=1, progress=False)
         im_scaled.fit(X, y, batch_size=20, epochs=1, progress=False)
+        im_amortized.fit(X, y, batch_size=20, epochs=1, progress=False)
 
 
 def test_fit_loader_with_custom_param_names(

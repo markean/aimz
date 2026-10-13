@@ -64,7 +64,8 @@ The two most common are:
   The number of sites it creates typically grows with the sequence length, making the trace shape dynamic for the same reason.
 
 For **local latent variables**, :meth:`~aimz.ImpactModel.predict` and :meth:`~aimz.ImpactModel.log_likelihood` detect the incompatible posterior shape, warn, and automatically rerun under draw-parallel sharding (``shard_axis="draw"``), which never splits the observation axis.
-:meth:`~aimz.ImpactModel.fit` with a ``batch_size`` smaller than the input warns with a :class:`~aimz.FitWarning`, since its batches split such a site.
+:meth:`~aimz.ImpactModel.fit` with a ``batch_size`` smaller than the input warns with a :class:`~aimz.FitWarning` when the guide does not compute such a site from the batch, as when it keeps a value per position or plate index like :external:class:`~numpyro.infer.autoguide.AutoNormal`, since its batches then pair those values with other observations.
+A guide that computes the site from each observation's inputs, such as an amortized encoder, trains on batches without the warning.
 :meth:`~aimz.ImpactModel.sample_prior_predictive` has no posterior to replicate and needs no rerun: under ``shard_axis="obs"`` it draws local latents within each batch and shares only the global latents across batches.
 See :ref:`user-guide-sharding` for how the two sharding strategies differ, when to choose each, and a worked comparison of a compatible kernel and one that triggers the rerun.
 Draw-parallel sharding does not lift the static-shape requirement, so :external:func:`~numpyro.contrib.control_flow.scan`-based models remain unsupported.
