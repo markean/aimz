@@ -20,6 +20,7 @@ import copyreg
 import logging
 import math
 import pickle
+from copy import copy
 from datetime import UTC, datetime
 from functools import partial
 from inspect import signature, stack
@@ -1558,17 +1559,64 @@ class ImpactModel(BaseModel):
                     "`fit_on_batch`."
                 )
                 warn(msg, category=FitWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
-            # Batches split a site that computes across observations, and a latent site
-            # in the output's plate whose guide value reads none of the batch arrays:
-            # kept per row position or plate index, it trains on whichever rows a batch
-            # brings. The guide is traced, not run, with the parameters of the first
-            # step's setup fixed, so a value that depends on an input reads the rows.
             self._build_kernel_spec(
                 signature(self.kernel)
                 .bind(**_to_jax({**batch, **kwargs_extra}))
                 .arguments,
                 with_output=True,
             )
+            # Batches split a site that computes across observations: one recorded by a
+            # scan, or one drawn as an event whose size follows the rows. An abstract
+            # trace over all the rows keeps an event that only matches the batch size.
+            n_obs = len(dataloader.dataset)
+            coupled = set(self._coupled_sites)
+            follow: dict[str, bool] = {}
+            try:
+                with validation_enabled(is_validate=False):
+                    eval_shape(
+                        lambda rows: follow.update(
+                            {
+                                k: bool(v.get("_control_flow_done"))
+                                or getattr(v.get("fn"), "event_shape", ())[:1]
+                                == (n_obs,)
+                                for k, v in trace(
+                                    substitute(
+                                        seed(self.kernel, rng_seed=self.rng_key),
+                                        substitute_fn=init_to_sample,
+                                    ),
+                                )
+                                .get_trace(**rows, **_to_jax(kwargs_extra))
+                                .items()
+                                if k in coupled
+                            },
+                        ),
+                        {
+                            k: ShapeDtypeStruct(
+                                (n_obs, *np.shape(v)[1:]),
+                                jnp.result_type(v),
+                            )
+                            for k, v in batch.items()
+                        },
+                    )
+            # A kernel that does not run on all the rows keeps every coupled site
+            except Exception:
+                follow = {}
+            coupled = sorted(k for k in coupled if follow.get(k, True))
+            if coupled:
+                msg = (
+                    f"`fit` trains on batches of {dataloader.batch_size} of {n_obs} "
+                    "observations, but the kernel computes across observations at "
+                    f"site(s) {', '.join(map(repr, coupled))}, which the batches "
+                    "split. Fit with `fit_on_batch`, or with a `batch_size` that "
+                    "covers the data."
+                )
+                warn(msg, category=FitWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
+            # Batches also split a latent site in the output's plate whose guide value
+            # reads none of the batch arrays, or follows the plate's indices: kept per
+            # row position or plate index, it trains on whichever rows a batch brings.
+            # The guide is traced, not run, with the parameters of a first step's setup
+            # fixed. The setup runs on a copy, so the model and its guide stay as they
+            # were if the warning is raised as an error.
             plates = self._dims.get(self.param_output, ())[:1]
             latent = {
                 k
@@ -1578,19 +1626,38 @@ class ImpactModel(BaseModel):
             }
             if latent:
                 svi = cast("SVI", self.inference)
-                if self._vi_state is None or svi.constrain_fn is None:
-                    state = svi.init(rng_subkey, **_to_jax({**batch, **kwargs_extra}))
-                    self._vi_state = state if self._vi_state is None else self._vi_state
+                state = self._vi_state
+                if state is None or svi.constrain_fn is None:
+                    svi = SVI(
+                        svi.model,
+                        copy(svi.guide),
+                        svi.optim,
+                        svi.loss,
+                        **svi.static_kwargs,
+                    )
+                    init = svi.init(rng_subkey, **_to_jax({**batch, **kwargs_extra}))
+                    state = init if state is None else state
                 params = {
-                    **svi.get_params(self._vi_state),
-                    **(getattr(self._vi_state, "mutable_state", None) or {}),
+                    **svi.get_params(state),
+                    **(getattr(state, "mutable_state", None) or {}),
                 }
                 closed, values = make_jaxpr(
                     lambda rows, idx: {
                         k: v["value"]
                         for k, v in trace(
                             seed(
-                                substitute(svi.guide, data={**params, plates[0]: idx}),
+                                substitute(
+                                    substitute(svi.guide, data=params),
+                                    # Indices the guide sets itself, as from a batched
+                                    # kwarg, are kept
+                                    substitute_fn=lambda msg: (
+                                        idx
+                                        if msg["type"] == "plate"
+                                        and msg["name"] == plates[0]
+                                        and msg["value"] is None
+                                        else None
+                                    ),
+                                ),
                                 self.rng_key,
                             ),
                         )
@@ -1611,16 +1678,15 @@ class ImpactModel(BaseModel):
                     for k, v in zip(sorted(values), closed.jaxpr.outvars, strict=True)
                     if id(v) not in reads or id(v) in follows
                 }
-            split = sorted({*self._coupled_sites, *latent})
-            if split:
+            if latent:
                 msg = (
-                    f"`fit` trains on batches of {dataloader.batch_size} of "
-                    f"{len(dataloader.dataset)} observations, but site(s) "
-                    f"{', '.join(map(repr, split))} have a latent value per "
-                    "observation that the guide does not compute from the batch, or "
-                    "compute across observations, which the batches split. Fit with "
-                    "`fit_on_batch`, with a `batch_size` that covers the data, or "
-                    "with a guide that computes such a site from the batch."
+                    f"`fit` trains on batches of {dataloader.batch_size} of {n_obs} "
+                    "observations, but the guide keeps a value per observation for "
+                    f"site(s) {', '.join(map(repr, sorted(latent)))} that it does not "
+                    "compute from the batch, so the batches pair those values with "
+                    "other observations. Fit with `fit_on_batch`, with a `batch_size` "
+                    "that covers the data, or with a guide that computes such a site "
+                    "from each observation's inputs."
                 )
                 warn(msg, category=FitWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
 

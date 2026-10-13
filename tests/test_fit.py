@@ -66,7 +66,7 @@ def test_fit_nan_warning(synthetic_data: tuple[Array, Array]) -> None:
 
 
 def test_fit_minibatch_warnings(synthetic_data: tuple[Array, Array]) -> None:
-    """Batches warn for an unscaled output site and a guide that ignores the rows."""
+    """Batches warn for an unscaled output, a coupled site, and a guide's row values."""
     X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), inference=make_svi(lm))
     msg = "trains on batches of 20 of 100 observations, but the kernel gives the"
@@ -84,9 +84,36 @@ def test_fit_minibatch_warnings(synthetic_data: tuple[Array, Array]) -> None:
             z = sample("z", dist.Normal())
             sample("y", dist.Normal(X[:, 0] + z, 1.0), obs=y)
 
+    # Raised as an error, the warning leaves the model as it was, so the fit it names
+    # works on the same model.
     im_rows = ImpactModel(per_row, rng_key=random.key(42), inference=make_svi(per_row))
-    with pytest.warns(FitWarning, match="'z' have a latent value per observation"):
-        im_rows.fit(X, y, batch_size=20, epochs=1, progress=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FitWarning)
+        with pytest.raises(FitWarning, match="keeps a value per observation"):
+            im_rows.fit(X, y, batch_size=20, epochs=1, progress=False)
+    im_rows.fit_on_batch(X, y, num_steps=1, progress=False)
+
+    # An event over the rows is split; a global event as long as a batch is not.
+    def coupled(X: Array, y: Array | None = None) -> None:
+        sample("y", dist.MultivariateNormal(X[:, 0], jnp.eye(X.shape[0])), obs=y)
+
+    def global_event(X: Array, y: Array | None = None) -> None:
+        w = sample("w", dist.MultivariateNormal(jnp.zeros(20), jnp.eye(20)))
+        with plate("data", size=100, subsample_size=X.shape[0]):
+            sample("y", dist.Normal(X[:, 0] + w.sum(), 1.0), obs=y)
+
+    im_coupled = ImpactModel(
+        coupled,
+        rng_key=random.key(42),
+        inference=make_svi(coupled),
+    )
+    with pytest.warns(FitWarning, match="computes across observations at site"):
+        im_coupled.fit(X, y, batch_size=20, epochs=1, progress=False)
+    im_global = ImpactModel(
+        global_event,
+        rng_key=random.key(42),
+        inference=make_svi(global_event),
+    )
 
     # A guide that computes the site from each row's inputs trains on batches.
     def amortized(X: Array, y: Array | None = None) -> None:
@@ -111,6 +138,7 @@ def test_fit_minibatch_warnings(synthetic_data: tuple[Array, Array]) -> None:
         im.fit(X, y, batch_size=len(X), epochs=1, progress=False)
         im_scaled.fit(X, y, batch_size=20, epochs=1, progress=False)
         im_amortized.fit(X, y, batch_size=20, epochs=1, progress=False)
+        im_global.fit(X, y, batch_size=20, epochs=1, progress=False)
 
 
 def test_fit_loader_with_custom_param_names(
