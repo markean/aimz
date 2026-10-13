@@ -296,9 +296,9 @@ def _validate_kernel_signature(
     """Raise for a kernel signature that aimz cannot call.
 
     Raises:
-        KernelValidationError: If the kernel takes variable arguments, lacks the input
-            or output parameter, gives the input a default, or gives the output a
-            default other than ``None``.
+        KernelValidationError: If the kernel takes variable arguments or
+            positional-only parameters, lacks the input or output parameter, gives the
+            input a default, or gives the output a default other than ``None``.
     """
     params = signature(kernel).parameters
     if any(
@@ -306,6 +306,12 @@ def _validate_kernel_signature(
         for p in params.values()
     ):
         msg = "Kernel must not accept variable arguments (*args or **kwargs)."
+        raise KernelValidationError(msg)
+    if any(p.kind == Parameter.POSITIONAL_ONLY for p in params.values()):
+        msg = (
+            "Kernel must not have positional-only parameters, since aimz passes every "
+            "argument by name."
+        )
         raise KernelValidationError(msg)
 
     param_main = [arg for arg in (param_input, param_output) if arg not in params]
