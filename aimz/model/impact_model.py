@@ -894,7 +894,7 @@ class ImpactModel(BaseModel):
         """
         X = cast("Array", _validate_X_y_to_jax(X))
 
-        args_bound = self._bind_kernel_args(X, kwargs=kwargs)
+        args_bound = _to_jax(self._bind_kernel_args(X, kwargs=kwargs))
         self._build_kernel_spec(args_bound, with_output=False)
         _validate_intervention(intervention, kernel_spec=self._kernel_spec)
 
@@ -1128,6 +1128,7 @@ class ImpactModel(BaseModel):
                 argument when the inference method is MCMC, or SVI whose guide has not
                 run yet.
         """
+        kwargs = _to_jax(kwargs)
         if isinstance(self.inference, MCMC):
             if self.inference.last_state is None:
                 msg = (
@@ -1362,7 +1363,7 @@ class ImpactModel(BaseModel):
         _group_kwargs(kwargs, forbid=(self.param_input, self.param_output))
         args_bound = (
             signature(self.kernel)
-            .bind(**{self.param_input: X, self.param_output: y, **kwargs})
+            .bind(**{self.param_input: X, self.param_output: y, **_to_jax(kwargs)})
             .arguments
         )
         self._build_kernel_spec(args_bound, with_output=True)
@@ -1765,7 +1766,7 @@ class ImpactModel(BaseModel):
             model_kwargs=(
                 {self.param_input: X, self.param_output: y, **kwargs}
                 if isinstance(X, ArrayLike)
-                else {**batch, **kwargs_extra}
+                else _to_jax({**batch, **kwargs_extra})
             ),
         )
         self._num_samples = num_samples
@@ -1971,7 +1972,7 @@ class ImpactModel(BaseModel):
 
         X = cast("Array", _validate_X_y_to_jax(X))
 
-        args_bound = self._bind_kernel_args(X, kwargs=kwargs)
+        args_bound = _to_jax(self._bind_kernel_args(X, kwargs=kwargs))
 
         if rng_key is None:
             self._rng_key, rng_key = random.split(self._rng_key)
