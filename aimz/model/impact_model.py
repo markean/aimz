@@ -1567,40 +1567,43 @@ class ImpactModel(BaseModel):
             )
             # Batches split a site that computes across observations: one recorded by a
             # scan, or one drawn as an event whose size follows the rows. An abstract
-            # trace over all the rows keeps an event that only matches the batch size.
+            # trace at one row more drops an event that only matches the batch size.
             n_obs = len(dataloader.dataset)
+            rows_more = dataloader.batch_size + 1
             coupled = set(self._coupled_sites)
             follow: dict[str, bool] = {}
-            try:
-                with validation_enabled(is_validate=False):
-                    eval_shape(
-                        lambda rows: follow.update(
+            if coupled:
+                try:
+                    with validation_enabled(is_validate=False):
+                        eval_shape(
+                            lambda rows: follow.update(
+                                {
+                                    k: bool(v.get("_control_flow_done"))
+                                    or getattr(v.get("fn"), "event_shape", ())[:1]
+                                    == (rows_more,)
+                                    for k, v in trace(
+                                        substitute(
+                                            seed(self.kernel, rng_seed=self.rng_key),
+                                            substitute_fn=init_to_sample,
+                                        ),
+                                    )
+                                    .get_trace(**rows, **_to_jax(kwargs_extra))
+                                    .items()
+                                    if k in coupled
+                                },
+                            ),
                             {
-                                k: bool(v.get("_control_flow_done"))
-                                or getattr(v.get("fn"), "event_shape", ())[:1]
-                                == (n_obs,)
-                                for k, v in trace(
-                                    substitute(
-                                        seed(self.kernel, rng_seed=self.rng_key),
-                                        substitute_fn=init_to_sample,
-                                    ),
+                                k: ShapeDtypeStruct(
+                                    (rows_more, *np.shape(v)[1:]),
+                                    jnp.result_type(v),
                                 )
-                                .get_trace(**rows, **_to_jax(kwargs_extra))
-                                .items()
-                                if k in coupled
+                                for k, v in batch.items()
                             },
-                        ),
-                        {
-                            k: ShapeDtypeStruct(
-                                (n_obs, *np.shape(v)[1:]),
-                                jnp.result_type(v),
-                            )
-                            for k, v in batch.items()
-                        },
-                    )
-            # A kernel that does not run on all the rows keeps every coupled site
-            except Exception:
-                follow = {}
+                        )
+                # A kernel that does not run on another number of rows keeps every
+                # coupled site
+                except Exception:
+                    follow = {}
             coupled = sorted(k for k in coupled if follow.get(k, True))
             if coupled:
                 msg = (
@@ -1615,8 +1618,9 @@ class ImpactModel(BaseModel):
             # reads none of the batch arrays, or follows the plate's indices: kept per
             # row position or plate index, it trains on whichever rows a batch brings.
             # The guide is traced, not run, with the parameters of a first step's setup
-            # fixed. The setup runs on a copy, so the model and its guide stay as they
-            # were if the warning is raised as an error.
+            # fixed. The setup runs on a copy of the guide where one can be made, so a
+            # model whose guide holds its own state stays as it was if the warning is
+            # raised as an error.
             plates = self._dims.get(self.param_output, ())[:1]
             latent = {
                 k
@@ -1628,9 +1632,13 @@ class ImpactModel(BaseModel):
                 svi = cast("SVI", self.inference)
                 state = self._vi_state
                 if state is None or svi.constrain_fn is None:
+                    try:
+                        guide = copy(svi.guide)
+                    except Exception:
+                        guide = svi.guide
                     svi = SVI(
                         svi.model,
-                        copy(svi.guide),
+                        guide,
                         svi.optim,
                         svi.loss,
                         **svi.static_kwargs,
