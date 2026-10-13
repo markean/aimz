@@ -908,7 +908,7 @@ class ImpactModel(BaseModel):
                 return_sites=self._coerce_return_sites(return_sites),
                 samples=None,
                 params=None,
-                intervention=intervention,
+                intervention=_to_jax(intervention or {}),
                 model_kwargs=args_bound,
             ),
         )
@@ -1989,7 +1989,7 @@ class ImpactModel(BaseModel):
                 }
                 if self.vi_result is not None
                 else None,
-                intervention=intervention,
+                intervention=_to_jax(intervention or {}),
                 model_kwargs=args_bound,
             ),
         )
