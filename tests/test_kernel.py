@@ -24,7 +24,7 @@ import pytest
 from jax import Array, random
 from numpyro import deterministic, handlers, sample
 
-from aimz import ImpactModel, KernelValidationError
+from aimz import ImpactModel, KernelValidationError, OutputWarning
 from tests.conftest import lm, make_svi
 
 
@@ -92,7 +92,7 @@ def test_kernel_signature_validation() -> None:
 
 
 def test_kernel_body_validation(synthetic_data: tuple[Array, Array]) -> None:
-    """A kernel whose trace lacks a usable output site is rejected at the first call."""
+    """A kernel with an unusable site name or output site is rejected when traced."""
     X, y = synthetic_data
 
     def without_output_site(X: Array, y: Array | None = None) -> None:
@@ -108,11 +108,16 @@ def test_kernel_body_validation(synthetic_data: tuple[Array, Array]) -> None:
         mu = sample("x/y", dist.Normal())
         sample("y", dist.Normal(mu, 1.0), obs=y)
 
+    def site_named_draw(X: Array, y: Array | None = None) -> None:
+        mu = sample("draw", dist.Normal())
+        sample("y", dist.Normal(mu, 1.0), obs=y)
+
     for kernel in (
         without_output_site,
         deterministic_output,
         unobserved_output,
         site_with_slash,
+        site_named_draw,
     ):
         im = ImpactModel(kernel, rng_key=random.key(42), inference=make_svi(kernel))
         with pytest.raises(KernelValidationError):
@@ -125,6 +130,20 @@ def test_kernel_body_validation(synthetic_data: tuple[Array, Array]) -> None:
     im = ImpactModel(delta_only, rng_key=random.key(42), inference=make_svi(delta_only))
     with pytest.raises(KernelValidationError):
         im.sample_prior_predictive_on_batch(X)
+
+    # A plate named like an output dimension gives way to the default names
+    def plate_named_chain(X: Array, y: Array | None = None) -> None:
+        with numpyro.plate("chain", X.shape[0]):
+            sample("y", dist.Normal(0.0, 1.0), obs=y)
+
+    im = ImpactModel(
+        plate_named_chain,
+        rng_key=random.key(42),
+        inference=make_svi(plate_named_chain),
+    )
+    with pytest.warns(OutputWarning, match="plate name 'chain'"):
+        dt = im.sample_prior_predictive_on_batch(X, num_samples=10)
+    assert dt.prior_predictive["y"].dims == ("chain", "draw", "y_dim_0")
 
 
 def test_dual_branch_kernel_sites(synthetic_data: tuple[Array, Array]) -> None:

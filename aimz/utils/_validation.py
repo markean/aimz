@@ -339,11 +339,16 @@ def _validate_kernel_body(
     model_trace: OrderedDict[str, dict],
     with_output: bool,
 ) -> None:
-    """Raise for a trace without a usable output site.
+    """Raise for a trace with an unusable site name or without a usable output site.
 
     Raises:
-        KernelValidationError: If a site name holds ``/``, or the output site is
-            missing or, when ``with_output`` is set, is not an observed sample site.
+        KernelValidationError: If a site name holds ``/``, a sample or deterministic
+            site is named ``chain`` or ``draw``, or the output site is missing or,
+            when ``with_output`` is set, is not an observed sample site.
+
+    Warns:
+        OutputWarning: If a plate is named ``chain`` or ``draw``, so the sites in it
+            keep the default dimension names.
     """
     invalid_site = [site for site in model_trace if "/" in site]
     if invalid_site:
@@ -352,6 +357,20 @@ def _validate_kernel_body(
             "xarray.DataTree does not allow '/' in variable names."
         )
         raise KernelValidationError(msg)
+    for name in ("chain", "draw"):
+        kind = model_trace.get(name, {}).get("type")
+        if kind in ("sample", "deterministic"):
+            msg = (
+                f"The site name {name!r} is reserved for a dimension of the output "
+                "trees. Rename the site."
+            )
+            raise KernelValidationError(msg)
+        if kind == "plate":
+            msg = (
+                f"The plate name {name!r} is reserved for a dimension of the output "
+                "trees, so the sites in the plate keep the default dimension names."
+            )
+            warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
 
     if param_output not in model_trace:
         msg = (
