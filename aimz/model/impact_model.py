@@ -155,6 +155,8 @@ class ImpactModel(BaseModel):
             KernelValidationError: If the kernel signature does not meet the required
                 constraints.
             TypeError: If ``inference`` is neither SVI nor MCMC.
+            ValueError: If ``inference`` is SVI with static keyword arguments, which
+                aimz does not pass to the guide or the kernel outside training.
 
         Warns:
             AimzWarning: If ``rng_key`` is a legacy ``uint32`` key, which is converted
@@ -178,6 +180,14 @@ class ImpactModel(BaseModel):
                 "Expected `SVI` or `MCMC` from `numpyro.infer`."
             )
             raise TypeError(msg)
+        if isinstance(inference, SVI) and inference.static_kwargs:
+            msg = (
+                "`SVI` static keyword arguments "
+                f"({', '.join(inference.static_kwargs)}) are not supported, since aimz "
+                "draws from the guide and runs the kernel without them. Pass them as "
+                "keyword arguments of the kernel instead."
+            )
+            raise ValueError(msg)
         self._inference = inference
         self._vi_result: SVIRunResult | None = None
         self._vi_state = None

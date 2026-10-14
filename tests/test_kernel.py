@@ -23,6 +23,7 @@ import numpyro.distributions as dist
 import pytest
 from jax import Array, random
 from numpyro import deterministic, handlers, sample
+from numpyro.infer import SVI
 
 from aimz import ImpactModel, KernelValidationError, OutputWarning
 from tests.conftest import lm, make_svi
@@ -89,6 +90,13 @@ def test_kernel_signature_validation() -> None:
     assert im.describe()["arguments"] == ["X", "y"]
     with pytest.raises(TypeError, match="Unsupported inference object"):
         ImpactModel(lm, rng_key=random.key(42), inference=None)
+    vi = make_svi(lm)
+    with pytest.raises(ValueError, match="static keyword arguments"):
+        ImpactModel(
+            lm,
+            rng_key=random.key(42),
+            inference=SVI(lm, vi.guide, vi.optim, vi.loss, sd=1.0),
+        )
 
 
 def test_kernel_body_validation(synthetic_data: tuple[Array, Array]) -> None:
