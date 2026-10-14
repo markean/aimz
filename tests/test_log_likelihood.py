@@ -16,15 +16,18 @@
 
 import jax.numpy as jnp
 import numpy as np
+import numpyro.distributions as dist
 import pytest
 from jax import Array, random
+from numpyro import plate, sample
 
 from aimz import ImpactModel
 from tests.conftest import lm_subsample, make_svi
 
 
+@pytest.mark.filterwarnings("ignore:subsample_size does not match")
 def test_log_likelihood_subsampled_kernel(synthetic_data: tuple[Array, Array]) -> None:
-    """A subsampling kernel scores every row; a batch past its plate raises."""
+    """Subsampling kernels score every row; a batch past a fixed-size plate raises."""
     X, y = synthetic_data
     im = ImpactModel(
         lm_subsample,
@@ -52,6 +55,24 @@ def test_log_likelihood_subsampled_kernel(synthetic_data: tuple[Array, Array]) -
             )
     finally:
         im.cleanup()
+
+    # A plate sized by the rows it is given takes them all, as on a device's share
+    def gathering(X: Array, y: Array | None = None, k: int | None = None) -> None:
+        b = sample("b", dist.Normal())
+        with plate("obs", X.shape[0], subsample_size=k) as idx:
+            sample("y", dist.Normal(b * X[idx], 1.0), obs=None if y is None else y[idx])
+
+    im = ImpactModel(gathering, rng_key=random.key(0), inference=make_svi(gathering))
+    im.set_posterior_sample({"b": jnp.ones(4)})
+    x = jnp.arange(30.0) / 10
+    out = im.log_likelihood(
+        x, 2 * x, k=len(x), batch_size=12, store="memory", progress=False
+    )
+    np.testing.assert_allclose(
+        out.log_likelihood["y"].values[0],
+        np.tile(-0.5 * np.log(2 * np.pi) - 0.5 * x**2, (4, 1)),
+        rtol=1e-5,
+    )
 
 
 def test_log_likelihood_without_posterior(

@@ -212,6 +212,7 @@ def _create_sharded_log_likelihood(
                 **dict(zip(kwargs_key, args[:n], strict=True)),
                 **_combine(args[n:], kwargs_static),
             },
+            n_rows=X.shape[0],
         )[param_output]
         if not draws:
             _validate_streamed_axis_size(
