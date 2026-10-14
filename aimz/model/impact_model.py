@@ -1106,7 +1106,8 @@ class ImpactModel(BaseModel):
         """Draw posterior samples from the model's inference state.
 
         Args:
-            num_samples: The number of posterior samples to draw.
+            num_samples: The number of posterior samples to draw. Under MCMC, it counts
+                per chain and before thinning, as the sampler's ``num_samples`` does.
             rng_key: A pseudo-random number generator key, split from an internal key by
                 default. Ignored for MCMC, which continues its chain.
             return_sites: Names of the sites to return; by default the kernel's latent
@@ -1833,7 +1834,9 @@ class ImpactModel(BaseModel):
         Args:
             posterior_sample: Posterior samples by site name, with the draws along the
                 leading axis of each array. A deterministic site is kept, but the kernel
-                computes its values instead of taking them from the posterior.
+                computes its values instead of taking them from the posterior. An
+                observed site other than the output is kept, and a call that omits its
+                data takes the site's values from the posterior instead of drawing them.
             num_chains: Number of chains the draws are stacked from, chain by chain.
                 Output trees then keep the chains along their ``chain`` dimension.
 
@@ -2360,7 +2363,9 @@ class ImpactModel(BaseModel):
         progress: bool = True,
         **kwargs: object,
     ) -> xr.DataTree:
-        """Compute the log-likelihood of the data under the given model.
+        """Compute the log-likelihood of the output site under the given model.
+
+        Other observed sites and ``factor`` terms of the kernel are not scored.
 
         The batches are computed and written to a Zarr store concurrently, or kept in
         host memory with ``store="memory"``.

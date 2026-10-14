@@ -131,7 +131,7 @@ Can I use my own data loader?
 Yes.
 The streaming methods accept any finite iterable that yields batches as mappings from kernel parameter names to NumPy or JAX arrays, such as a generator wrapping a PyTorch ``DataLoader``.
 Batches may differ in size, no length is required, and padding for sharding and device placement are handled by aimz.
-:meth:`~aimz.ImpactModel.fit` accepts arrays or the built-in :class:`~aimz.utils.data.ArrayLoader`; for other loaders, write a training loop with :meth:`~aimz.ImpactModel.train_on_batch`.
+:meth:`~aimz.ImpactModel.fit` accepts such a loader too and iterates it once per epoch, so a loader for several epochs has to start a new pass each time it is iterated.
 See :doc:`user_guide/dataloader` for the batch contract and examples.
 
 
