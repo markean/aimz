@@ -173,6 +173,29 @@ def test_predict_per_observation_intervention() -> None:
     )
 
 
+@pytest.mark.filterwarnings("ignore:subsample_size does not match")
+def test_predict_subsample_plate_keeps_row_order() -> None:
+    """Rows gathered through a plate subsampling all of them stay in order."""
+
+    def kernel(X: Array, y: Array | None = None, k: int | None = None) -> None:
+        b = sample("b", dist.Normal())
+        with plate("obs", X.shape[0], subsample_size=k) as idx:
+            mu = deterministic("mu", b * X[idx])
+            sample("y", dist.Normal(mu, 1.0), obs=y)
+
+    X = jnp.arange(30.0)
+    im = ImpactModel(kernel, rng_key=random.key(0), inference=make_svi(kernel))
+    im.set_posterior_sample({"b": jnp.ones(4)})
+    # Each device's share of the rows is smaller than the subsample size
+    dt = im.predict(
+        X, k=len(X), return_sites="mu", batch_size=12, store="memory", progress=False
+    )
+
+    np.testing.assert_array_equal(
+        dt["posterior_predictive"]["mu"].values[0], np.tile(X, (4, 1))
+    )
+
+
 def test_predict_intervention_reuses_compiled_program(
     synthetic_data: tuple[Array, Array],
     im_lm_svi_fitted: ImpactModel,
