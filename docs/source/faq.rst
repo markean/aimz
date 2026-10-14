@@ -50,30 +50,21 @@ Most conventional models with global latents and a plate-based structure work ou
 The core requirement is that every sample site in the model must have a **static shape** that does not change with the data.
 The forward sampler used internally requires every traced site to have a fixed shape across all sample iterations, and the default observation-sharded execution additionally requires the posterior to be **replicable** across devices.
 
-Several modeling patterns can violate this requirement.
-The two most common are:
-
-* **Local latent variables**
-
-  A :external:func:`~numpyro.primitives.sample` call inside a :external:class:`~numpyro.primitives.plate` without ``obs=`` produces a posterior whose shape grows with the plate size along its second (observation) axis, for example ``(num_samples, n_obs)``, or ``(num_samples, n_obs, k)`` for a multi-output site.
-  The default observation-sharded execution splits the observations between batches and devices, so such a posterior, which covers all of them, cannot be replicated there.
-
-* **The** :external:func:`~numpyro.contrib.control_flow.scan` **primitive**
-
-  :external:func:`~numpyro.contrib.control_flow.scan` is commonly used for sequential or autoregressive models (e.g., state-space models, time-series forecasting).
-  The number of sites it creates typically grows with the sequence length, making the trace shape dynamic for the same reason.
+The most common pattern that violates this requirement is a **local latent variable**.
+A :external:func:`~numpyro.primitives.sample` call inside a :external:class:`~numpyro.primitives.plate` without ``obs=`` produces a posterior whose shape grows with the plate size along its second (observation) axis, for example ``(num_samples, n_obs)``, or ``(num_samples, n_obs, k)`` for a multi-output site.
+The default observation-sharded execution splits the observations between batches and devices, so such a posterior, which covers all of them, cannot be replicated there.
 
 For **local latent variables**, :meth:`~aimz.ImpactModel.predict` and :meth:`~aimz.ImpactModel.log_likelihood` detect the incompatible posterior shape, warn, and automatically rerun under draw-parallel sharding (``shard_axis="draw"``), which never splits the observation axis.
 :meth:`~aimz.ImpactModel.fit` with a ``batch_size`` smaller than the input warns with a :class:`~aimz.FitWarning` when the guide does not compute such a site from the batch, as when it keeps a value per position or plate index like :external:class:`~numpyro.infer.autoguide.AutoNormal`, since its batches then pair those values with other observations.
 A guide that computes the site from each observation's inputs, such as an amortized encoder, trains on batches without the warning.
 :meth:`~aimz.ImpactModel.sample_prior_predictive` has no posterior to replicate and needs no rerun: under ``shard_axis="obs"`` it draws local latents within each batch and shares only the global latents across batches.
 See :ref:`user-guide-sharding` for how the two sharding strategies differ, when to choose each, and a worked comparison of a compatible kernel and one that triggers the rerun.
-Draw-parallel sharding does not lift the static-shape requirement, so :external:func:`~numpyro.contrib.control_flow.scan`-based models remain unsupported.
 A local latent's posterior applies only to the observations the model was fitted on.
 For an array input with another number of observations, prediction and :meth:`~aimz.ImpactModel.log_likelihood` raise a ``ValueError`` that names the site, unless the site is intervened on.
 The fitted values are reused without notice for an input with the same number of observations, and, under ``shard_axis="obs"``, for one split into device batches with exactly the fitted number of rows, padding included.
 A data loader is checked one device batch at a time, so a loader batch that gives each device exactly the fitted number of rows passes too.
 To predict other observations, draw the site from the prior: set a posterior without it, or, if it is the only latent site, use :meth:`~aimz.ImpactModel.sample_prior_predictive`.
+A latent site inside the body of :external:func:`~numpyro.contrib.control_flow.scan` follows NumPyro's scan instead, intervened on or not: an input with fewer rows than the fitted ones raises NumPyro's ``RuntimeError``, and one with more rows takes the fitted values for the leading rows and draws the rest.
 
 A model with nested plates whose :external:func:`~numpyro.primitives.sample` sites are all observed (``obs=``) or whose latent shapes are fixed remains compatible; a model with a single plate containing one unobserved :external:func:`~numpyro.primitives.sample` site triggers the draw-parallel rerun.
 
@@ -112,6 +103,7 @@ A kernel that computes across observations, for example through a cumulative sum
 This happens without an error or a warning, unless the kernel's trace shows the dependence: a site recorded by :external:func:`~numpyro.contrib.control_flow.scan`, or a site drawn as one event over all the rows, such as a :external:class:`~numpyro.distributions.continuous.MultivariateNormal` over the observations.
 For such a kernel and an array input, the streaming methods warn with a :class:`~aimz.PerformanceWarning` and rerun under ``shard_axis="draw"``, which keeps the rows whole and in order, while a data loader still splits them, and so does :meth:`~aimz.ImpactModel.fit` with a ``batch_size`` smaller than the input, which warns with a :class:`~aimz.FitWarning`.
 Whether a split happens depends on the input size, ``batch_size``, and the number of devices, so such a kernel can give correct results on a small input on one device and wrong results on a larger input or on several devices.
+A plate inside the body of :external:func:`~numpyro.contrib.control_flow.scan` whose ``subsample_size`` exceeds the rows it receives, as when the kernel gathers rows through its indices and :meth:`~aimz.ImpactModel.predict` or :meth:`~aimz.ImpactModel.sample_prior_predictive` splits the input, takes the rows in a random order that differs between draws, so give it no ``subsample_size`` at prediction or pass ``shard_axis="draw"``.
 
 There are two ways to make such a kernel safe:
 
@@ -183,7 +175,7 @@ A :class:`~xarray.DataTree` organizes heterogeneous groups (``posterior``, ``pos
 It can also be passed to `ArviZ`_ functions.
 The dimensions of a site are named after the plates around it, for example ``obs`` for a site inside ``plate("obs", ...)``.
 Its other dimensions are named ``<site>_dim_<i>``, numbered from zero among them, so a site of shape ``(obs, 3)`` has the dimensions ``obs`` and ``<site>_dim_0``.
-To name such a dimension, list it in the site's ``infer={"event_dims": [...]}``.
+To name such a dimension of a sample site, list it in the site's ``infer={"event_dims": [...]}``; a deterministic site takes no ``infer``, so its other dimensions keep the default names.
 Names that cannot apply, such as a plate named ``chain`` or ``draw``, a name shared with a site, more names than the site has dimensions, or one name with two lengths in a group, give way to the default names with an :class:`~aimz.OutputWarning`.
 The plate names come from a trace of the kernel, which fitting or prior predictive sampling runs, so a posterior set with :meth:`~aimz.ImpactModel.set_posterior_sample` on a model that was never traced keeps the default names.
 Trees from the streaming methods are lazy, and ArviZ functions operate on loaded arrays, so call :external:meth:`~xarray.DataTree.load` on the tree first, or on a reduced result when the tree does not fit in memory.
