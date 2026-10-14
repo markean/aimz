@@ -148,14 +148,13 @@ Unlike the on-batch methods, ``store="memory"`` still batches (and, on multiple 
 
 Passing Keyword Arguments
 -------------------------
-Keyword arguments reach the kernel as they would in an uncompiled call.
-The streaming methods and :meth:`~aimz.ImpactModel.fit` give each one of two roles:
+The streaming methods and :meth:`~aimz.ImpactModel.fit` give each keyword argument one of two roles:
 
 * **Per-observation:** an array whose leading axis matches ``X`` is split into batches and sharded together with ``X``.
   With a data loader, the loader's fields play this role.
 * **Constant:** every other value is passed whole to every batch.
-  Arrays, including 0-D arrays, are traced, so their values can change between calls without recompiling.
-  Other values, such as integers, booleans, strings, and Python floats, are passed as static Python values, so they can set shapes or drive control flow in the kernel.
+  Arrays, including 0-D arrays and NumPy scalars, are traced, so their values can change between calls without recompiling, but the kernel cannot read them, for example to set a shape.
+  Other values, such as Python integers, floats, booleans, and strings, are passed as static Python values, so they can set shapes or drive control flow in the kernel.
   Containers such as dictionaries are handled leaf by leaf in the same way.
 
 .. code-block:: python

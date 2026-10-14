@@ -81,6 +81,7 @@ Two regression kernels are fitted to data generated with a quadratic term, so th
 Pointwise Log-Likelihood
 ------------------------
 :meth:`~aimz.ImpactModel.log_likelihood` evaluates every posterior draw on every observation.
+It scores the output site only, leaving out the kernel's other observed sites and ``factor`` terms, so a comparison covers the output alone.
 The memory store keeps the result in host memory, and :external:meth:`~xarray.DataTree.load` materializes it for ArviZ.
 
 .. jupyter-execute::
