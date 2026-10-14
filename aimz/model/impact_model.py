@@ -448,7 +448,7 @@ class ImpactModel(BaseModel):
                 0 < len(names) <= len(shape)
                 and all(isinstance(name, str) for name in names)
                 and len(set(names)) == len(names)
-                and not {"chain", "draw"} & set(names)
+                and not {"chain", "draw", *sample_sites, *return_sites} & set(names)
                 and shape[: len(frames)] == tuple(f.size for f in frames)
             )
             if names_apply:
@@ -1841,8 +1841,9 @@ class ImpactModel(BaseModel):
             The model instance, treated as fitted.
 
         Raises:
-            ValueError: If ``posterior_sample`` is empty, a value is 0-D, or the batch
-                shapes in ``posterior_sample`` are inconsistent.
+            ValueError: If ``posterior_sample`` is empty, a value is 0-D, the batch
+                shapes in ``posterior_sample`` are inconsistent, or a key is ``chain``
+                or ``draw``.
 
         Warns:
             AimzWarning: If the output site is in ``posterior_sample``; it is removed.
@@ -1862,6 +1863,12 @@ class ImpactModel(BaseModel):
             }
             msg = f"The output site {self.param_output!r} is removed."
             warn(msg, category=AimzWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
+        if reserved := sorted({"chain", "draw"} & posterior_sample.keys()):
+            msg = (
+                f"The site name(s) {', '.join(map(repr, reserved))} are reserved for a "
+                "dimension of the output trees. Rename the site(s)."
+            )
+            raise ValueError(msg)
         batch_ndims = 1
         posterior_sample = {
             name: sample
