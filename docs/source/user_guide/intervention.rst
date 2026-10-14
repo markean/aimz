@@ -11,6 +11,8 @@ The ``intervention`` argument maps sample site names to replacement values, for 
 The predictive methods apply this mapping through NumPyro_'s :external:class:`~numpyro.handlers.do` effect handler, so downstream computations use the specified values without requiring changes to the kernel.
 This includes deterministic downstream sites.
 You can intervene on multiple sites in the same call.
+A sample site inside the body of :external:func:`~numpyro.contrib.control_flow.scan` is the exception: NumPyro's :external:class:`~numpyro.handlers.do` does not reach it, so an intervention on it changes no draw, and no warning says so.
+To vary such a treatment, pass it as a keyword argument of the kernel and add it to the output through deterministic computations in the body; read only into the distribution of a latent site there, it changes nothing either.
 
 Values must broadcast to the shape expected by downstream computations.
 A scalar sets a site to the same value for every observation, and an array whose leading axis matches the number of observations sets a different value for each observation.
@@ -36,6 +38,7 @@ Before fitting, you can explore the model's prior predictions with ``z`` fixed a
 
 After fitting, the same mapping applies the intervention while using posterior samples for the other latent sites.
 A latent site downstream of the intervened one keeps its posterior draws and does not pass the intervention on, which :meth:`~aimz.ImpactModel.predict` warns about with :class:`~aimz.OutputWarning`; :doc:`estimands` shows how to write the kernel so that the path runs through deterministic computations.
+On a kernel built on :external:func:`~numpyro.contrib.control_flow.scan`, the warning does not fire when that path runs through a latent site inside the body.
 Here, the baseline holds ``z`` at one and the modified scenario holds it at zero, both drawn with the same key:
 
 .. code-block:: python

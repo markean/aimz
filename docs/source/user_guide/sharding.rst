@@ -52,7 +52,7 @@ Passing ``shard_axis="draw"`` explicitly skips the warning.
 The streaming methods, :meth:`~aimz.ImpactModel.sample_prior_predictive` included, rerun the same way for a kernel that computes across observations at a site recorded by :external:func:`~numpyro.contrib.control_flow.scan` or drawn as one event over all the rows (see :ref:`faq-cross-observation`).
 :meth:`~aimz.ImpactModel.predict` and :meth:`~aimz.ImpactModel.sample_prior_predictive` also rerun when a return site has no observation axis, such as a global deterministic site that a reparameterization creates, since such a site cannot be split with the rows, and when the kernel does not run on fewer rows than the input, such as one whose plate size is a fixed count.
 A data loader cannot rerun, so leave such a site out of ``return_sites`` when passing one.
-See :ref:`faq-model-compatibility` for the model patterns that trigger a rerun and those that stay unsupported.
+See :ref:`faq-model-compatibility` for the model patterns that trigger a rerun.
 The kernels below contrast a compatible model with one that triggers the rerun; a runnable version is in :doc:`streaming_and_on_batch`.
 
 .. code-block:: python
@@ -93,4 +93,4 @@ Constraints
 -----------
 
 Draw-parallel sharding does **not** lift the core static-shape requirement: every traced site must have a shape that is fixed across draws.
-In particular, :external:func:`~numpyro.contrib.control_flow.scan`-based models, whose number of sites grows with the sequence length, remain unsupported under either strategy.
+In particular, a site whose shape depends on a drawn value, such as a vector whose length is a sampled count, raises an error under either strategy, as it does in NumPyro.
