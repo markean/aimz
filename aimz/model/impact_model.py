@@ -1863,7 +1863,7 @@ class ImpactModel(BaseModel):
             }
             msg = f"The output site {self.param_output!r} is removed."
             warn(msg, category=AimzWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
-        if reserved := sorted({"chain", "draw"} & posterior_sample.keys()):
+        if reserved := sorted({"chain", "draw"}.intersection(posterior_sample)):
             msg = (
                 f"The site name(s) {', '.join(map(repr, reserved))} are reserved for a "
                 "dimension of the output trees. Rename the site(s)."
