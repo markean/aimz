@@ -46,9 +46,10 @@ def _pin_subsample_indices(msg: Message) -> Array | None:
         return None
     if subsample_size > size:
         err_msg = (
-            f"Plate site {msg['name']!r} declares size={size}, but the evaluated "
-            f"batch has {subsample_size} observations. Evaluate at most `size` "
-            "observations per batch, or declare a plate size covering the data."
+            f"Plate site {msg['name']!r} declares size={size} but "
+            f"subsample_size={subsample_size}. The rows are evaluated in batches split "
+            "across devices, and each must fit within the plate: declare a plate size "
+            "covering the data, or pass a smaller subsample size, such as None."
         )
         raise ValueError(err_msg)
 

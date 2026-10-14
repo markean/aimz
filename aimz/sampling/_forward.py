@@ -19,6 +19,7 @@ from __future__ import annotations
 from functools import partial
 from typing import TYPE_CHECKING
 
+import jax.numpy as jnp
 from jax import Array, lax, vmap
 from jax.core import Tracer
 from numpyro.handlers import do, mask, seed, substitute, trace
@@ -64,6 +65,16 @@ def _sample_forward(
         model = substitute(model, data=params)
     if intervention:
         model = do(model, data=intervention)
+    # A plate given fewer rows than its subsample size, such as a device's share of the
+    # rows, takes them in order
+    model = substitute(
+        model,
+        substitute_fn=lambda msg: (
+            jnp.arange(msg["args"][0])
+            if msg["type"] == "plate" and (msg["args"][1] or 0) > msg["args"][0]
+            else None
+        ),
+    )
 
     def _trace_one_sample(
         sample_input: tuple[Array, dict[str, Array]],
