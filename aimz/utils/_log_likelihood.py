@@ -29,12 +29,13 @@ if TYPE_CHECKING:
     from numpyro._typing import Message
 
 
-def _pin_subsample_indices(msg: Message) -> Array | None:
+def _pin_subsample_indices(msg: Message, n_rows: int) -> Array | None:
     """Pin the indices of a subsampling plate to ``arange``, for a seed-free trace.
 
     Each batch is passed through the model's arguments, so the indices only set shapes.
     A kernel that gathers rows from a closed-over array through them is not supported:
-    the pinned indices select the leading rows.
+    the pinned indices select the leading rows. A plate sized by the ``n_rows`` rows
+    being scored takes them all when its subsample size exceeds them.
 
     Raises:
         ValueError: If the batch is larger than the plate size.
@@ -45,11 +46,12 @@ def _pin_subsample_indices(msg: Message) -> Array | None:
     if subsample_size is None or subsample_size == size:
         return None
     if subsample_size > size:
+        if size == n_rows:
+            return jnp.arange(size)
         err_msg = (
-            f"Plate site {msg['name']!r} declares size={size} but "
-            f"subsample_size={subsample_size}. The rows are evaluated in batches split "
-            "across devices, and each must fit within the plate: declare a plate size "
-            "covering the data, or pass a smaller subsample size, such as None."
+            f"Plate site {msg['name']!r} declares size={size}, but the evaluated "
+            f"batch has {n_rows} observations. Evaluate at most `size` observations "
+            "per batch, or declare a plate size covering the data."
         )
         raise ValueError(err_msg)
 
@@ -91,11 +93,12 @@ def _log_likelihood(
     samples: dict[str, Array] | None,
     params: dict[str, Array] | None,
     model_kwargs: Mapping[str, object] | None,
+    n_rows: int,
 ) -> dict[str, Array]:
     """Compute the log-likelihood at the observed sites for each posterior draw.
 
     Without ``samples`` the result has a single draw. The plate indices are pinned by
-    :func:`_pin_subsample_indices`.
+    :func:`_pin_subsample_indices` for the ``n_rows`` rows being scored.
 
     Returns:
         The log-probability of each observed site, with the draws on the leading axis.
@@ -104,7 +107,10 @@ def _log_likelihood(
         model = substitute(model, data=params)
 
     def _loglik_one_sample(sample: dict[str, Array]) -> dict[str, Array]:
-        pinned_model = substitute(model, substitute_fn=_pin_subsample_indices)
+        pinned_model = substitute(
+            model,
+            substitute_fn=partial(_pin_subsample_indices, n_rows=n_rows),
+        )
         substituted_model = (
             substitute(
                 pinned_model,
