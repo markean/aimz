@@ -497,7 +497,10 @@ class ImpactModel(BaseModel):
                 self._coupled_sites.add(k)
             else:
                 self._coupled_sites.discard(k)
-        deps = get_dependencies(self.kernel, model_kwargs=dict(args_bound))
+        try:
+            deps = get_dependencies(self.kernel, model_kwargs=dict(args_bound))
+        except Exception:
+            deps = {"prior_dependencies": {}}
         for k, v in cast("Mapping[str, Mapping]", deps["prior_dependencies"]).items():
             self._site_parents[k] = set(v) - {k}
         prev = self._kernel_spec

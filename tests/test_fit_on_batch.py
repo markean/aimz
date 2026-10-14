@@ -16,11 +16,12 @@
 
 import warnings
 
+import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
 import pytest
 from jax import Array, random
-from numpyro import deterministic, sample
+from numpyro import deterministic, handlers, plate, sample
 from numpyro.infer import MCMC, NUTS
 
 from aimz import ImpactModel
@@ -106,3 +107,20 @@ def test_fit_on_batch_input_validation(synthetic_data: tuple[Array, Array]) -> N
         im.fit_on_batch(X=X, y=1.0)
     with pytest.raises(ValueError, match="must have the same leading-axis size"):
         im.fit_on_batch(X=X, y=y[:-1])
+
+
+def test_fit_on_batch_scaled_kernel_refits(synthetic_data: tuple[Array, Array]) -> None:
+    """A kernel weighting its rows through a scale fits again in a new model."""
+    X, y = synthetic_data
+
+    def kernel(X: Array, w: Array, y: Array | None = None) -> None:
+        b = sample("b", dist.Normal().expand([X.shape[1]]).to_event(1))
+        with plate("obs", X.shape[0]), handlers.scale(scale=w):
+            sample("y", dist.Normal(X @ b, 1.0), obs=y)
+
+    w = np.linspace(0.5, 1.5, len(X), dtype=np.float32)
+    # NumPyro's dependency trace fails for the second model, which still fits
+    for weights in (jnp.asarray(w), w):
+        im = ImpactModel(kernel, rng_key=random.key(0), inference=make_svi(kernel))
+        im.fit_on_batch(X, y, w=weights, num_steps=10, num_samples=5, progress=False)
+        assert im.is_fitted()
