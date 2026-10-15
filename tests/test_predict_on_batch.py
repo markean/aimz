@@ -97,3 +97,22 @@ def test_predict_on_batch_warns_on_dimension_names_that_cannot_apply() -> None:
     assert dt.posterior["u"].dims == ("chain", "draw", "u_dim_0")
     assert dt.posterior["v"].dims == ("chain", "draw", "v_dim_0")
     assert dt.posterior_predictive["mu"].dims == ("chain", "draw", "obs")
+
+    # A name shared with a site of one branch gives way in every trace
+    def branched(X: Array, y: Array | None = None) -> None:
+        w = sample(
+            "w", dist.Normal().expand([4]).to_event(1), infer={"event_dims": ["q"]}
+        )
+        with plate("obs", X.shape[0]):
+            sample("y", dist.Normal(w.sum() + X[:, 0], 1.0), obs=y)
+        if y is None:
+            deterministic("q", 2 * w)
+
+    im = ImpactModel(branched, rng_key=random.key(0), inference=make_svi(branched))
+    with pytest.warns(OutputWarning, match="names .* of site 'w' cannot apply"):
+        im.sample_prior_predictive_on_batch(X, num_samples=4)
+    with pytest.warns(OutputWarning, match="names .* of site 'w' cannot apply"):
+        im.fit_on_batch(X, y, num_steps=5, num_samples=4, progress=False)
+    dt = im.sample_prior_predictive_on_batch(X, num_samples=4, return_sites=["q", "w"])
+    assert dt.prior_predictive["w"].dims == ("chain", "draw", "w_dim_0")
+    assert "q" in dt.prior_predictive.data_vars
