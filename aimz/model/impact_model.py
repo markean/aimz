@@ -673,12 +673,13 @@ class ImpactModel(BaseModel):
                     skip_file_prefixes=_SKIP_FILE_PREFIXES,
                 )
                 shard_axis, batch_size = "draw", None
-        if shard_axis == "obs" and return_sites:
+        if return_sites:
             # A site without the observation axis, such as a global deterministic site,
             # has no rows to split. Abstract traces of this call, at its rows and at one
             # row fewer, as in a device batch, tell the sites that follow the rows: an
             # earlier trace may have had other arguments, and a global site may match
-            # the row count.
+            # the row count. Under `draw`, which keeps the rows whole, only the output
+            # is checked.
             kwargs_rows, kwargs_const = _group_kwargs(kwargs or {}, n_obs=n_obs)
             constants, fields = _split_intervention(intervention, n_obs)
             constants = _to_jax(constants)
@@ -731,7 +732,7 @@ class ImpactModel(BaseModel):
             per_row = {k for k, v in shapes.items() if v.shape[:1] == (n_obs,)}
             msg, category = None, PerformanceWarning
             try:
-                if n_obs > 1:
+                if n_obs > 1 and shard_axis == "obs":
                     fewer = shapes_at(n_obs - 1)
                     per_row &= {
                         k for k, v in fewer.items() if v.shape[:1] == (n_obs - 1,)
@@ -745,26 +746,30 @@ class ImpactModel(BaseModel):
                     "`shard_axis='draw'`. Pass `shard_axis='draw'` to silence this "
                     "warning."
                 )
-            else:
-                whole = sorted(shapes.keys() - per_row)
-                if self.param_output in whole:
-                    msg = (
-                        f"The output site {self.param_output!r} does not have one "
-                        "value per row of the input, so `shard_axis='obs'` cannot "
-                        "split it; rerunning with `shard_axis='draw'`."
-                    )
-                    category = OutputWarning
-                elif whole:
-                    msg = (
-                        f"Return site(s) {', '.join(map(repr, whole))} have no "
-                        "observation axis, so `shard_axis='obs'` cannot split them; "
-                        "rerunning with `shard_axis='draw'`. Pass `shard_axis='draw'`, "
-                        "or leave the site(s) out of `return_sites`, to silence this "
-                        "warning."
-                    )
+            whole = sorted(shapes.keys() - per_row)
+            if self.param_output in whole:
+                msg = (
+                    f"The output site {self.param_output!r} does not have one value "
+                    "per row of the input"
+                ) + (
+                    ", so `shard_axis='obs'` cannot split it; rerunning with "
+                    "`shard_axis='draw'`."
+                    if shard_axis == "obs"
+                    else "."
+                )
+                category = OutputWarning
+            elif whole and msg is None and shard_axis == "obs":
+                msg = (
+                    f"Return site(s) {', '.join(map(repr, whole))} have no "
+                    "observation axis, so `shard_axis='obs'` cannot split them; "
+                    "rerunning with `shard_axis='draw'`. Pass `shard_axis='draw'`, "
+                    "or leave the site(s) out of `return_sites`, to silence this "
+                    "warning."
+                )
             if msg is not None:
                 warn(msg, category=category, skip_file_prefixes=_SKIP_FILE_PREFIXES)
-                shard_axis, batch_size = "draw", None
+                if shard_axis == "obs":
+                    shard_axis, batch_size = "draw", None
         if (
             shard_axis == "obs"
             and batch_size is not None
@@ -1015,7 +1020,8 @@ class ImpactModel(BaseModel):
 
         Warns:
             OutputWarning: If the output site does not have one value per row of an
-                array input, so the call reruns under ``shard_axis="draw"``.
+                array input; under ``shard_axis="obs"`` the call then reruns under
+                ``shard_axis="draw"``.
             PerformanceWarning: If ``shard_axis="obs"`` cannot split an array input,
                 as for a return site without an observation axis, so the call reruns
                 under ``shard_axis="draw"``.
@@ -2122,8 +2128,8 @@ class ImpactModel(BaseModel):
             OutputWarning: If an intervened site reaches the output only through sites
                 whose values are taken from the posterior or intervened on, so that
                 the draws do not respond to it, or if the output site does not have one
-                value per row of an array input, so the call reruns under
-                ``shard_axis="draw"``.
+                value per row of an array input; under ``shard_axis="obs"`` the call
+                then reruns under ``shard_axis="draw"``.
             PerformanceWarning: If ``shard_axis="obs"`` cannot split an array input,
                 as for a return site without an observation axis or a latent site with
                 one value per observation, so the call reruns under
