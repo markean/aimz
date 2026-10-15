@@ -673,15 +673,16 @@ class ImpactModel(BaseModel):
                     skip_file_prefixes=_SKIP_FILE_PREFIXES,
                 )
                 shard_axis, batch_size = "draw", None
-        if return_sites:
+        if return_sites and (shard_axis == "obs" or self.param_output in return_sites):
             # A site without the observation axis, such as a global deterministic site,
             # has no rows to split. Abstract traces of this call, at its rows and at one
             # row fewer, as in a device batch, tell the sites that follow the rows: an
             # earlier trace may have had other arguments, and a global site may match
-            # the row count. Under `draw`, which keeps the rows whole, only the output
-            # is checked.
-            kwargs_rows, kwargs_const = _group_kwargs(kwargs or {}, n_obs=n_obs)
-            constants, fields = _split_intervention(intervention, n_obs)
+            # the row count. Under `draw`, which keeps the rows whole and passes every
+            # argument whole, only the output is checked.
+            n_split = n_obs if shard_axis == "obs" else None
+            kwargs_rows, kwargs_const = _group_kwargs(kwargs or {}, n_obs=n_split)
+            constants, fields = _split_intervention(intervention, n_split)
             constants = _to_jax(constants)
             leaves, static = _partition(kwargs_const)
 
