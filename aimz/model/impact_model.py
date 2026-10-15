@@ -445,8 +445,13 @@ class ImpactModel(BaseModel):
             ),
         )
         # Dimension names: the plates, outermost first, then the event dimensions named
-        # in the site's `infer` dictionary
+        # in the site's `infer` dictionary, none of them a site's in this trace or an
+        # earlier one
         rows = getattr(args_bound[self.param_input], "shape", ())[:1]
+        prev = self._kernel_spec
+        taken = {"chain", "draw", *sample_sites, *return_sites}
+        if prev is not None and prev.traced:
+            taken |= {*prev.sample_sites, *prev.return_sites}
         for k, v in model_trace.items():
             if v["type"] not in {"sample", "deterministic"}:
                 continue
@@ -458,21 +463,25 @@ class ImpactModel(BaseModel):
                 0 < len(names) <= len(shape)
                 and all(isinstance(name, str) for name in names)
                 and len(set(names)) == len(names)
-                and not {"chain", "draw", *sample_sites, *return_sites} & set(names)
+                and not taken & set(names)
                 and shape[: len(frames)] == tuple(f.size for f in frames)
             )
             if names_apply:
                 self._dims[k] = names
-            elif event_dims:
-                msg = (
-                    f"The event dimension names {tuple(event_dims)!r} of site {k!r} "
-                    "cannot apply, so the site keeps the default dimension names."
-                )
-                warn(
-                    msg,
-                    category=OutputWarning,
-                    skip_file_prefixes=_SKIP_FILE_PREFIXES,
-                )
+            else:
+                # Names that an earlier trace applied give way too
+                self._dims.pop(k, None)
+                if event_dims:
+                    msg = (
+                        f"The event dimension names {tuple(event_dims)!r} of site "
+                        f"{k!r} cannot apply, so the site keeps the default dimension "
+                        "names."
+                    )
+                    warn(
+                        msg,
+                        category=OutputWarning,
+                        skip_file_prefixes=_SKIP_FILE_PREFIXES,
+                    )
             # Values per draw: per observation when the leading axis follows the input
             # rows, else whole
             if hasattr(v["value"], "shape"):
@@ -503,7 +512,6 @@ class ImpactModel(BaseModel):
             deps = {"prior_dependencies": {}}
         for k, v in cast("Mapping[str, Mapping]", deps["prior_dependencies"]).items():
             self._site_parents[k] = set(v) - {k}
-        prev = self._kernel_spec
         if prev is not None and prev.traced:
             sample_sites = tuple(dict.fromkeys(prev.sample_sites + sample_sites))
             return_sites = tuple(dict.fromkeys(return_sites + prev.return_sites))
