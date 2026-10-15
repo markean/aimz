@@ -101,6 +101,11 @@ def test_predict_site_without_observation_axis(
     with pytest.warns(OutputWarning, match="'y' does not have one value per row"):
         dt = im.predict(X, n=3, progress=False)
     assert dt.posterior_predictive["y"].shape == (1, 5, 3)
+    # So does it in the on-batch methods, which take the whole input
+    with pytest.warns(OutputWarning, match="'y' does not have one value per row"):
+        im.predict_on_batch(X, n=3)
+    with pytest.warns(OutputWarning, match="'y' does not have one value per row"):
+        im.sample_prior_predictive_on_batch(X, n=3, num_samples=2)
 
 
 def test_predict_warns_on_unknown_return_site(
