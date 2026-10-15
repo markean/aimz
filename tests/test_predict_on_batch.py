@@ -99,13 +99,13 @@ def test_predict_on_batch_warns_on_dimension_names_that_cannot_apply() -> None:
     assert dt.posterior_predictive["mu"].dims == ("chain", "draw", "obs")
 
     # A name shared with a site of one branch gives way in every trace
-    def branched(X: Array, y: Array | None = None) -> None:
+    def branched(X: Array, y: Array | None = None, *, observed: bool = False) -> None:
         w = sample(
             "w", dist.Normal().expand([4]).to_event(1), infer={"event_dims": ["q"]}
         )
         with plate("obs", X.shape[0]):
             sample("y", dist.Normal(w.sum() + X[:, 0], 1.0), obs=y)
-        if y is None:
+        if (y is not None) is observed:
             deterministic("q", 2 * w)
 
     im = ImpactModel(branched, rng_key=random.key(0), inference=make_svi(branched))
@@ -114,5 +114,22 @@ def test_predict_on_batch_warns_on_dimension_names_that_cannot_apply() -> None:
     with pytest.warns(OutputWarning, match="names .* of site 'w' cannot apply"):
         im.fit_on_batch(X, y, num_steps=5, num_samples=4, progress=False)
     dt = im.sample_prior_predictive_on_batch(X, num_samples=4, return_sites=["q", "w"])
+    assert dt.prior_predictive["w"].dims == ("chain", "draw", "w_dim_0")
+    assert "q" in dt.prior_predictive.data_vars
+    # With the site in the other branch, the fit drops the name stored before
+    im = ImpactModel(branched, rng_key=random.key(0), inference=make_svi(branched))
+    im.sample_prior_predictive_on_batch(X, num_samples=4, observed=True)
+    with pytest.warns(OutputWarning, match="names .* of site 'w' cannot apply"):
+        im.fit_on_batch(X, y, num_steps=5, num_samples=4, progress=False, observed=True)
+    dt = im.predict_on_batch(X, observed=True)
+    assert dt.posterior["w"].dims == ("chain", "draw", "w_dim_0")
+    # A fit before any prior trace stores the name, which the tree then drops
+    im = ImpactModel(branched, rng_key=random.key(0), inference=make_svi(branched))
+    im.fit_on_batch(X, y, num_steps=5, num_samples=4, progress=False)
+    with pytest.warns(OutputWarning) as record:
+        dt = im.sample_prior_predictive_on_batch(
+            X, num_samples=4, return_sites=["q", "w"]
+        )
+    assert any("'q' would name a site" in str(w.message) for w in record)
     assert dt.prior_predictive["w"].dims == ("chain", "draw", "w_dim_0")
     assert "q" in dt.prior_predictive.data_vars

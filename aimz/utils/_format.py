@@ -67,7 +67,7 @@ def _group_dims(
 
     Warns:
         OutputWarning: If sites keep the default names because a name would have two
-            lengths within the group.
+            lengths within the group, or would name a site of the group.
     """
     names = {
         site: _site_dims(site, len(shape), dims.get(site, ()))
@@ -87,6 +87,15 @@ def _group_dims(
             "group."
         )
         warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
+    # A dimension named like a site of the group would replace the site's values
+    if taken := (lengths.keys() & shapes.keys()) - clashes:
+        kept = [site for site in shapes if taken & set(names[site])]
+        msg = (
+            f"The sites {', '.join(map(repr, kept))} keep the default dimension names: "
+            f"{', '.join(map(repr, sorted(taken)))} would name a site of the group."
+        )
+        warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
+        clashes |= taken
 
     return {
         site: _site_dims(site, len(shapes[site]))
