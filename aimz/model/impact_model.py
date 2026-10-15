@@ -902,6 +902,10 @@ class ImpactModel(BaseModel):
             ValueError: If ``intervention`` names a site that is not a sample site of
                 the kernel.
 
+        Warns:
+            OutputWarning: If the output site does not have one value per row of the
+                input.
+
         See Also:
             :meth:`~aimz.ImpactModel.sample_prior_predictive`
         """
@@ -925,6 +929,13 @@ class ImpactModel(BaseModel):
                 model_kwargs=args_bound,
             ),
         )
+        out = prior_predictive_samples.get(self.param_output)
+        if out is not None and np.shape(out)[1:2] != (len(X),):
+            msg = (
+                f"The output site {self.param_output!r} does not have one value per "
+                "row of the input."
+            )
+            warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
 
         if not return_datatree:
             return prior_predictive_samples
@@ -1984,7 +1995,8 @@ class ImpactModel(BaseModel):
         Warns:
             OutputWarning: If an intervened site reaches the output only through sites
                 whose values are taken from the posterior or intervened on, so that
-                the draws do not respond to it.
+                the draws do not respond to it, or if the output site does not have one
+                value per row of the input.
         """
         _check_is_fitted(self)
         _validate_intervention(intervention, kernel_spec=self._kernel_spec)
@@ -2018,6 +2030,13 @@ class ImpactModel(BaseModel):
                 model_kwargs=args_bound,
             ),
         )
+        out = samples.get(self.param_output)
+        if out is not None and np.shape(out)[1:2] != (len(X),):
+            msg = (
+                f"The output site {self.param_output!r} does not have one value per "
+                "row of the input."
+            )
+            warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
 
         if not return_datatree:
             return samples
