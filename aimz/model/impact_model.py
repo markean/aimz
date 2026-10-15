@@ -1582,9 +1582,11 @@ class ImpactModel(BaseModel):
             )
             # Batches split a site that computes across observations: one recorded by a
             # scan, or one drawn as an event whose size follows the rows. An abstract
-            # trace at one row more drops an event that keeps the batch size.
+            # trace at twice the batch's rows, or all of them, drops an event that keeps
+            # the batch size.
             n_obs = len(dataloader.dataset)
-            rows_more = dataloader.batch_size + 1
+            batch_rows = dataloader.batch_size
+            rows_more = min(2 * batch_rows, n_obs)
             coupled = set(self._coupled_sites)
             follow: dict[str, bool] = {}
             if coupled:
@@ -1595,7 +1597,7 @@ class ImpactModel(BaseModel):
                                 {
                                     k: bool(v.get("_control_flow_done"))
                                     or getattr(v.get("fn"), "event_shape", ())[:1]
-                                    != (rows_more - 1,)
+                                    != (batch_rows,)
                                     for k, v in trace(
                                         substitute(
                                             seed(self.kernel, rng_seed=self.rng_key),
