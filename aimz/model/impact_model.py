@@ -447,7 +447,8 @@ class ImpactModel(BaseModel):
         )
         # Dimension names: the plates, outermost first, then the event dimensions named
         # in the site's `infer` dictionary, none of them a site's in this trace or an
-        # earlier one
+        # earlier one. A site recorded by control flow keeps the default names, as
+        # `scan` stacks its values along a leading time axis.
         rows = getattr(args_bound[self.param_input], "shape", ())[:1]
         prev = self._kernel_spec
         taken = {"chain", "draw", *sample_sites, *return_sites}
@@ -461,7 +462,8 @@ class ImpactModel(BaseModel):
             names = (*(f.name for f in frames), *event_dims)
             shape = getattr(v["value"], "shape", ())
             names_apply = (
-                0 < len(names) <= len(shape)
+                not v.get("_control_flow_done")
+                and 0 < len(names) <= len(shape)
                 and all(isinstance(name, str) for name in names)
                 and len(set(names)) == len(names)
                 and not taken & set(names)
