@@ -222,8 +222,8 @@ def test_estimate_effect_scenario_compatibility(
             output_intervention=base.isel(y_dim_0=slice(50, 100)),
         )
 
-    # A site named differently in the two scenarios takes the default names in both,
-    # keeping the leading names they share and skipping those that name a site
+    # A site named differently in the two scenarios takes the intervention's names, or
+    # new default names where the baseline uses those, keeping its labels
     def kernel(X: Array, y: Array | None = None, *, report: bool = False) -> None:
         w = sample(
             "w", dist.Normal().expand([4]).to_event(1), infer={"event_dims": ["q"]}
@@ -240,22 +240,27 @@ def test_estimate_effect_scenario_compatibility(
     im.sample_prior_predictive_on_batch(X, num_samples=2)
     im.set_posterior_sample({"w": jnp.ones((5, 4))})
     sites = ["w", "w_dim_0", "mu"]
-    with pytest.warns(OutputWarning) as record:
-        effect = im.estimate_effect(
-            args_baseline={"X": X, "return_sites": sites},
-            args_intervention={
-                "X": X,
-                "report": True,
-                "return_sites": [*sites, "q", "mu_dim_0"],
-            },
-            on_batch=True,
+    args = {"X": X, "return_sites": sites}
+    args_report = {"X": X, "report": True, "return_sites": [*sites, "q", "mu_dim_0"]}
+    for args_baseline, args_intervention, i in (
+        (args, args_report, 1),
+        (args_report, args, 2),
+    ):
+        with pytest.warns(OutputWarning) as record:
+            effect = im.estimate_effect(
+                args_baseline=args_baseline,
+                args_intervention=args_intervention,
+                on_batch=True,
+            )
+        assert any(
+            "'mu', 'w' have other dimension names" in str(w.message) for w in record
         )
-    assert any("'mu', 'w' have other dimension names" in str(w.message) for w in record)
-    w, mu = effect.posterior_predictive["w"], effect.posterior_predictive["mu"]
-    assert w.dims == ("chain", "draw", "w_dim_1")
-    assert mu.dims == ("chain", "draw", "obs", "mu_dim_1")
-    assert (w == 0).all()
-    assert (mu == 0).all()
+        w, mu = effect.posterior_predictive["w"], effect.posterior_predictive["mu"]
+        assert w.dims == ("chain", "draw", f"w_dim_{i}")
+        assert mu.dims == ("chain", "draw", "obs", f"mu_dim_{i}")
+        assert "obs" in mu.coords
+        assert (w == 0).all()
+        assert (mu == 0).all()
 
 
 def test_estimate_effect_warns_on_stale_baseline(

@@ -24,7 +24,7 @@ from copy import copy
 from datetime import UTC, datetime
 from functools import partial
 from inspect import signature, stack
-from itertools import takewhile
+from itertools import count
 from pathlib import Path
 from shutil import rmtree
 from tempfile import TemporaryDirectory
@@ -78,7 +78,6 @@ from aimz.sampling._forward import _sample_forward
 from aimz.utils._format import (
     _build_datatree,
     _dict_to_datatree,
-    _site_dims,
 )
 from aimz.utils._kwargs import (
     _combine,
@@ -2352,59 +2351,74 @@ class ImpactModel(BaseModel):
         if stale is not None and "artifact_path" in stale.attrs:
             rmtree(stale.attrs["artifact_path"], ignore_errors=True)
 
-        # A site of one shape whose dimensions are named differently in the two
-        # scenarios, as when only one of them returns a site that a dimension name
-        # would collide with, takes the default names in both, so that its effect does
-        # not broadcast
+        # A site whose dimensions are named differently in the two scenarios, as when
+        # only one of them returns a site that a default name skips, takes the
+        # intervention's name for each such dimension, or a new default name where the
+        # baseline already uses that one, and keeps its labels, so that its effect
+        # aligns instead of broadcasting
         baseline = dt_baseline[group].to_dataset()
         intervention = dt_intervention[group].to_dataset()
         if renamed := sorted(
             str(site)
             for site in baseline.data_vars.keys() & intervention.data_vars.keys()
-            if baseline[site].shape == intervention[site].shape
-            and baseline[site].dims != intervention[site].dims
+            if baseline[site].ndim == intervention[site].ndim
+            and set(baseline[site].dims) != set(intervention[site].dims)
         ):
-            sites = {str(site) for site in (*baseline, *intervention)}
-            # The leading names both scenarios give a site, as a plate's, stay
-            shared = {
-                site: [
-                    str(a)
-                    for a, _ in takewhile(
-                        lambda pair: pair[0] == pair[1],
-                        zip(
-                            baseline[site].dims[2:],
-                            intervention[site].dims[2:],
-                            strict=True,
-                        ),
-                    )
-                ]
-                for site in renamed
+            taken = {
+                str(name)
+                for ds in (baseline, intervention)
+                for name in (*ds.variables, *ds.dims)
             }
-            # The renamed sites' old dimensions go unless another site keeps them
+            used = {str(name) for name in (*baseline.variables, *baseline.dims)}
+            arrays_baseline, arrays_intervention = {}, {}
+            for site in renamed:
+                names_baseline, names_intervention = {}, {}
+                for old, new in zip(
+                    [d for d in baseline[site].dims if d not in {"chain", "draw"}],
+                    [d for d in intervention[site].dims if d not in {"chain", "draw"}],
+                    strict=True,
+                ):
+                    if old == new:
+                        continue
+                    if new in used:
+                        names_intervention[new] = next(
+                            name
+                            for i in count()
+                            if (name := f"{site}_dim_{i}") not in taken
+                        )
+                        taken.add(names_intervention[new])
+                    names_baseline[old] = names_intervention.get(new, new)
+                    used.add(names_baseline[old])
+                arrays_baseline[site] = baseline[site].rename(names_baseline)
+                arrays_intervention[site] = intervention[site].rename(
+                    names_intervention
+                )
+            baseline = baseline.drop_vars(list(arrays_baseline)).assign(arrays_baseline)
+            intervention = intervention.drop_vars(list(arrays_intervention)).assign(
+                arrays_intervention,
+            )
+            # A coordinate on a dimension no site uses any more would clash with a site
+            # of its name
             baseline, intervention = (
                 ds.drop_vars(
-                    {d for site in renamed for d in ds[site].dims[2:]}
-                    - {
-                        d
-                        for v in ds.data_vars.keys() - set(renamed)
-                        for d in ds[v].dims
-                    },
+                    [
+                        name
+                        for name in ds.coords
+                        if not set(ds.variables[name].dims) <= dims
+                    ],
                 )
-                for ds in (baseline, intervention)
-            )
-            for ds in (baseline, intervention):
-                for site in renamed:
-                    ds[site] = (
-                        (
-                            "chain",
-                            "draw",
-                            *_site_dims(site, ds[site].ndim - 2, shared[site], sites),
-                        ),
-                        ds[site].data,
+                for ds, dims in (
+                    (
+                        ds,
+                        {d for name in ds.data_vars for d in ds.variables[name].dims},
                     )
+                    for ds in (baseline, intervention)
+                )
+            )
             msg = (
                 f"The site(s) {', '.join(map(repr, renamed))} have other dimension "
-                "names in the two scenarios, so their effects take the default names."
+                "names in the two scenarios, so their effects take the names of the "
+                "intervention, or new default names where the baseline uses those."
             )
             warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
         out = xr.DataTree(name="root")
