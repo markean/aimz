@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import datetime as dt
 from importlib.metadata import version
+from itertools import count, islice
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from warnings import warn
@@ -62,13 +63,9 @@ def _site_dims(
     """
     if len(set(names)) < len(names) or {"chain", "draw"} & set(names):
         names = ()
-    defaults = [
-        name
-        for i in range(ndim + len(sites))
-        if (name := f"{site}_dim_{i}") not in sites
-    ]
+    defaults = (name for i in count() if (name := f"{site}_dim_{i}") not in sites)
 
-    return [*names[:ndim], *defaults[: max(ndim - len(names), 0)]]
+    return [*names[:ndim], *islice(defaults, max(ndim - len(names), 0))]
 
 
 def _group_dims(
