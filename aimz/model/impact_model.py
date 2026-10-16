@@ -447,10 +447,17 @@ class ImpactModel(BaseModel):
         )
         # Dimension names: the plates, outermost first, then the event dimensions named
         # in the site's `infer` dictionary, none of them a site's in this trace or an
-        # earlier one. A site recorded by control flow keeps the default names, as
-        # `scan` stacks its values along a leading time axis.
+        # earlier one. A site that `scan` records keeps the default names, as `scan`
+        # stacks its values along a leading time axis and `cond` does not. Only sample
+        # sites carry the mark of `scan`, so a deterministic site recorded by control
+        # flow keeps them only in a trace with a marked sample site.
         rows = getattr(args_bound[self.param_input], "shape", ())[:1]
         prev = self._kernel_spec
+        scanned = {
+            k
+            for k, v in model_trace.items()
+            if "_scan_current_index" in (v.get("infer") or {})
+        }
         taken = {"chain", "draw", *sample_sites, *return_sites}
         if prev is not None and prev.traced:
             taken |= {*prev.sample_sites, *prev.return_sites}
@@ -462,7 +469,12 @@ class ImpactModel(BaseModel):
             names = (*(f.name for f in frames), *event_dims)
             shape = getattr(v["value"], "shape", ())
             names_apply = (
-                not v.get("_control_flow_done")
+                k not in scanned
+                and not (
+                    scanned
+                    and v["type"] == "deterministic"
+                    and v.get("_control_flow_done")
+                )
                 and 0 < len(names) <= len(shape)
                 and all(isinstance(name, str) for name in names)
                 and len(set(names)) == len(names)
