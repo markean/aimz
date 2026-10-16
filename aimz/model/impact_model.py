@@ -24,6 +24,7 @@ from copy import copy
 from datetime import UTC, datetime
 from functools import partial
 from inspect import signature, stack
+from itertools import takewhile
 from pathlib import Path
 from shutil import rmtree
 from tempfile import TemporaryDirectory
@@ -2364,13 +2365,40 @@ class ImpactModel(BaseModel):
             and baseline[site].dims != intervention[site].dims
         ):
             sites = {str(site) for site in (*baseline, *intervention)}
+            # The leading names both scenarios give a site, as a plate's, stay
+            shared = {
+                site: [
+                    str(a)
+                    for a, _ in takewhile(
+                        lambda pair: pair[0] == pair[1],
+                        zip(
+                            baseline[site].dims[2:],
+                            intervention[site].dims[2:],
+                            strict=True,
+                        ),
+                    )
+                ]
+                for site in renamed
+            }
+            # The renamed sites' old dimensions go unless another site keeps them
+            baseline, intervention = (
+                ds.drop_vars(
+                    {d for site in renamed for d in ds[site].dims[2:]}
+                    - {
+                        d
+                        for v in ds.data_vars.keys() - set(renamed)
+                        for d in ds[v].dims
+                    },
+                )
+                for ds in (baseline, intervention)
+            )
             for ds in (baseline, intervention):
                 for site in renamed:
                     ds[site] = (
                         (
                             "chain",
                             "draw",
-                            *_site_dims(site, ds[site].ndim - 2, (), sites),
+                            *_site_dims(site, ds[site].ndim - 2, shared[site], sites),
                         ),
                         ds[site].data,
                     )
