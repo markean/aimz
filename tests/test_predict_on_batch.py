@@ -133,3 +133,28 @@ def test_predict_on_batch_warns_on_dimension_names_that_cannot_apply() -> None:
     assert any("'q' would name a site" in str(w.message) for w in record)
     assert dt.prior_predictive["w"].dims == ("chain", "draw", "w_dim_0")
     assert "q" in dt.prior_predictive.data_vars
+
+
+def test_predict_on_batch_default_names_skip_sites(
+    synthetic_data: tuple[Array, Array],
+) -> None:
+    """A default dimension name that is a site of the group skips to the next one."""
+    X, y = synthetic_data
+
+    def named_like_default(X: Array, y: Array | None = None) -> None:
+        b = sample("b", dist.Normal().expand([3]).to_event(1))
+        with plate("obs", X.shape[0]):
+            mu = deterministic("mu", X[:, :1] + b)
+            sample("y", dist.Normal(mu.sum(-1), 1.0), obs=y)
+        deterministic("mu_dim_0", b.sum())
+
+    im = ImpactModel(
+        named_like_default,
+        rng_key=random.key(0),
+        inference=make_svi(named_like_default),
+    )
+    im.fit_on_batch(X, y, num_steps=5, num_samples=4, progress=False)
+    with pytest.warns(OutputWarning, match="'mu' skip those that name a site"):
+        dt = im.predict_on_batch(X)
+    assert dt.posterior_predictive["mu"].dims == ("chain", "draw", "obs", "mu_dim_1")
+    assert "mu_dim_0" in dt.posterior_predictive.data_vars
