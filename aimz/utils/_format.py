@@ -32,6 +32,7 @@ from aimz._exceptions import _SKIP_FILE_PREFIXES, OutputWarning
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+    from collections.abc import Set as AbstractSet
 
     import numpy.typing as npt
     from dask.array import Array as DaskArray
@@ -46,17 +47,28 @@ def _make_attrs() -> dict[str, str]:
     }
 
 
-def _site_dims(site: str, ndim: int, names: Sequence[str] = ()) -> list[str]:
+def _site_dims(
+    site: str,
+    ndim: int,
+    names: Sequence[str] = (),
+    sites: AbstractSet[str] = frozenset(),
+) -> list[str]:
     """Name the ``ndim`` dimensions of a site after its sample dimensions.
 
     The given names come first and the other dimensions take ``<site>_dim_<i>``,
-    numbered among themselves. Names beyond the dimensions are dropped; names that
-    repeat or are ``chain`` or ``draw`` give way to the defaults.
+    numbered among themselves, skipping a name in ``sites``, which a dimension of that
+    name would replace. Names beyond the dimensions are dropped; names that repeat or
+    are ``chain`` or ``draw`` give way to the defaults.
     """
     if len(set(names)) < len(names) or {"chain", "draw"} & set(names):
         names = ()
+    defaults = [
+        name
+        for i in range(ndim + len(sites))
+        if (name := f"{site}_dim_{i}") not in sites
+    ]
 
-    return [*names[:ndim], *(f"{site}_dim_{i}" for i in range(ndim - len(names)))]
+    return [*names[:ndim], *defaults[: max(ndim - len(names), 0)]]
 
 
 def _group_dims(
@@ -67,10 +79,12 @@ def _group_dims(
 
     Warns:
         OutputWarning: If sites keep the default names because a name would have two
-            lengths within the group, or would name a site of the group.
+            lengths within the group, or would name a site of the group, or if a
+            default name skips one that names a site of the group.
     """
+    sites = shapes.keys()
     names = {
-        site: _site_dims(site, len(shape), dims.get(site, ()))
+        site: _site_dims(site, len(shape), dims.get(site, ()), sites)
         for site, shape in shapes.items()
     }
     lengths: dict[str, int] = {}
@@ -97,13 +111,30 @@ def _group_dims(
         )
         warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
         clashes |= taken
-
-    return {
-        site: _site_dims(site, len(shapes[site]))
+    out = {
+        site: _site_dims(site, len(shapes[site]), sites=sites)
         if clashes & set(names[site])
         else names[site]
         for site in shapes
     }
+    # A default name that is a site of the group would replace it, so it skips ahead
+    if skipped := sorted(
+        site
+        for site in shapes
+        if out[site]
+        != _site_dims(
+            site,
+            len(shapes[site]),
+            () if clashes & set(names[site]) else dims.get(site, ()),
+        )
+    ):
+        msg = (
+            f"The default dimension names of the sites {', '.join(map(repr, skipped))} "
+            "skip those that name a site of the group."
+        )
+        warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
+
+    return out
 
 
 def _dict_to_datatree(

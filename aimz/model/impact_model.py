@@ -77,6 +77,7 @@ from aimz.sampling._forward import _sample_forward
 from aimz.utils._format import (
     _build_datatree,
     _dict_to_datatree,
+    _site_dims,
 )
 from aimz.utils._kwargs import (
     _combine,
@@ -2362,13 +2363,14 @@ class ImpactModel(BaseModel):
             if baseline[site].shape == intervention[site].shape
             and baseline[site].dims != intervention[site].dims
         ):
+            sites = {str(site) for site in (*baseline, *intervention)}
             for ds in (baseline, intervention):
                 for site in renamed:
                     ds[site] = (
                         (
                             "chain",
                             "draw",
-                            *(f"{site}_dim_{i}" for i in range(ds[site].ndim - 2)),
+                            *_site_dims(site, ds[site].ndim - 2, (), sites),
                         ),
                         ds[site].data,
                     )
