@@ -2350,8 +2350,35 @@ class ImpactModel(BaseModel):
         if stale is not None and "artifact_path" in stale.attrs:
             rmtree(stale.attrs["artifact_path"], ignore_errors=True)
 
+        # A site of one shape whose dimensions are named differently in the two
+        # scenarios, as when only one of them returns a site that a dimension name
+        # would collide with, takes the default names in both, so that its effect does
+        # not broadcast
+        baseline = dt_baseline[group].to_dataset()
+        intervention = dt_intervention[group].to_dataset()
+        if renamed := sorted(
+            str(site)
+            for site in baseline.data_vars.keys() & intervention.data_vars.keys()
+            if baseline[site].shape == intervention[site].shape
+            and baseline[site].dims != intervention[site].dims
+        ):
+            for ds in (baseline, intervention):
+                for site in renamed:
+                    ds[site] = (
+                        (
+                            "chain",
+                            "draw",
+                            *(f"{site}_dim_{i}" for i in range(ds[site].ndim - 2)),
+                        ),
+                        ds[site].data,
+                    )
+            msg = (
+                f"The site(s) {', '.join(map(repr, renamed))} have other dimension "
+                "names in the two scenarios, so their effects take the default names."
+            )
+            warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
         out = xr.DataTree(name="root")
-        out[group] = dt_intervention[group] - dt_baseline[group]
+        out[group] = intervention - baseline
         # The key and the batching decide the draws of the sites a call samples anew:
         # every site under the prior, and the output otherwise
         attrs_baseline = dt_baseline[group].attrs

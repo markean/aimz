@@ -88,7 +88,8 @@ def _group_dims(
         )
         warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
     # A dimension named like a site of the group would replace the site's values
-    if taken := (lengths.keys() & shapes.keys()) - clashes:
+    given = {name for site in shapes for name in dims.get(site, ())}
+    if taken := (given & lengths.keys() & shapes.keys()) - clashes:
         kept = [site for site in shapes if taken & set(names[site])]
         msg = (
             f"The sites {', '.join(map(repr, kept))} keep the default dimension names: "

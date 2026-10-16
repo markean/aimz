@@ -179,7 +179,7 @@ def test_estimate_effect_scenario_compatibility(
     synthetic_data: tuple[Array, Array],
     im_lm_svi_fitted: ImpactModel,
 ) -> None:
-    """Scenarios must share a predictive group; differing sizes or labels warn."""
+    """Scenarios must share a predictive group; differing sizes or names warn."""
     X, y = synthetic_data
     im = im_lm_svi_fitted
     rng_key = random.key(0)
@@ -221,6 +221,29 @@ def test_estimate_effect_scenario_compatibility(
             output_baseline=im.predict_on_batch(X[:50], rng_key=rng_key),
             output_intervention=base.isel(y_dim_0=slice(50, 100)),
         )
+
+    # A site named differently in the two scenarios takes the default names in both
+    def kernel(X: Array, y: Array | None = None, *, report: bool = False) -> None:
+        w = sample(
+            "w", dist.Normal().expand([4]).to_event(1), infer={"event_dims": ["q"]}
+        )
+        with plate("obs", X.shape[0]):
+            sample("y", dist.Normal(w.sum() + X[:, 0], 1.0), obs=y)
+        if report:
+            deterministic("q", 2 * w)
+
+    im = ImpactModel(kernel, rng_key=random.key(0), inference=make_svi(kernel))
+    im.sample_prior_predictive_on_batch(X, num_samples=2)
+    im.set_posterior_sample({"w": jnp.ones((5, 4))})
+    with pytest.warns(OutputWarning) as record:
+        effect = im.estimate_effect(
+            args_baseline={"X": X, "return_sites": ["w"]},
+            args_intervention={"X": X, "report": True, "return_sites": ["w", "q"]},
+            on_batch=True,
+        )
+    assert any("'w' have other dimension names" in str(w.message) for w in record)
+    assert effect.posterior_predictive["w"].dims == ("chain", "draw", "w_dim_0")
+    assert (effect.posterior_predictive["w"] == 0).all()
 
 
 def test_estimate_effect_warns_on_stale_baseline(
