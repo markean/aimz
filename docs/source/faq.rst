@@ -177,7 +177,7 @@ The dimensions of a site are named after the plates around it, for example ``obs
 Its other dimensions are named ``<site>_dim_<i>``, numbered from zero among them, so a site of shape ``(obs, 3)`` has the dimensions ``obs`` and ``<site>_dim_0``.
 To name such a dimension of a sample site, list it in the site's ``infer={"event_dims": [...]}``; a deterministic site takes no ``infer``, so its other dimensions keep the default names.
 Names that cannot apply, such as a plate named ``chain`` or ``draw``, a name shared with a site, more names than the site has dimensions, or one name with two lengths in a group, give way to the default names with an :class:`~aimz.OutputWarning`.
-A site inside the body of :external:func:`~numpyro.contrib.control_flow.scan` or :external:func:`~numpyro.contrib.control_flow.cond` keeps the default names.
+A site inside the body of :external:func:`~numpyro.contrib.control_flow.scan` keeps the default names, and event dimension names listed in its ``infer`` give way with an :class:`~aimz.OutputWarning`.
 A default name that is itself a site of the group skips to the next free number, also with an :class:`~aimz.OutputWarning`.
 The plate names come from a trace of the kernel, which fitting or prior predictive sampling runs, so a posterior set with :meth:`~aimz.ImpactModel.set_posterior_sample` on a model that was never traced keeps the default names.
 Trees from the streaming methods are lazy, and ArviZ functions operate on loaded arrays, so call :external:meth:`~xarray.DataTree.load` on the tree first, or on a reduced result when the tree does not fit in memory.
