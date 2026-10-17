@@ -153,8 +153,9 @@ class ImpactModel(BaseModel):
             param_output: Name of the ``kernel`` parameter for the output data.
 
         Raises:
-            KernelValidationError: If the kernel signature does not meet the required
-                constraints.
+            KernelValidationError: If the kernel takes variable arguments or
+                positional-only parameters, lacks the input or output parameter, gives
+                the input a default, or gives the output a default other than ``None``.
             TypeError: If ``inference`` is neither SVI nor MCMC.
             ValueError: If ``inference`` is SVI with static keyword arguments, which
                 aimz does not pass to the guide or the kernel outside training.
