@@ -2290,9 +2290,11 @@ class ImpactModel(BaseModel):
             output_baseline: Precomputed output for the baseline scenario.
             output_intervention: Precomputed output for the intervention scenario.
             args_baseline: Arguments of the prediction method for the baseline
-                scenario, used when ``output_baseline`` is not given.
+                scenario, keyed by its parameter names, as ``{"X": X}`` whatever the
+                kernel calls its input, used when ``output_baseline`` is not given.
             args_intervention: Arguments of the prediction method for the intervention
-                scenario, used when ``output_intervention`` is not given.
+                scenario, keyed the same way, used when ``output_intervention`` is not
+                given.
             on_batch: Compute the scenarios with
                 :meth:`~aimz.ImpactModel.predict_on_batch` instead of
                 :meth:`~aimz.ImpactModel.predict`.

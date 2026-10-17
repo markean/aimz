@@ -63,7 +63,8 @@ def _group_kwargs(
         if name in kwargs:
             msg = (
                 f"{name!r} is a reserved kernel parameter and cannot be passed as a "
-                "keyword argument."
+                "keyword argument. Pass the input as `X`, and the output as `y` where "
+                "the method takes one."
             )
             raise TypeError(msg)
     kwargs_array = {k: v for k, v in kwargs.items() if _is_per_observation(v, n_obs)}
