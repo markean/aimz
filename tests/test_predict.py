@@ -396,6 +396,10 @@ def test_predict_blocked_intervention() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         im.predict_on_batch(X, intervention={"m": 0.0})
+    # A requested site that is intervened on comes back with its own draws
+    with pytest.warns(OutputWarning, match="'m' are intervened on"):
+        dt = im.predict_on_batch(X, intervention={"m": 0.0}, return_sites=["m", "mu"])
+    assert (dt.posterior_predictive["m"] != 0).all()
     # Once `m` is drawn from the prior instead of the posterior, `z` passes through
     with pytest.warns(OutputWarning, match="no draws for the latent site"):
         im.set_posterior_sample({"z": np.zeros(5)})

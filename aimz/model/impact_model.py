@@ -543,13 +543,15 @@ class ImpactModel(BaseModel):
     def _coerce_return_sites(
         self,
         return_sites: str | Iterable[str] | None,
+        intervention: Mapping[str, object] | None = None,
     ) -> tuple[str, ...]:
         """Return the requested site names as a tuple, or the default return sites.
 
         Warns:
             OutputWarning: If a requested site was not seen in any trace so far; the
                 name is passed through, since a kernel may define it only at sampling
-                time.
+                time. Also if a requested site is intervened on, since it comes back
+                with its own draws, not the set value.
         """
         spec = self._kernel_spec
         if return_sites is None:
@@ -572,6 +574,13 @@ class ImpactModel(BaseModel):
                 warn(
                     msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES
                 )
+        if intervened := [site for site in requested if site in (intervention or {})]:
+            msg = (
+                f"Return site(s) {', '.join(map(repr, intervened))} are intervened on, "
+                "so they come back with their own draws, not the set values. Read the "
+                "effect of the intervention from the sites downstream of them."
+            )
+            warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
 
         return requested
 
@@ -937,7 +946,8 @@ class ImpactModel(BaseModel):
 
         Warns:
             OutputWarning: If the output site does not have one value per row of the
-                input.
+                input, or a requested return site is intervened on, since it comes back
+                with its own draws.
 
         See Also:
             :meth:`~aimz.ImpactModel.sample_prior_predictive`
@@ -955,7 +965,10 @@ class ImpactModel(BaseModel):
             _sample_forward(
                 self.kernel,
                 rng_keys=random.split(rng_key, num=num_samples),
-                return_sites=self._coerce_return_sites(return_sites),
+                return_sites=self._coerce_return_sites(
+                    return_sites,
+                    intervention=intervention,
+                ),
                 samples=None,
                 params=None,
                 intervention=_to_jax(intervention or {}),
@@ -1051,9 +1064,10 @@ class ImpactModel(BaseModel):
                 evaluates from a batch.
 
         Warns:
-            OutputWarning: If the output site does not have one value per row of an
-                array input; under ``shard_axis="obs"`` the call then reruns under
-                ``shard_axis="draw"``.
+            OutputWarning: If a requested return site is intervened on, since it comes
+                back with its own draws, or if the output site does not have one value
+                per row of an array input; under ``shard_axis="obs"`` the call then
+                reruns under ``shard_axis="draw"``.
             PerformanceWarning: If ``shard_axis="obs"`` cannot split an array input,
                 as for a return site without an observation axis, so the call reruns
                 under ``shard_axis="draw"``.
@@ -1107,7 +1121,10 @@ class ImpactModel(BaseModel):
             self._build_kernel_spec(_to_jax(probe), with_output=False)
         _validate_intervention(intervention, kernel_spec=self._kernel_spec)
 
-        return_sites = self._coerce_return_sites(return_sites)
+        return_sites = self._coerce_return_sites(
+            return_sites,
+            intervention=intervention,
+        )
         shard_axis, batch_size = self._plan_execution(
             X,
             shard_axis=shard_axis,
@@ -2034,8 +2051,9 @@ class ImpactModel(BaseModel):
         Warns:
             OutputWarning: If an intervened site reaches the output only through sites
                 whose values are taken from the posterior or intervened on, so that
-                the draws do not respond to it, or if the output site does not have one
-                value per row of the input.
+                the draws do not respond to it, if a requested return site is
+                intervened on, since it comes back with its own draws, or if the output
+                site does not have one value per row of the input.
         """
         _check_is_fitted(self)
         _validate_intervention(intervention, kernel_spec=self._kernel_spec)
@@ -2057,7 +2075,10 @@ class ImpactModel(BaseModel):
             _sample_forward(
                 self.kernel,
                 rng_keys=random.split(rng_key, num=self._num_samples),
-                return_sites=self._coerce_return_sites(return_sites),
+                return_sites=self._coerce_return_sites(
+                    return_sites,
+                    intervention=intervention,
+                ),
                 samples=self._streamer.place_posterior(self.posterior, sharding=None),
                 params={
                     **self.vi_result.params,
@@ -2165,9 +2186,10 @@ class ImpactModel(BaseModel):
         Warns:
             OutputWarning: If an intervened site reaches the output only through sites
                 whose values are taken from the posterior or intervened on, so that
-                the draws do not respond to it, or if the output site does not have one
-                value per row of an array input; under ``shard_axis="obs"`` the call
-                then reruns under ``shard_axis="draw"``.
+                the draws do not respond to it, if a requested return site is
+                intervened on, since it comes back with its own draws, or if the output
+                site does not have one value per row of an array input; under
+                ``shard_axis="obs"`` the call then reruns under ``shard_axis="draw"``.
             PerformanceWarning: If ``shard_axis="obs"`` cannot split an array input,
                 as for a return site without an observation axis or a latent site with
                 one value per observation, so the call reruns under
@@ -2189,7 +2211,10 @@ class ImpactModel(BaseModel):
         if isinstance(X, ArrayLike):
             _ = self._bind_kernel_args(X, kwargs=kwargs)
 
-        return_sites = self._coerce_return_sites(return_sites)
+        return_sites = self._coerce_return_sites(
+            return_sites,
+            intervention=intervention,
+        )
         shard_axis, batch_size = self._plan_execution(
             X,
             shard_axis=shard_axis,
