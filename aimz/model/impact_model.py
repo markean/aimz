@@ -1044,8 +1044,10 @@ class ImpactModel(BaseModel):
                 ``store="memory"``, ``X`` is 0-D or empty, or ``intervention`` names
                 a site that is not a sample site of the kernel.
             NotImplementedError: With a data loader, if a return site has no
-                observation axis, or its axis-1 size does not match the input batch
-                size.
+                observation axis, unless it is intervened on or the kernel does not
+                run on one row fewer than a device evaluates (two rows when it
+                evaluates one), or if its axis-1 size does not match the rows a device
+                evaluates from a batch.
 
         Warns:
             OutputWarning: If the output site does not have one value per row of an
@@ -2154,8 +2156,10 @@ class ImpactModel(BaseModel):
                 site sized by a count, such as the number of groups, does not fit
                 another count.
             NotImplementedError: With a data loader, if a return site has no
-                observation axis, or its axis-1 size does not match the input batch
-                size.
+                observation axis, unless it is intervened on or the kernel does not
+                run on one row fewer than a device evaluates (two rows when it
+                evaluates one), or if its axis-1 size does not match the rows a device
+                evaluates from a batch.
 
         Warns:
             OutputWarning: If an intervened site reaches the output only through sites

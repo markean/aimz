@@ -78,9 +78,9 @@ def _substitute_latent(msg: Message, sample: dict[str, Array]) -> Array | None:
             err_msg = (
                 f"Each posterior draw of site {msg['name']!r} has shape "
                 f"{jnp.shape(value)}, which does not fit the shape {shape} the site "
-                "has for this call: a site with one value per observation fits only "
-                "the fitted observations, and a site sized by a count read from the "
-                "data fits only the fitted count."
+                "has for the rows being evaluated: a site with one value per "
+                "observation fits only the fitted observations, and a site sized by a "
+                "count read from the data fits only the fitted count."
             )
             raise ValueError(err_msg)
 
