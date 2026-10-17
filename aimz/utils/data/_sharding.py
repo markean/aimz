@@ -21,7 +21,17 @@ from typing import TYPE_CHECKING, Literal
 
 import jax.numpy as jnp
 import numpy as np
-from jax import Array, device_put, jit, lax, random, shard_map
+from jax import (
+    Array,
+    ShapeDtypeStruct,
+    device_put,
+    eval_shape,
+    jit,
+    lax,
+    random,
+    shard_map,
+    tree,
+)
 from jax.sharding import PartitionSpec
 
 from aimz.sampling._forward import _sample_forward
@@ -83,25 +93,67 @@ def _create_sharded_sampler(
             )
 
         n = len(kwargs_key)
-        model_kwargs, fields = _split_intervention_fields(
-            {
-                param_input: X,
-                **dict(zip(kwargs_key, args[:n], strict=True)),
-                **_combine(args[n:], kwargs_static),
-            },
-        )
+        constants = _combine(args[n:], kwargs_static)
 
-        out = _sample_forward(
-            kernel,
-            rng_keys=rng_keys,
-            return_sites=return_sites,
-            samples=samples,
-            params=params,
-            intervention={**intervention, **fields},
-            model_kwargs=model_kwargs,
-        )
-        # Checked at trace time, so every device count raises the same error
+        def run(X: Array, rows: tuple[object, ...]) -> dict[str, Array]:
+            model_kwargs, fields = _split_intervention_fields(
+                {
+                    param_input: X,
+                    **dict(zip(kwargs_key, rows, strict=True)),
+                    **constants,
+                },
+            )
+
+            return _sample_forward(
+                kernel,
+                rng_keys=rng_keys,
+                return_sites=return_sites,
+                samples=samples,
+                params=params,
+                intervention={**intervention, **fields},
+                model_kwargs=model_kwargs,
+            )
+
+        out = run(X, args[:n])
+        # Checked at trace time, so every device count raises the same error, and a
+        # warm call pays nothing
         if not draws:
+            # A site that keeps its size on one row fewer, or on two rows for a single
+            # row, such as a global site as long as a device's rows, has no observation
+            # axis
+            rows = X.shape[0] - 1 or 2
+            try:
+                other = eval_shape(
+                    run,
+                    *tree.map(
+                        lambda v: ShapeDtypeStruct((rows, *v.shape[1:]), v.dtype),
+                        (X, args[:n]),
+                    ),
+                )
+            # A kernel that does not run on other rows, such as one whose plate size is
+            # a fixed count, keeps the size check alone
+            except Exception:
+                other = {}
+            # An intervened site records its free copy, which can hold the posterior's
+            # rows, so it keeps the size check alone too
+            intervened = {
+                *intervention,
+                *_split_intervention_fields(dict.fromkeys(kwargs_key))[1],
+            }
+            if whole := sorted(
+                site
+                for site, value in out.items()
+                if site in other
+                and site not in intervened
+                and other[site].shape[1:2] == value.shape[1:2]
+            ):
+                msg = (
+                    f"Return site(s) {', '.join(map(repr, whole))} have no "
+                    "observation axis, so streaming cannot split them with the "
+                    'rows. Pass an array input with `shard_axis="draw"`, or leave '
+                    "the site(s) out of `return_sites`."
+                )
+                raise NotImplementedError(msg)
             for site, value in out.items():
                 _validate_streamed_axis_size(
                     value,

@@ -22,7 +22,7 @@ import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
 import pytest
-from jax import Array, random
+from jax import Array, device_count, random
 from numpyro import deterministic, param, plate, sample
 from numpyro.primitives import mutable
 
@@ -109,6 +109,13 @@ def test_predict_site_without_observation_axis(
         im.predict_on_batch(X, n=3)
     with pytest.warns(OutputWarning, match="'y' does not have one value per row"):
         im.sample_prior_predictive_on_batch(X, n=3, num_samples=2)
+    # A loader streams it when each device evaluates as many rows as the count
+    dt = im.predict(
+        _iter_batches(X, [3 * device_count()] * 2),
+        n=3,
+        progress=False,
+    )
+    assert dt.posterior_predictive["y"].shape == (1, 5, 6 * device_count())
 
 
 def test_predict_warns_on_unknown_return_site(
