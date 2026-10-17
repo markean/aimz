@@ -37,10 +37,10 @@ Fix it by renaming your arguments to ``X`` / ``y`` or supplying ``param_input`` 
 
 What does aimz require of a kernel's signature and sites?
 ---------------------------------------------------------
-aimz calls the kernel itself, so it relies on a few rules, each checked with a :class:`~aimz.KernelValidationError` when the model is created or first traces the kernel:
+aimz calls the kernel itself, so it relies on a few rules, each checked with a :class:`~aimz.KernelValidationError` when the model is created or first traces the kernel, except that the output is checked to be an observed sample site only when the kernel is first traced with output data, as in :meth:`~aimz.ImpactModel.fit`:
 
 * The input argument (``X``, or ``param_input``) takes no default, since every call passes it and the batches split along its leading axis.
-* The output argument (``y``, or ``param_output``) defaults to ``None``, since aimz predicts by calling the kernel with ``y=None``.
+* The output argument (``y``, or ``param_output``) defaults to ``None``, since aimz predicts by calling the kernel without it.
 * The output is a sample site named after the output argument and observed through it, as in ``sample("y", ..., obs=y)``, since aimz finds the output by that name; a likelihood named otherwise, such as ``sample("obs", ..., obs=y)``, needs renaming.
 * The signature takes no ``*args``, ``**kwargs``, or positional-only parameters, since aimz passes every argument by name.
 * No site name contains ``/``, which :external:class:`~xarray.DataTree` does not allow in variable names, and no sample or deterministic site is named ``chain`` or ``draw``, the dimensions of the draws.
