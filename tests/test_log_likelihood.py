@@ -94,11 +94,23 @@ def test_log_likelihood_requires_output(
     synthetic_data: tuple[Array, Array],
     im_lm_svi_fitted: ImpactModel,
 ) -> None:
-    """The observed output is required: `y` for an array, a field for a loader."""
+    """The output is required, `y` for an array or a field for a loader, per row."""
     X, _ = synthetic_data
     with pytest.raises(ValueError, match="`y` is required"):
         im_lm_svi_fitted.log_likelihood(X, progress=False)
     with pytest.raises(ValueError, match="requires the observed output field 'y'"):
         im_lm_svi_fitted.log_likelihood(
             iter([{"X": X}]), store="memory", progress=False
+        )
+
+    # A loader streams only an output with one value per row
+    def joint(X: Array, y: Array | None = None) -> None:
+        mu = sample("mu", dist.Normal())
+        sample("y", dist.MultivariateNormal(mu + X[:, 0], jnp.eye(len(X))), obs=y)
+
+    im = ImpactModel(joint, rng_key=random.key(0), inference=make_svi(joint))
+    im.set_posterior_sample({"mu": jnp.zeros(5)})
+    with pytest.raises(NotImplementedError, match="match the input batch size"):
+        im.log_likelihood(
+            iter([{"X": X[:60], "y": X[:60, 0]}]), store="memory", progress=False
         )

@@ -631,6 +631,7 @@ class ImpactModel(BaseModel):
         return_sites: tuple[str, ...] = (),
         kwargs: Mapping[str, object] | None = None,
         intervention: dict | None = None,
+        batch: Mapping[str, Array | np.ndarray] | None = None,
     ) -> tuple[Literal["obs", "draw"], int | None]:
         """Choose the sharding strategy and the batch size of a streamed call.
 
@@ -652,24 +653,38 @@ class ImpactModel(BaseModel):
                 for the call's arguments makes it run draw-parallel.
             kwargs: The call's other kernel arguments.
             intervention: The call's intervention.
+            batch: The first batch of a data loader, whose rows the return sites are
+                checked against.
 
         Returns:
             The sharding strategy and the batch size, ``None`` for a data loader.
-        """
-        if not isinstance(X, ArrayLike):
-            return shard_axis, None
 
-        n_obs = len(cast("Sized", X))
+        Raises:
+            NotImplementedError: If a return site has no observation axis for the
+                first batch of a data loader, which cannot rerun under
+                ``shard_axis="draw"``.
+        """
+        loader = not isinstance(X, ArrayLike)
+        if loader and (batch is None or not return_sites):
+            return shard_axis, None
+        # A data loader's rows are the fields of its first batch, and its keyword
+        # arguments are constants of the call
+        rows_input = cast("Mapping", batch)[self.param_input] if loader else X
+        n_obs = len(cast("Sized", rows_input))
         row_nbytes, rest_nbytes = nbytes
         min_aligned_ndim = 2
         spec = cast("KernelSpec", self._kernel_spec)
         deterministic = set(spec.return_sites) - set(spec.sample_sites)
-        if shard_axis == "obs" and (
-            self._coupled_sites
-            or any(
-                v.ndim >= min_aligned_ndim and v.shape[1] == n_obs
-                for site, v in (posterior or {}).items()
-                if site not in deterministic
+        if (
+            not loader
+            and shard_axis == "obs"
+            and (
+                self._coupled_sites
+                or any(
+                    v.ndim >= min_aligned_ndim and v.shape[1] == n_obs
+                    for site, v in (posterior or {}).items()
+                    if site not in deterministic
+                )
             )
         ):
             if (
@@ -704,7 +719,7 @@ class ImpactModel(BaseModel):
             # earlier trace may have had other arguments, and a global site may match
             # the row count. Under `draw`, which keeps the rows whole and passes every
             # argument whole, only the output is checked.
-            n_split = n_obs if shard_axis == "obs" else None
+            n_split = n_obs if shard_axis == "obs" and not loader else None
             kwargs_rows, kwargs_const = _group_kwargs(kwargs or {}, n_obs=n_split)
             constants, fields = _split_intervention(intervention, n_split)
             constants = _to_jax(constants)
@@ -740,7 +755,13 @@ class ImpactModel(BaseModel):
                     np.shape(v),
                     jnp.result_type(v if hasattr(v, "dtype") else np.asarray(v)),
                 )
-                for k, v in {self.param_input: X, **kwargs_rows, **fields}.items()
+                for k, v in {
+                    **(batch or {}),
+                    self.param_input: rows_input,
+                    **kwargs_rows,
+                    **fields,
+                }.items()
+                if k != self.param_output
             }
 
             def shapes_at(size: int) -> dict[str, ShapeDtypeStruct]:
@@ -772,6 +793,16 @@ class ImpactModel(BaseModel):
                     "warning."
                 )
             whole = sorted(shapes.keys() - per_row)
+            if loader:
+                if whole:
+                    msg = (
+                        f"Return site(s) {', '.join(map(repr, whole))} have no "
+                        "observation axis, and a data loader cannot rerun under "
+                        "`shard_axis='draw'`. Pass an array input, or leave the "
+                        "site(s) out of `return_sites`."
+                    )
+                    raise NotImplementedError(msg)
+                return shard_axis, None
             if self.param_output in whole:
                 msg = (
                     f"The output site {self.param_output!r} does not have one value "
@@ -1040,8 +1071,9 @@ class ImpactModel(BaseModel):
                 not ``"persistent"`` or ``"memory"``, ``output_dir`` is passed with
                 ``store="memory"``, ``X`` is 0-D or empty, or ``intervention`` names
                 a site that is not a sample site of the kernel.
-            NotImplementedError: If a return site's axis-1 size does not match the
-                input batch size (``shard_axis="obs"`` with a data loader only).
+            NotImplementedError: With a data loader, if a return site has no
+                observation axis, or its axis-1 size does not match the input batch
+                size.
 
         Warns:
             OutputWarning: If the output site does not have one value per row of an
@@ -1111,6 +1143,7 @@ class ImpactModel(BaseModel):
             return_sites=return_sites,
             kwargs=kwargs,
             intervention=intervention,
+            batch=None if stream is None else stream[2],
         )
 
         if rng_key is None:
@@ -2146,8 +2179,9 @@ class ImpactModel(BaseModel):
                 site that is not a sample site of the kernel, or a posterior site that
                 is not intervened on does not fit the rows being evaluated, as a site
                 with one value per observation does not fit other observations.
-            NotImplementedError: If a return site's axis-1 size does not match the
-                input batch size (``shard_axis="obs"`` with a data loader only).
+            NotImplementedError: With a data loader, if a return site has no
+                observation axis, or its axis-1 size does not match the input batch
+                size.
 
         Warns:
             OutputWarning: If an intervened site reaches the output only through sites
@@ -2173,8 +2207,24 @@ class ImpactModel(BaseModel):
         _validate_store(store, output_dir=output_dir)
         _validate_aligned_inputs(X, y=None)
 
+        stream = None
         if isinstance(X, ArrayLike):
             _ = self._bind_kernel_args(X, kwargs=kwargs)
+        else:
+            stream = self._streamer.setup_stream(
+                _WriteRequest(
+                    shard_axis,
+                    X=X,
+                    return_sites=(),
+                    num_samples=self._num_samples,
+                    batch_size=batch_size,
+                    artifact_path=None,
+                    progress=progress,
+                    loader_rng_key=self.rng_key,
+                    kwargs=kwargs,
+                ),
+                y=None,
+            )
 
         return_sites = self._coerce_return_sites(return_sites)
         shard_axis, batch_size = self._plan_execution(
@@ -2187,6 +2237,7 @@ class ImpactModel(BaseModel):
             return_sites=return_sites,
             kwargs=kwargs,
             intervention=intervention,
+            batch=None if stream is None else stream[2],
         )
 
         if rng_key is None:
@@ -2219,6 +2270,7 @@ class ImpactModel(BaseModel):
                 if self.vi_result is not None
                 else None,
                 intervention=intervention,
+                stream=stream,
             ),
             store=store,
             output_dir=output_dir,
