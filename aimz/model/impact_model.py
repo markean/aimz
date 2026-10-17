@@ -507,8 +507,9 @@ class ImpactModel(BaseModel):
                 )
             if v.get("is_observed"):
                 self._observed_sites.add(k)
-            # A site recorded by a scan, or drawn as one event over the rows, computes
-            # across observations. Each trace decides anew for the sites it records, so
+            # A site recorded by control flow, which NumPyro marks alike for `scan` and
+            # `cond`, or drawn as one event over the rows, counts as computing across
+            # observations. Each trace decides anew for the sites it records, so
             # a trace over all the rows clears a one-element event that a one-row trace
             # took for one over the rows.
             fn = v.get("fn")
@@ -1621,10 +1622,10 @@ class ImpactModel(BaseModel):
                 .arguments,
                 with_output=True,
             )
-            # Batches split a site that computes across observations: one recorded by a
-            # scan, or one drawn as an event whose size follows the rows. An abstract
-            # trace at twice the batch's rows, or all of them, drops an event that keeps
-            # the batch size.
+            # Batches split a site that counts as computing across observations: one
+            # recorded by control flow, or one drawn as an event whose size follows the
+            # rows. An abstract trace at twice the batch's rows, or all of them, drops
+            # an event that keeps the batch size.
             n_obs = len(dataloader.dataset)
             batch_rows = dataloader.batch_size
             rows_more = min(2 * batch_rows, n_obs)
