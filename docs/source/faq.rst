@@ -32,6 +32,9 @@ If you see an error like:
 it means you neither matched the defaults nor overrode them.
 Fix it by renaming your arguments to ``X`` / ``y`` or supplying ``param_input`` / ``param_output`` as shown above.
 
+The methods keep their own ``X`` and ``y`` parameters whatever the kernel calls them, so pass the input as ``X`` and the output as ``y``, also in the argument dictionaries of :meth:`~aimz.ImpactModel.estimate_effect`, as in ``{"X": X}``; the kernel's own names, such as ``features=X``, raise a ``TypeError``.
+The batches of a data loader, in contrast, are keyed by the kernel's own names (see :doc:`user_guide/dataloader`).
+
 
 .. _faq-kernel-contract:
 
