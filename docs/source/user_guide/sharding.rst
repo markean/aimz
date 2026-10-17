@@ -52,6 +52,7 @@ Passing ``shard_axis="draw"`` explicitly skips the warning.
 The streaming methods, :meth:`~aimz.ImpactModel.sample_prior_predictive` included, rerun the same way for a kernel that computes across observations at a site recorded by :external:func:`~numpyro.contrib.control_flow.scan` or drawn as one event over all the rows, and for a kernel with a site recorded by :external:func:`~numpyro.contrib.control_flow.cond` (see :ref:`faq-cross-observation`).
 :meth:`~aimz.ImpactModel.predict` and :meth:`~aimz.ImpactModel.sample_prior_predictive` also rerun when a return site has no observation axis, such as a global deterministic site that a reparameterization creates, since such a site cannot be split with the rows, and when the kernel does not run on fewer rows than the input, such as one whose plate size is a fixed count.
 A data loader cannot rerun, so such a site raises a ``NotImplementedError``; leave it out of ``return_sites`` when passing one.
+An intervened return site, and every return site of a kernel that runs only at one row count, such as one with a fixed-count plate, raises only when its length differs from the rows a device evaluates from a batch, so a global one of that length comes back tiled along the observations; leave such a site out of ``return_sites`` with a loader.
 See :ref:`faq-model-compatibility` for the model patterns that trigger a rerun.
 The kernels below contrast a compatible model with one that triggers the rerun; a runnable version is in :doc:`streaming_and_on_batch`.
 
