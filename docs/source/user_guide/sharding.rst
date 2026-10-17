@@ -49,7 +49,7 @@ When the posterior sample shape is observation-aligned (the hallmark of a **loca
 Rather than failing, :meth:`~aimz.ImpactModel.predict` and :meth:`~aimz.ImpactModel.log_likelihood` detect this, emit a warning, and rerun under ``shard_axis="draw"``, keeping results streamed to disk and memory-bounded.
 The rerun chooses its own draw chunk size, since a ``batch_size`` given for ``shard_axis="obs"`` counts observations, not draws.
 Passing ``shard_axis="draw"`` explicitly skips the warning.
-The streaming methods, :meth:`~aimz.ImpactModel.sample_prior_predictive` included, rerun the same way for a kernel that computes across observations at a site recorded by :external:func:`~numpyro.contrib.control_flow.scan` or drawn as one event over all the rows (see :ref:`faq-cross-observation`).
+The streaming methods, :meth:`~aimz.ImpactModel.sample_prior_predictive` included, rerun the same way for a kernel that computes across observations at a site recorded by :external:func:`~numpyro.contrib.control_flow.scan` or drawn as one event over all the rows, and for a kernel with a site recorded by :external:func:`~numpyro.contrib.control_flow.cond` (see :ref:`faq-cross-observation`).
 :meth:`~aimz.ImpactModel.predict` and :meth:`~aimz.ImpactModel.sample_prior_predictive` also rerun when a return site has no observation axis, such as a global deterministic site that a reparameterization creates, since such a site cannot be split with the rows, and when the kernel does not run on fewer rows than the input, such as one whose plate size is a fixed count.
 A data loader cannot rerun, so leave such a site out of ``return_sites`` when passing one.
 See :ref:`faq-model-compatibility` for the model patterns that trigger a rerun.
