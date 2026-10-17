@@ -79,10 +79,11 @@ def test_predict_site_without_observation_axis(
     assert dt.posterior_predictive["sigma"].dims == ("chain", "draw")
     with pytest.warns(PerformanceWarning, match="'sigma' have no observation axis"):
         im_lm_svi_fitted.predict(X=X[:1], return_sites="sigma", progress=False)
-    with pytest.raises(NotImplementedError, match="match the input batch size"):
+    # A loader raises, even where each batch has as many rows as the site has values
+    with pytest.raises(NotImplementedError, match="'w' have no observation axis"):
         im_lm_svi_fitted.predict(
-            X=_iter_batches(X, [3, len(X) - 3]),
-            return_sites="sigma",
+            X=_iter_batches(X, [10] * 10),
+            return_sites="w",
             progress=False,
         )
 
