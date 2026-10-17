@@ -33,6 +33,31 @@ it means you neither matched the defaults nor overrode them.
 Fix it by renaming your arguments to ``X`` / ``y`` or supplying ``param_input`` / ``param_output`` as shown above.
 
 
+.. _faq-kernel-contract:
+
+What does aimz require of a kernel's signature and sites?
+---------------------------------------------------------
+aimz calls the kernel itself, so it relies on a few rules, each checked with a :class:`~aimz.KernelValidationError` when the model is created or first traces the kernel:
+
+* The input argument (``X``, or ``param_input``) takes no default, since every call passes it and the batches split along its leading axis.
+* The output argument (``y``, or ``param_output``) defaults to ``None``, since aimz predicts by calling the kernel with ``y=None``.
+* The output is a sample site named after the output argument and observed through it, as in ``sample("y", ..., obs=y)``, since aimz finds the output by that name; a likelihood named otherwise, such as ``sample("obs", ..., obs=y)``, needs renaming.
+* The signature takes no ``*args``, ``**kwargs``, or positional-only parameters, since aimz passes every argument by name.
+* No site name contains ``/``, which :external:class:`~xarray.DataTree` does not allow in variable names, and no sample or deterministic site is named ``chain`` or ``draw``, the dimensions of the draws.
+
+A kernel without an input matrix, such as the eight schools model, takes another array with one value per row as its input:
+
+.. code-block:: python
+
+    def eight_schools(sigma, y=None):  # sigma: the standard error of each school
+        ...
+
+    im = ImpactModel(eight_schools, ..., param_input="sigma")
+
+Names with a ``/`` come from :external:class:`~numpyro.handlers.scope` with its default divider and from NumPyro's module helpers built on it.
+Pass ``divider="."`` to ``scope``, or ``scope_divider="."`` to :external:func:`~numpyro.contrib.module.random_nnx_module` or :external:func:`~numpyro.contrib.module.random_eqx_module`; :external:func:`~numpyro.contrib.module.random_flax_module` takes no divider, so wrap the kernel in a handler that renames its sites.
+
+
 Do I need to know NumPyro_ to use aimz?
 ---------------------------------------
 Yes.

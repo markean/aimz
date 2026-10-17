@@ -354,7 +354,9 @@ def _validate_kernel_body(
     if invalid_site:
         msg = (
             f"Invalid site names containing '/': {invalid_site!r}. "
-            "xarray.DataTree does not allow '/' in variable names."
+            "xarray.DataTree does not allow '/' in variable names. Pass `divider='.'` "
+            "to `handlers.scope` or `scope_divider='.'` to `random_nnx_module`, or "
+            "wrap the kernel in a handler that renames the sites."
         )
         raise KernelValidationError(msg)
     for name in ("chain", "draw"):
@@ -375,7 +377,8 @@ def _validate_kernel_body(
     if param_output not in model_trace:
         msg = (
             f"Kernel must include a sample or deterministic site named "
-            f"{param_output!r}."
+            f"{param_output!r}. Name the output site after the output argument, or "
+            "rename the argument and pass its name as `param_output`."
         )
         raise KernelValidationError(msg)
     site = model_trace[param_output]
