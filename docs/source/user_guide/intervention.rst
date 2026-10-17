@@ -11,6 +11,8 @@ The ``intervention`` argument maps sample site names to replacement values, for 
 The predictive methods apply this mapping through NumPyro_'s :external:class:`~numpyro.handlers.do` effect handler, so downstream computations use the specified values without requiring changes to the kernel.
 This includes deterministic downstream sites.
 You can intervene on multiple sites in the same call.
+A site named in both ``intervention`` and ``return_sites`` comes back with its own draws, as :external:class:`~numpyro.handlers.do` records them, not with the set value: its posterior draws, with the fitted number of observations for a site with one value per observation, or fresh prior draws under the prior predictive.
+The call warns about it with an :class:`~aimz.OutputWarning`, and its effect in :meth:`~aimz.ImpactModel.estimate_effect` is zero or noise, so leave it out of ``return_sites`` and read the effect from the sites downstream of it.
 A sample site inside the body of :external:func:`~numpyro.contrib.control_flow.scan` is the exception: NumPyro's :external:class:`~numpyro.handlers.do` does not reach it, so an intervention on it changes no draw, and no warning says so.
 To vary such a treatment, pass it as a keyword argument of the kernel and add it to the output through deterministic computations in the body; read only into the distribution of a latent site there, it changes nothing either.
 
