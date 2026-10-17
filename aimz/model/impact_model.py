@@ -910,6 +910,8 @@ class ImpactModel(BaseModel):
     ) -> xr.DataTree | dict[str, npt.NDArray]:
         """Draw samples from the prior predictive distribution.
 
+        The kernel's ``param`` sites keep their initial values, not those a fit learned.
+
         Args:
             X: Input array with observations on the leading axis.
             intervention: Replacement values by sample site name, applied while
@@ -997,7 +999,8 @@ class ImpactModel(BaseModel):
         """Draw samples from the prior predictive distribution.
 
         The batches are computed and written to a Zarr store concurrently, or kept in
-        host memory with ``store="memory"``.
+        host memory with ``store="memory"``. The kernel's ``param`` sites keep their
+        initial values, not those a fit learned.
 
         Args:
             X: Input array with observations on the leading axis, or a data loader
@@ -2022,7 +2025,8 @@ class ImpactModel(BaseModel):
             ValueError: If ``intervention`` names a site that is not a sample site of
                 the kernel, or a posterior site that is not intervened on does not fit
                 the rows being evaluated, as a site with one value per observation does
-                not fit other observations.
+                not fit other observations, and a site sized by a count, such as the
+                number of groups, does not fit another count.
 
         Warns:
             OutputWarning: If an intervened site reaches the output only through sites
@@ -2146,7 +2150,9 @@ class ImpactModel(BaseModel):
                 ``store="memory"``, ``X`` is 0-D or empty, ``intervention`` names a
                 site that is not a sample site of the kernel, or a posterior site that
                 is not intervened on does not fit the rows being evaluated, as a site
-                with one value per observation does not fit other observations.
+                with one value per observation does not fit other observations, and a
+                site sized by a count, such as the number of groups, does not fit
+                another count.
             NotImplementedError: With a data loader, if a return site has no
                 observation axis, or its axis-1 size does not match the input batch
                 size.
@@ -2550,7 +2556,8 @@ class ImpactModel(BaseModel):
                 ``store="memory"``, ``y`` is missing when ``X`` is array-like, ``y``
                 does not share ``X``'s leading-axis size, or a posterior site does not
                 fit the rows being evaluated, as a site with one value per observation
-                does not fit other observations.
+                does not fit other observations, and a site sized by a count, such as
+                the number of groups, does not fit another count.
             NotImplementedError: If a return site's axis-1 size does not match the
                 input batch size (``shard_axis="obs"`` only).
         """

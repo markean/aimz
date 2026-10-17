@@ -48,6 +48,7 @@ Can I use aimz with any `NumPyro`_ model?
 No.
 Most conventional models with global latents and a plate-based structure work out of the box.
 The core requirement is that every sample site in the model must have a **static shape** that does not change with the data.
+A site sized by a count read from the data, such as the number of groups, breaks this rule, and data with another count make prediction raise the ``ValueError`` described below for local latents; pass the count as a keyword argument with its fitted value.
 The forward sampler used internally requires every traced site to have a fixed shape across all sample iterations, and the default observation-sharded execution additionally requires the posterior to be **replicable** across devices.
 
 The most common pattern that violates this requirement is a **local latent variable**.
@@ -63,7 +64,10 @@ A local latent's posterior applies only to the observations the model was fitted
 For an array input with another number of observations, prediction and :meth:`~aimz.ImpactModel.log_likelihood` raise a ``ValueError`` that names the site, unless the site is intervened on.
 The fitted values are reused without notice for an input with the same number of observations, and, under ``shard_axis="obs"``, for one split into device batches with exactly the fitted number of rows, padding included.
 A data loader is checked one device batch at a time, so a loader batch that gives each device exactly the fitted number of rows passes too.
-To predict other observations, draw the site from the prior: set a posterior without it, or, if it is the only latent site, use :meth:`~aimz.ImpactModel.sample_prior_predictive`.
+A data loader cannot rerun under ``shard_axis="draw"``, so a call with one raises the error for the fitted observations too whenever its batches or the devices split them; pass them as an array instead.
+The rerun recognizes a local latent by the second axis of its posterior, so for one whose observations lie on another axis, as in nested plates, the call raises the error for the fitted observations too unless ``shard_axis="draw"`` is passed.
+To predict other observations, draw the site from the prior: set a posterior without it, or, if it is the only latent site, use :meth:`~aimz.ImpactModel.sample_prior_predictive`, which runs ``param`` sites at their initial values.
+For a kernel with learned ``param`` sites, such as a network, pass draws of the site for the new observations to :meth:`~aimz.ImpactModel.set_posterior_sample` instead, drawn from its prior or, for a guide that computes the site from the inputs, by :meth:`~aimz.ImpactModel.sample` with the new inputs; the learned values stay in use.
 A latent site inside the body of :external:func:`~numpyro.contrib.control_flow.scan` follows NumPyro's scan instead, intervened on or not: an input with fewer rows than the fitted ones raises NumPyro's ``RuntimeError``, and one with more rows takes the fitted values for the leading rows and draws the rest.
 
 A model with nested plates whose :external:func:`~numpyro.primitives.sample` sites are all observed (``obs=``) or whose latent shapes are fixed remains compatible; a model with a single plate containing one unobserved :external:func:`~numpyro.primitives.sample` site triggers the draw-parallel rerun.
