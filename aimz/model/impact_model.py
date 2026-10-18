@@ -943,6 +943,9 @@ class ImpactModel(BaseModel):
                 :attr:`~aimz.ImpactModel.param_output` is passed as an argument.
             ValueError: If ``intervention`` names a site that is not a sample site of
                 the kernel.
+            NotImplementedError: If a site's prior cannot be sampled, as for an
+                improper prior, also when the site is intervened on, since the
+                intervention still draws its own value; NumPyro's error names no site.
 
         Warns:
             OutputWarning: If the output site does not have one value per row of the
@@ -1057,11 +1060,12 @@ class ImpactModel(BaseModel):
                 not ``"persistent"`` or ``"memory"``, ``output_dir`` is passed with
                 ``store="memory"``, ``X`` is 0-D or empty, or ``intervention`` names
                 a site that is not a sample site of the kernel.
-            NotImplementedError: With a data loader, if a return site has no
-                observation axis, unless it is intervened on or the kernel does not
-                run on one row fewer than a device evaluates (two rows when it
-                evaluates one), or if its axis-1 size does not match the rows a device
-                evaluates from a batch.
+            NotImplementedError: If a site's prior cannot be sampled, as for an
+                improper prior, also when the site is intervened on; or, with a data
+                loader, if a return site has no observation axis, unless it is
+                intervened on or the kernel does not run on one row fewer than a device
+                evaluates (two rows when it evaluates one), or if its axis-1 size does
+                not match the rows a device evaluates from a batch.
 
         Warns:
             OutputWarning: If a requested return site is intervened on, since it comes
@@ -1204,9 +1208,10 @@ class ImpactModel(BaseModel):
             NotFittedError: If there is no inference state to sample from (no
                 completed MCMC run, or no ``vi_result`` when the inference method
                 is SVI).
-            TypeError: If :attr:`~aimz.ImpactModel.param_output` is not passed as an
-                argument when the inference method is MCMC, or SVI whose guide has not
-                run yet.
+            TypeError: If an argument of the kernel, the output included, is not
+                passed when the inference method is MCMC, or SVI whose guide has not
+                run yet, as with a ``vi_result`` from another SVI object; one missing
+                argument is named at a time.
         """
         kwargs = _to_jax(kwargs)
         if isinstance(self.inference, MCMC):
@@ -1885,7 +1890,9 @@ class ImpactModel(BaseModel):
             site maps to its ``kind`` (``"latent"``, ``"observed"``, or
             ``"deterministic"``), its ``dims`` after ``chain`` and ``draw`` where the
             trace named them (``None`` for the default ``<site>_dim_<i>`` names), and,
-            for a site in the posterior, the ``draw_shape`` of one draw.
+            for a site in the posterior, the ``draw_shape`` of one draw. A ``factor``
+            term counts as observed, and ``param`` sites are not listed; their values
+            after a fit are in :attr:`~aimz.ImpactModel.vi_result`.
         """
         spec = self._kernel_spec
         sample_sites = spec.sample_sites if spec else ()
