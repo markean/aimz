@@ -79,7 +79,7 @@ Use these unless the task says otherwise.
 
 ## Where the treatment lives
 
-How a scenario is expressed depends on how the kernel receives the treatment, so find that out first: `im.describe()` lists the kernel's arguments and its sites with their kinds.
+How a scenario is expressed depends on how the kernel receives the treatment, so find that out first: `im.describe()` lists the kernel's arguments and its sites with their kinds, though not its `param` sites, whose fitted values are in `im.vi_result.params`, and a `factor` term shows as observed.
 
 | The treatment is | Express a scenario by |
 |---|---|
@@ -89,7 +89,7 @@ How a scenario is expressed depends on how the kernel receives the treatment, so
 
 `intervention` takes sample sites only. Naming a kernel argument or a deterministic site raises a `ValueError` that lists the kernel's sample sites. Unless the name is misspelled, that error means the treatment belongs to one of the other two rows. A scalar sets the site to one value for every observation, and an array whose leading axis matches `X` sets one value per observation. A value is shared by every draw, so to change one component of a vector site and keep the draws of the others, pass the change as a keyword argument that the kernel applies to that component. A site named in both `intervention` and `return_sites` comes back with its own draws, not the set value: under the posterior predictive, for a site the posterior holds, its posterior draws, with the fitted number of observations for a site with one value per observation, and otherwise the data passed for the site or fresh draws from its distribution. The call warns with an `OutputWarning`, and its effect in `estimate_effect` is zero or noise, so leave it out of `return_sites` and read the effect from the sites downstream of it.
 
-A latent sample site downstream of the intervened one keeps its posterior draws and does not pass the intervention on, so an intervention that reaches the output only through such sites changes nothing; `predict` and `predict_on_batch`, and so `estimate_effect`, warn with an `OutputWarning`. Write the kernel so that the path runs through deterministic computations instead.
+A latent sample site downstream of the intervened one keeps its posterior draws and does not pass the intervention on, so an intervention that reaches the output only through such sites changes nothing; `predict` and `predict_on_batch`, and so `estimate_effect`, warn with an `OutputWarning`. Write the kernel so that the path runs through deterministic computations instead. A keyword argument or a part of `X` that reaches the output only through such a site, and an intervention whose only path runs through an observed site whose data are passed, change nothing either, with no warning: the effect is exactly zero.
 
 A sample site inside the body of `scan` is not intervened on at all, since NumPyro's `do` does not reach it, and no warning says so. On a `scan` kernel the `OutputWarning` above does not fire either when the path to the output runs through a latent site inside the body. To vary a treatment inside the body, pass it as a keyword argument of the kernel and add it to the output through deterministic computations; read only into the distribution of a latent site there, it changes nothing either.
 
@@ -120,6 +120,7 @@ None of these raises an error or a warning.
 | Calling `fit` or `fit_on_batch` again to start over | The training continues from the state it had reached. | Create a new `ImpactModel`. |
 | Refitting with a keyword argument that adds a latent site, such as a switch that turns on an intercept | Under `SVI`, the training continues from a state without the site, so the posterior lacks it and the predictive methods draw it from its prior; only NumPyro's "Found vars in model but not guide" warning hints at it. | Create a new `ImpactModel` with a new `SVI` object and guide, since an autoguide keeps the sites of its first call. |
 | Computing across rows in the kernel, as in a cumulative sum, a lag, or a mean over the rows | Wrong numbers once the rows are shuffled or split, which depends on the input size, `batch_size`, and the number of devices. | Give each row what it needs as its own input, or keep the rows whole and in order: `fit_on_batch`, the `*_on_batch` methods, `shard_axis="draw"`. |
+| Forecasting with a kernel whose recursion reads the output | The recursion runs free at prediction, since the output cannot be passed; an intervention on it does not condition either. | Pass the observed history as a keyword argument that the recursion reads, or as lag features in `X`. |
 | Intervening on a sample site inside the body of `scan` | A zero effect: the intervention changes no draw. | Pass the treatment as a keyword argument of the kernel and add it to the output through deterministic computations in the body. |
 
 ## When not to report an effect

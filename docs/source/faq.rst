@@ -155,6 +155,15 @@ There are two ways to make such a kernel safe:
   For the other methods, use the ``*_on_batch`` variants or pass ``shard_axis="draw"`` to the streaming methods, which then split the draws instead of the observations and require an array input.
 
 
+.. _faq-forecasting:
+
+How do I forecast from the observed history?
+--------------------------------------------
+The predictive methods call the kernel without the output, so a kernel whose recursion reads the output, as an autoregressive :external:func:`~numpyro.contrib.control_flow.scan` does, runs free at prediction: each step follows the steps it drew, not the observed ones.
+The output cannot be passed instead, since it is a reserved parameter, and an intervention on it does not condition the recursion either.
+To predict each step from the observed history, pass that history as data: as a keyword argument that the recursion reads in place of the output, or as lag features in ``X``, such as the previous value of the output in a column.
+
+
 Can I use my own data loader?
 -----------------------------
 Yes.

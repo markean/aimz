@@ -43,6 +43,7 @@ Before fitting, you can explore the model's prior predictions with ``z`` fixed a
 
 After fitting, the same mapping applies the intervention while using posterior samples for the other latent sites.
 A latent site downstream of the intervened one keeps its posterior draws and does not pass the intervention on, which :meth:`~aimz.ImpactModel.predict` warns about with :class:`~aimz.OutputWarning`; :doc:`estimands` shows how to write the kernel so that the path runs through deterministic computations.
+A keyword argument or ``X`` that reaches the output only through such a latent site, and an intervention whose only path to the output runs through an observed site whose data are passed, change nothing either, and no warning says so: the effect is exactly zero.
 On a kernel built on :external:func:`~numpyro.contrib.control_flow.scan`, the warning does not fire when that path runs through a latent site inside the body.
 Here, the baseline holds ``z`` at one and the modified scenario holds it at zero, both drawn with the same key:
 
@@ -159,7 +160,8 @@ The following example uses posterior predictive interventions to estimate effect
 The variable ``Z`` has a direct causal effect on the outcome ``Y``, while both are influenced by a shared confounder, ``C``.
 An additional variable, ``X``, is an observed exogenous factor that influences ``Z`` but has no direct effect on ``Y``.
 
-Our objective is to estimate the causal effect of ``Z`` (or alternatively ``X``) on ``Y``, while properly accounting for the confounding influence of ``C``.
+Our objective is to estimate the causal effect of ``Z`` on ``Y``, while properly accounting for the confounding influence of ``C``.
+The fitted model gives no effect of ``X``: ``X`` enters only the prior of the per-observation latent ``z``, whose posterior draws prediction keeps, so a scenario with another ``X`` changes nothing.
 We assume the following generative model for the observed data:
 
 Model
