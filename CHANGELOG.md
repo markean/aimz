@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The {class}`~aimz.KernelValidationError` for a kernel without a site named after the output argument now suggests renaming the site or setting `param_output`, and the one for a site name containing `/` now names the dividers of `handlers.scope` and `random_nnx_module` and a renaming handler, instead of stating only the rule ([#496](https://github.com/markean/aimz/issues/496)).
 - {meth}`~aimz.ImpactModel.predict`, {meth}`~aimz.ImpactModel.predict_on_batch`, {meth}`~aimz.ImpactModel.sample_prior_predictive`, {meth}`~aimz.ImpactModel.sample_prior_predictive_on_batch`, and the methods and scenarios built on them now warn with {class}`~aimz.OutputWarning` when a requested return site is also intervened on, since it comes back with its own draws rather than the set value, instead of returning those draws without notice ([#498](https://github.com/markean/aimz/issues/498)).
 - The `TypeError` for a keyword argument named like the kernel's input or output parameter now says to pass the input as `X` and the output as `y`, instead of stating only that the name is reserved ([#500](https://github.com/markean/aimz/issues/500)).
+- The {class}`~aimz.KernelValidationError` for an output site that `obs_mask` records as deterministic now says to mask the output's distribution instead, as in `sample("y", d.mask(mask), obs=y)`, instead of naming only the site's type ([#502](https://github.com/markean/aimz/issues/502)).
 
 ### Fixed
 
