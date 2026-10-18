@@ -22,6 +22,8 @@ For example, a length-``N`` site can take a replacement array of shape ``(N,)``.
 The streaming methods batch and shard such arrays together with an array ``X``, so per-observation interventions also work on inputs processed in several batches.
 Any other value is applied whole to every batch, as is every value when ``X`` is a data loader.
 The rule goes by shape alone, so a global site whose length happens to equal the number of observations is also treated as per-observation; pass ``shard_axis="draw"`` or use an ``_on_batch`` method to apply it whole.
+An intervention value is shared by every draw, so it cannot set a site per draw, and a value with one entry per draw fails with a broadcasting error that names no site.
+To change one component of a vector site and keep the posterior draws of the others, pass the change as a keyword argument that the kernel applies to that component, such as a factor on one coefficient, or set edited posterior draws with :meth:`~aimz.ImpactModel.set_posterior_sample`, which replace the fitted ones until set again.
 
 The choice of predictive method determines how the remaining sites are sampled and where results appear in the returned :class:`~xarray.DataTree`:
 

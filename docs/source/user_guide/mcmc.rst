@@ -98,3 +98,20 @@ For example:
     im.predict_on_batch(X)
 
 With several chains, pass ``num_chains=mcmc.num_chains`` as well, so the output trees keep the chains along their ``chain`` dimension.
+:meth:`~aimz.ImpactModel.fit_on_batch` passes only the kernel's arguments to ``MCMC.run``, so options of the run itself, such as ``extra_fields`` or ``init_params``, raise a ``TypeError`` there; run the sampler natively with them, as above, and pass its samples to :meth:`~aimz.ImpactModel.set_posterior_sample`.
+
+The same route serves inference methods that :class:`~aimz.ImpactModel` does not take, such as :external:class:`~numpyro.contrib.einstein.steinvi.SteinVI`.
+Its guide parameters carry a leading axis over the particles, so draw from the guide of each particle and pass the draws with ``num_chains`` set to the number of particles, which keeps each particle's draws along the ``chain`` dimension:
+
+.. code-block:: python
+
+    stein = SteinVI(model, guide, optimizer, RBFKernel(), num_stein_particles=3)
+    result = stein.run(rng_key, 1000, X, y)
+    params = stein.get_params(result.state)
+    draws = jax.vmap(
+        lambda p, key: Predictive(guide, params=p, num_samples=100)(key, X),
+    )(params, random.split(rng_key, 3))
+    im.set_posterior_sample(
+        {site: v.reshape(-1, *v.shape[2:]) for site, v in draws.items()},
+        num_chains=3,
+    )
