@@ -15,6 +15,8 @@ A site named in both ``intervention`` and ``return_sites`` comes back with its o
 The call warns about it with an :class:`~aimz.OutputWarning`, and its effect in :meth:`~aimz.ImpactModel.estimate_effect` is zero or noise, so leave it out of ``return_sites`` and read the effect from the sites downstream of it.
 A sample site inside the body of :external:func:`~numpyro.contrib.control_flow.scan` is the exception: NumPyro's :external:class:`~numpyro.handlers.do` does not reach it, so an intervention on it changes no draw, and no warning says so.
 To vary such a treatment, pass it as a keyword argument of the kernel and add it to the output through deterministic computations in the body; read only into the distribution of a latent site there, it changes nothing either.
+A site that the kernel already intervenes on, with a :external:class:`~numpyro.handlers.do` inside or around it, cannot be named in ``intervention``: two ``do`` handlers on one site recurse in NumPyro_, so the call raises a ``RecursionError``.
+To vary such a value, remove the kernel's own ``do`` or pass its value as a keyword argument of the kernel.
 
 Values must broadcast to the shape expected by downstream computations.
 A scalar sets a site to the same value for every observation, and an array whose leading axis matches the number of observations sets a different value for each observation.
@@ -43,8 +45,8 @@ Before fitting, you can explore the model's prior predictions with ``z`` fixed a
 
 After fitting, the same mapping applies the intervention while using posterior samples for the other latent sites.
 A latent site downstream of the intervened one keeps its posterior draws and does not pass the intervention on, which :meth:`~aimz.ImpactModel.predict` warns about with :class:`~aimz.OutputWarning`; :doc:`estimands` shows how to write the kernel so that the path runs through deterministic computations.
-A keyword argument or ``X`` that reaches the output only through such a latent site, and an intervention whose only path to the output runs through an observed site whose data are passed, change nothing either, and no warning says so: the effect is exactly zero.
 On a kernel built on :external:func:`~numpyro.contrib.control_flow.scan`, the warning does not fire when that path runs through a latent site inside the body.
+A keyword argument or ``X`` that reaches the output only through a latent site that keeps its posterior draws, and an intervention whose only path to the output runs through an observed site whose data are passed, change nothing either, and no warning says so: the effect is exactly zero.
 Here, the baseline holds ``z`` at one and the modified scenario holds it at zero, both drawn with the same key:
 
 .. code-block:: python

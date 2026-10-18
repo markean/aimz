@@ -91,6 +91,7 @@ from aimz.utils._validation import (
     _check_is_fitted,
     _validate_aligned_inputs,
     _validate_batch_size,
+    _validate_condition,
     _validate_group,
     _validate_intervention,
     _validate_kernel_body,
@@ -641,12 +642,14 @@ class ImpactModel(BaseModel):
         return_sites: tuple[str, ...] = (),
         kwargs: Mapping[str, object] | None = None,
         intervention: dict | None = None,
+        condition: dict | None = None,
     ) -> tuple[Literal["obs", "draw"], int | None]:
         """Choose the sharding strategy and the batch size of a streamed call.
 
         A posterior site shaped ``(num_samples, n_obs, ...)`` cannot be split with the
-        observation axis, nor can a kernel that computes across observations: only a
-        whole-input batch on a single device keeps them intact, so the call otherwise
+        observation axis, nor can a kernel that computes across observations, nor a
+        ``condition`` value with one entry per observation, which is passed whole: only
+        a whole-input batch on a single device keeps them intact, so the call otherwise
         runs draw-parallel, with a warning. Deterministic posterior sites are exempt,
         since the kernel recomputes them, but observed ones are not, since a call
         without their data takes their draws.
@@ -662,6 +665,7 @@ class ImpactModel(BaseModel):
                 for the call's arguments makes it run draw-parallel.
             kwargs: The call's other kernel arguments.
             intervention: The call's intervention.
+            condition: The call's condition.
 
         Returns:
             The sharding strategy and the batch size, ``None`` for a data loader.
@@ -674,8 +678,12 @@ class ImpactModel(BaseModel):
         min_aligned_ndim = 2
         spec = cast("KernelSpec", self._kernel_spec)
         deterministic = set(spec.return_sites) - set(spec.sample_sites)
+        conditioned = sorted(
+            site for site, v in (condition or {}).items() if np.shape(v)[:1] == (n_obs,)
+        )
         if shard_axis == "obs" and (
             self._coupled_sites
+            or conditioned
             or any(
                 v.ndim >= min_aligned_ndim and v.shape[1] == n_obs
                 for site, v in (posterior or {}).items()
@@ -694,6 +702,11 @@ class ImpactModel(BaseModel):
                     f"{', '.join(map(repr, sorted(self._coupled_sites)))}, which "
                     "`shard_axis='obs'` would split"
                     if self._coupled_sites
+                    else "The `condition` values of site(s) "
+                    f"{', '.join(map(repr, conditioned))} have one entry per "
+                    "observation and are passed whole, so `shard_axis='obs'` cannot "
+                    "split them"
+                    if conditioned
                     else "One or more posterior sample shapes are not compatible with "
                     "`shard_axis='obs'`"
                 )
@@ -944,8 +957,8 @@ class ImpactModel(BaseModel):
             ValueError: If ``intervention`` names a site that is not a sample site of
                 the kernel.
             NotImplementedError: If a site's prior cannot be sampled, as for an
-                improper prior, also when the site is intervened on, since the
-                intervention still draws its own value; NumPyro's error names no site.
+                improper prior, also when the site is intervened on, since the site
+                still draws its own value first; NumPyro's error names no site.
 
         Warns:
             OutputWarning: If the output site does not have one value per row of the
@@ -1208,10 +1221,10 @@ class ImpactModel(BaseModel):
             NotFittedError: If there is no inference state to sample from (no
                 completed MCMC run, or no ``vi_result`` when the inference method
                 is SVI).
-            TypeError: If an argument of the kernel, the output included, is not
-                passed when the inference method is MCMC, or SVI whose guide has not
-                run yet, as with a ``vi_result`` from another SVI object; one missing
-                argument is named at a time.
+            TypeError: If an argument of the kernel without a default, or the output,
+                is not passed when the inference method is MCMC, or SVI whose guide has
+                not run yet, as with a ``vi_result`` from another SVI object; one
+                missing argument is named at a time.
         """
         kwargs = _to_jax(kwargs)
         if isinstance(self.inference, MCMC):
@@ -1296,6 +1309,7 @@ class ImpactModel(BaseModel):
         X: ArrayLike,
         *,
         intervention: dict | None = None,
+        condition: dict | None = None,
         rng_key: Array | None = None,
         return_sites: str | Iterable[str] | None = None,
         return_datatree: bool = True,
@@ -1309,6 +1323,7 @@ class ImpactModel(BaseModel):
         return self.predict_on_batch(
             X,
             intervention=intervention,
+            condition=condition,
             rng_key=rng_key,
             in_sample=True,
             return_sites=return_sites,
@@ -1321,6 +1336,7 @@ class ImpactModel(BaseModel):
         X: ArrayLike | ArrayLoader | Iterable[Mapping[str, Array | np.ndarray]],
         *,
         intervention: dict | None = None,
+        condition: dict | None = None,
         rng_key: Array | None = None,
         return_sites: str | Iterable[str] | None = None,
         shard_axis: Literal["obs", "draw"] = "obs",
@@ -1338,6 +1354,7 @@ class ImpactModel(BaseModel):
         return self.predict(
             X,
             intervention=intervention,
+            condition=condition,
             rng_key=rng_key,
             in_sample=True,
             return_sites=return_sites,
@@ -1892,7 +1909,7 @@ class ImpactModel(BaseModel):
             trace named them (``None`` for the default ``<site>_dim_<i>`` names), and,
             for a site in the posterior, the ``draw_shape`` of one draw. A ``factor``
             term counts as observed, and ``param`` sites are not listed; their values
-            after a fit are in :attr:`~aimz.ImpactModel.vi_result`.
+            after an SVI fit are in :attr:`~aimz.ImpactModel.vi_result`.
         """
         spec = self._kernel_spec
         sample_sites = spec.sample_sites if spec else ()
@@ -2030,6 +2047,7 @@ class ImpactModel(BaseModel):
         X: ArrayLike,
         *,
         intervention: dict | None = None,
+        condition: dict | None = None,
         rng_key: Array | None = None,
         in_sample: bool = True,
         return_sites: str | Iterable[str] | None = None,
@@ -2045,6 +2063,10 @@ class ImpactModel(BaseModel):
             X: Input array with observations on the leading axis.
             intervention: Replacement values by sample site name, applied while
                 sampling.
+            condition: Values by sample site name that the sites take while sampling,
+                such as the observed history of an output that an autoregressive
+                recursion reads; a conditioned site returns these values, and one
+                whose values the posterior holds keeps its posterior draws.
             rng_key: A pseudo-random number generator key, split from an internal key by
                 default.
             in_sample: Put the samples in the ``posterior_predictive`` group, or in
@@ -2064,21 +2086,27 @@ class ImpactModel(BaseModel):
             NotFittedError: If the model is not fitted.
             TypeError: If :attr:`~aimz.ImpactModel.param_input` or
                 :attr:`~aimz.ImpactModel.param_output` is passed as an argument.
-            ValueError: If ``intervention`` names a site that is not a sample site of
-                the kernel, or a posterior site that is not intervened on does not fit
-                the rows being evaluated, as a site with one value per observation does
-                not fit other observations, and a site sized by a count, such as the
-                number of groups, does not fit another count.
+            ValueError: If ``intervention`` or ``condition`` names a site that is not a
+                sample site of the kernel, or a posterior site that is not intervened
+                on does not fit the rows being evaluated, as a site with one value per
+                observation does not fit other observations, and a site sized by a
+                count, such as the number of groups, does not fit another count.
 
         Warns:
             OutputWarning: If an intervened site reaches the output only through sites
                 whose values are taken from the posterior or intervened on, so that
                 the draws do not respond to it, if a requested return site is
-                intervened on, since it comes back with its own draws, or if the output
-                site does not have one value per row of the input.
+                intervened on, since it comes back with its own draws, if a conditioned
+                site is one the posterior holds, since it keeps its posterior draws, or
+                if the output site does not have one value per row of the input.
         """
         _check_is_fitted(self)
         _validate_intervention(intervention, kernel_spec=self._kernel_spec)
+        _validate_condition(
+            condition,
+            kernel_spec=self._kernel_spec,
+            fixed=(self._posterior or {}).keys(),
+        )
         _warn_unreachable_intervention(
             intervention,
             output=self.param_output,
@@ -2105,9 +2133,10 @@ class ImpactModel(BaseModel):
                 params={
                     **self.vi_result.params,
                     **(getattr(self.vi_result.state, "mutable_state", None) or {}),
+                    **_to_jax(condition or {}),
                 }
                 if self.vi_result is not None
-                else None,
+                else _to_jax(condition or {}),
                 intervention=_to_jax(intervention or {}),
                 model_kwargs=args_bound,
             ),
@@ -2137,6 +2166,7 @@ class ImpactModel(BaseModel):
         X: ArrayLike | ArrayLoader | Iterable[Mapping[str, Array | np.ndarray]],
         *,
         intervention: dict | None = None,
+        condition: dict | None = None,
         rng_key: Array | None = None,
         in_sample: bool = True,
         return_sites: str | Iterable[str] | None = None,
@@ -2157,6 +2187,11 @@ class ImpactModel(BaseModel):
                 yielding batch mappings keyed by kernel parameter names.
             intervention: Replacement values by sample site name, applied while
                 sampling.
+            condition: Values by sample site name that the sites take while sampling,
+                such as the observed history of an output that an autoregressive
+                recursion reads; a conditioned site returns these values, and one
+                whose values the posterior holds keeps its posterior draws. Each value
+                is passed whole, to every batch of a data loader too.
             rng_key: A pseudo-random number generator key, split from an internal key by
                 default.
             in_sample: Put the samples in the ``posterior_predictive`` group, or in
@@ -2193,12 +2228,12 @@ class ImpactModel(BaseModel):
                 ``shard_axis="draw"`` is used with a data loader ``X``.
             ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``, ``store`` is
                 not ``"persistent"`` or ``"memory"``, ``output_dir`` is passed with
-                ``store="memory"``, ``X`` is 0-D or empty, ``intervention`` names a
-                site that is not a sample site of the kernel, or a posterior site that
-                is not intervened on does not fit the rows being evaluated, as a site
-                with one value per observation does not fit other observations, and a
-                site sized by a count, such as the number of groups, does not fit
-                another count.
+                ``store="memory"``, ``X`` is 0-D or empty, ``intervention`` or
+                ``condition`` names a site that is not a sample site of the kernel, or
+                a posterior site that is not intervened on does not fit the rows being
+                evaluated, as a site with one value per observation does not fit other
+                observations, and a site sized by a count, such as the number of
+                groups, does not fit another count.
             NotImplementedError: With a data loader, if a return site has no
                 observation axis, unless it is intervened on or the kernel does not
                 run on one row fewer than a device evaluates (two rows when it
@@ -2209,16 +2244,24 @@ class ImpactModel(BaseModel):
             OutputWarning: If an intervened site reaches the output only through sites
                 whose values are taken from the posterior or intervened on, so that
                 the draws do not respond to it, if a requested return site is
-                intervened on, since it comes back with its own draws, or if the output
-                site does not have one value per row of an array input; under
-                ``shard_axis="obs"`` the call then reruns under ``shard_axis="draw"``.
+                intervened on, since it comes back with its own draws, if a conditioned
+                site is one the posterior holds, since it keeps its posterior draws, or
+                if the output site does not have one value per row of an array input;
+                under ``shard_axis="obs"`` the call then reruns under
+                ``shard_axis="draw"``.
             PerformanceWarning: If ``shard_axis="obs"`` cannot split an array input,
-                as for a return site without an observation axis or a latent site with
-                one value per observation, so the call reruns under
+                as for a return site without an observation axis, a latent site with
+                one value per observation, or a ``condition`` value with one entry per
+                observation, which is passed whole, so the call reruns under
                 ``shard_axis="draw"``.
         """
         _check_is_fitted(self)
         _validate_intervention(intervention, kernel_spec=self._kernel_spec)
+        _validate_condition(
+            condition,
+            kernel_spec=self._kernel_spec,
+            fixed=(self._posterior or {}).keys(),
+        )
         _warn_unreachable_intervention(
             intervention,
             output=self.param_output,
@@ -2247,6 +2290,7 @@ class ImpactModel(BaseModel):
             return_sites=return_sites,
             kwargs=kwargs,
             intervention=intervention,
+            condition=condition,
         )
 
         if rng_key is None:
@@ -2275,9 +2319,10 @@ class ImpactModel(BaseModel):
                 params={
                     **self.vi_result.params,
                     **(getattr(self.vi_result.state, "mutable_state", None) or {}),
+                    **_to_jax(condition or {}),
                 }
                 if self.vi_result is not None
-                else None,
+                else _to_jax(condition or {}),
                 intervention=intervention,
             ),
             store=store,
@@ -2332,9 +2377,10 @@ class ImpactModel(BaseModel):
                 ``output_intervention`` is not provided.
             ValueError: If neither ``output_baseline`` nor ``args_baseline`` is
                 provided, if neither ``output_intervention`` nor
-                ``args_intervention`` is provided, if an ``intervention`` passed
-                through ``args_baseline`` or ``args_intervention`` names a site that
-                is not a sample site of the kernel, if a posterior site that is not
+                ``args_intervention`` is provided, if an ``intervention`` or
+                ``condition`` passed through ``args_baseline`` or
+                ``args_intervention`` names a site that is not a sample site of the
+                kernel, if a posterior site that is not
                 intervened on does not fit the rows a scenario evaluates, or if the
                 scenarios do not share a predictive group.
 
@@ -2354,6 +2400,11 @@ class ImpactModel(BaseModel):
                 _validate_intervention(
                     args.get("intervention"),
                     kernel_spec=self._kernel_spec,
+                )
+                _validate_intervention(
+                    args.get("condition"),
+                    kernel_spec=self._kernel_spec,
+                    argument="condition",
                 )
 
         if output_baseline is None and args_baseline is None:

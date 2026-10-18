@@ -24,6 +24,7 @@ import numpyro.distributions as dist
 import pytest
 from jax import Array, device_count, random
 from numpyro import deterministic, param, plate, sample
+from numpyro.contrib.control_flow import scan
 from numpyro.primitives import mutable
 
 from aimz import ImpactModel, OutputWarning, PerformanceWarning
@@ -431,3 +432,50 @@ def test_predict_blocked_intervention() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         im.predict_on_batch(X, intervention={"z": 0.0})
+
+
+def test_predict_condition() -> None:
+    """A conditioned output gives an autoregressive recursion its observed history."""
+
+    def ar1(X: Array, y: Array | None = None) -> None:
+        phi = sample("phi", dist.Uniform(-1.0, 1.0))
+
+        def step(prev: Array, inputs: tuple[Array, Array | None]) -> tuple:
+            x, y_t = inputs
+            mu = deterministic("mu", phi * prev + 0.0 * x)
+            return sample("y", dist.Normal(mu, 0.1), obs=y_t), None
+
+        scan(step, 0.0, (X[:, 0], y))
+
+    X = np.zeros((12, 1), dtype=np.float32)
+    y = np.linspace(0.0, 1.0, 12, dtype=np.float32)
+    im = ImpactModel(ar1, rng_key=random.key(0), inference=make_svi(ar1))
+    im.fit_on_batch(X, y, num_steps=10, num_samples=4, progress=False)
+    im.set_posterior_sample({"phi": np.full(4, 0.5)})
+    expected = np.broadcast_to(0.5 * np.concatenate([[0.0], y[:-1]]), (1, 4, 12))
+    dt = im.predict_on_batch(X, condition={"y": y}, return_sites="mu")
+    np.testing.assert_allclose(dt.posterior_predictive["mu"].values, expected)
+    with pytest.warns(PerformanceWarning, match="computes across observations"):
+        dt = im.predict(
+            X,
+            condition={"y": y},
+            return_sites="mu",
+            store="memory",
+            progress=False,
+        )
+    np.testing.assert_allclose(dt.posterior_predictive["mu"].values, expected)
+    with pytest.raises(ValueError, match="Condition site"):
+        im.predict_on_batch(X, condition={"mu": y})
+    with pytest.warns(OutputWarning, match="keep their posterior draws"):
+        im.predict_on_batch(X, condition={"phi": 0.0})
+
+    # Without `scan`, a value with one entry per observation keeps the rows whole
+    X = np.linspace(-1.0, 1.0, 24, dtype=np.float32).reshape(12, 2)
+    im = ImpactModel(lm, rng_key=random.key(0), inference=make_svi(lm))
+    im.fit_on_batch(X, y, num_steps=10, num_samples=4, progress=False)
+    with pytest.warns(PerformanceWarning, match="`condition` values of site"):
+        dt = im.predict(X, condition={"y": y}, store="memory", progress=False)
+    np.testing.assert_array_equal(
+        dt.posterior_predictive["y"].values,
+        np.broadcast_to(y, (1, 4, 12)),
+    )

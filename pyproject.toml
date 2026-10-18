@@ -81,6 +81,7 @@ per-file-ignores = { "aimz/model/_core.py" = [
     "BLE001",  # blind-except
     "C901",    # complex-structure
     "PLR0912", # too-many-branches
+    "PLR0913", # too-many-arguments
     "PLR0915", # too-many-statements
     "SLF001",  # private-member-access
 ], "aimz/mlflow*" = [

@@ -142,8 +142,12 @@ def _validate_group(dt_baseline: xr.DataTree, dt_intervention: xr.DataTree) -> s
 def _validate_intervention(
     intervention: dict | None,
     kernel_spec: KernelSpec | None,
+    *,
+    argument: str = "intervention",
 ) -> None:
     """Raise if an intervened site is not a sample site of a traced kernel.
+
+    ``argument`` names the mapping in the error, as ``"condition"``.
 
     Raises:
         ValueError: If ``intervention`` names a site that is not a sample site.
@@ -153,11 +157,37 @@ def _validate_intervention(
     unknown = [site for site in intervention if site not in kernel_spec.sample_sites]
     if unknown:
         msg = (
-            f"Intervention site(s) not among the kernel's sample sites: "
+            f"{argument.capitalize()} site(s) not among the kernel's sample sites: "
             f"{', '.join(map(repr, unknown))}. Sample sites: "
             f"{', '.join(map(repr, kernel_spec.sample_sites))}."
         )
         raise ValueError(msg)
+
+
+def _validate_condition(
+    condition: dict | None,
+    *,
+    kernel_spec: KernelSpec | None,
+    fixed: AbstractSet[str],
+) -> None:
+    """Raise for a conditioned site that is not a sample site, and warn for a fixed one.
+
+    Raises:
+        ValueError: If ``condition`` names a site that is not a sample site of a traced
+            kernel.
+
+    Warns:
+        OutputWarning: If a conditioned site is fixed, as one whose values are taken
+            from the posterior, so that it keeps them.
+    """
+    _validate_intervention(condition, kernel_spec, argument="condition")
+    if held := sorted((condition or {}).keys() & fixed):
+        msg = (
+            f"Conditioned site(s) {', '.join(map(repr, held))} keep their posterior "
+            "draws, since the posterior holds them; intervene on them instead to set "
+            "their values."
+        )
+        warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
 
 
 def _warn_unreachable_intervention(
