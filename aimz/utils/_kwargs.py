@@ -25,7 +25,7 @@ from jax import Array, tree
 from aimz.utils._validation import _is_arraylike
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Iterable, Mapping, Sized
 
     from jax.typing import ArrayLike
 
@@ -42,13 +42,25 @@ def _is_per_observation(value: object, n_obs: int | None) -> bool:
     ``n_obs`` is ``None`` when the input is a data loader or is replicated under
     ``shard_axis="draw"``, so that no value is per observation. Nor is a ragged
     sequence, which has no shape.
+
+    Raises:
+        ValueError: If a ragged sequence holds one entry per observation, since it
+            cannot be split with the rows.
     """
     if n_obs is None or not _is_arraylike(value):
         return False
     try:
         shape = np.shape(cast("ArrayLike", value))
     except ValueError:
-        return False
+        if len(cast("Sized", value)) != n_obs:
+            return False
+        msg = (
+            "A ragged keyword argument with one entry per observation cannot be "
+            "split with the rows. Pad its entries into an array with one row per "
+            "observation, or, if its length matches the rows only by chance, wrap it "
+            "in a dictionary to pass it whole."
+        )
+        raise ValueError(msg) from None
 
     return len(shape) >= 1 and shape[0] == n_obs
 

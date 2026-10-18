@@ -393,6 +393,9 @@ def test_predict_container_keyword_argument() -> None:
         im.predict_on_batch(X, pair=pair).posterior_predictive["mu"],
         rtol=1e-6,
     )
+    ragged_rows = [np.ones(i % 3 + 1) for i in range(len(X))]
+    with pytest.raises(ValueError, match="one entry per observation"):
+        im.predict(X, pair=ragged_rows, store="memory", progress=False)
 
 
 def test_predict_blocked_intervention() -> None:
