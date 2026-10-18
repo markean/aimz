@@ -48,6 +48,8 @@ aimz calls the kernel itself, so it relies on a few rules, each checked with a :
 * The signature takes no ``*args``, ``**kwargs``, or positional-only parameters, since aimz passes every argument by name.
 * No site name contains ``/``, which :external:class:`~xarray.DataTree` does not allow in variable names, and no sample or deterministic site is named ``chain`` or ``draw``, the dimensions of the draws.
 
+For missing outputs, mask the output's distribution, as in ``sample("y", d.mask(mask), obs=y)``, which leaves the masked observations out of the likelihood; with ``obs_mask``, NumPyro records the output as a deterministic site, which the rules above reject.
+
 A kernel without an input matrix, such as the eight schools model, takes another array with one value per row as its input:
 
 .. code-block:: python

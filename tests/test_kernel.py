@@ -131,6 +131,20 @@ def test_kernel_body_validation(synthetic_data: tuple[Array, Array]) -> None:
         with pytest.raises(KernelValidationError):
             im.fit(X, y, batch_size=len(X), progress=False)
 
+    # `obs_mask` records the output as a deterministic site
+    def masked_output(X: Array, y: Array | None = None) -> None:
+        mask = jnp.ones(len(X), dtype=bool)
+        with numpyro.plate("obs", X.shape[0]):
+            sample("y", dist.Normal(0.0, 1.0), obs=y, obs_mask=mask)
+
+    im = ImpactModel(
+        masked_output,
+        rng_key=random.key(42),
+        inference=make_svi(masked_output),
+    )
+    with pytest.raises(KernelValidationError, match="mask its distribution instead"):
+        im.fit(X, y, batch_size=len(X), progress=False)
+
     # The prior predictive trace needs a sample or deterministic output site
     def delta_only(X: Array, y: Array | None = None) -> None:
         sample("z", dist.Delta(y if y is not None else jnp.zeros(len(X))), obs=y)

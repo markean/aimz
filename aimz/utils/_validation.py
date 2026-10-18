@@ -387,6 +387,12 @@ def _validate_kernel_body(
             msg = (
                 f"Expected {param_output!r} to have type 'sample', got "
                 f"{site['type']!r}."
+            ) + (
+                " `obs_mask` on the output site is not supported; mask its "
+                "distribution instead, as in "
+                f"`sample({param_output!r}, d.mask(mask), obs={param_output})`."
+                if f"{param_output}_observed" in model_trace
+                else ""
             )
             raise KernelValidationError(msg)
         if not site.get("is_observed", False):
