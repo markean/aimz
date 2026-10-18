@@ -1354,6 +1354,9 @@ class ImpactModel(BaseModel):
     ) -> tuple[SVIState, Array]:
         """Run one SVI step on a batch, keeping the state internally.
 
+        A later step continues from that state, which has no guide parameters for a
+        latent site that a new keyword argument adds; create a new model for one.
+
         Args:
             X: Input array with observations on the leading axis.
             y: Output array with observations on the leading axis.
@@ -1418,7 +1421,9 @@ class ImpactModel(BaseModel):
 
         With SVI, runs the optimization on the batch and draws posterior samples from
         the guide; with MCMC, runs the sampler. Training continues from an existing SVI
-        state; create a new model to start over.
+        state; create a new model to start over, or to fit with a keyword argument that
+        adds a latent site: that state has no guide parameters for it, so the posterior
+        lacks it and the predictive methods draw it from its prior.
 
         Args:
             X: Input array with observations on the leading axis.
@@ -1521,7 +1526,9 @@ class ImpactModel(BaseModel):
         samples are drawn from the guide, called with the data in input order. With a
         data loader, the guide gets the last batch instead, so a latent drawn per
         observation covers only that batch. Training continues from an existing SVI
-        state; create a new model to start over.
+        state; create a new model to start over, or to fit with a keyword argument that
+        adds a latent site: that state has no guide parameters for it, so the posterior
+        lacks it and the predictive methods draw it from its prior.
 
         Args:
             X: Input array with observations on the leading axis, or a data loader
@@ -1562,7 +1569,10 @@ class ImpactModel(BaseModel):
                 batch, such as one kept per position or plate index, which the batches
                 split. The checks run on the first ``batch_size`` observations of an
                 array input or of an :class:`~aimz.utils.data.ArrayLoader`; another
-                data loader has no size to compare with.
+                data loader has no size to compare with. Of the sites drawn as one
+                event over the rows, only an event as long as the batch is checked, so
+                one padded beyond the rows, or offset from them, trains without the
+                warning.
         """
         _validate_aligned_inputs(X, y=y)
         if y is None and isinstance(X, ArrayLike):

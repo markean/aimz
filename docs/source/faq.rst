@@ -49,6 +49,7 @@ aimz calls the kernel itself, so it relies on a few rules, each checked with a :
 * No site name contains ``/``, which :external:class:`~xarray.DataTree` does not allow in variable names, and no sample or deterministic site is named ``chain`` or ``draw``, the dimensions of the draws.
 
 For missing outputs, mask the output's distribution, as in ``sample("y", d.mask(mask), obs=y)``, which leaves the masked observations out of the likelihood; with ``obs_mask``, NumPyro records the output as a deterministic site, which the rules above reject.
+A custom guide takes the kernel's arguments under the same names, since aimz passes them to the guide by keyword, as to the kernel: a guide with other names or positional-only parameters, which NumPyro's own ``SVI.run`` accepts by passing them positionally, fails with a ``TypeError`` when aimz fits it.
 
 A kernel without an input matrix, such as the eight schools model, takes another array with one value per row as its input:
 
@@ -136,6 +137,7 @@ The streaming methods (:meth:`~aimz.ImpactModel.predict`, :meth:`~aimz.ImpactMod
 A kernel that computes across observations, for example through a cumulative sum, a moving average, a value from a previous row, or a statistic such as the mean over all rows, then sees only part of the rows or sees them out of order.
 This happens without an error or a warning, unless the kernel's trace shows the dependence: a site recorded by :external:func:`~numpyro.contrib.control_flow.scan`, or a site drawn as one event over all the rows, such as a :external:class:`~numpyro.distributions.continuous.MultivariateNormal` over the observations.
 For such a kernel and an array input, the streaming methods warn with a :class:`~aimz.PerformanceWarning` and rerun under ``shard_axis="draw"``, which keeps the rows whole and in order, while a data loader still splits them, and so does :meth:`~aimz.ImpactModel.fit` with a ``batch_size`` smaller than the input, which warns with a :class:`~aimz.FitWarning`.
+:meth:`~aimz.ImpactModel.fit` checks only an event as long as its batch, so an event over the rows that is padded, as to a multiple of eight, or offset from them, as by an anchor point, trains on the split batches without the warning.
 A site recorded by :external:func:`~numpyro.contrib.control_flow.cond` counts as one recorded by ``scan``, so a kernel with such a site reruns and warns the same way, even when it computes each row from that row's inputs alone.
 Whether a split happens depends on the input size, ``batch_size``, and the number of devices, so such a kernel can give correct results on a small input on one device and wrong results on a larger input or on several devices.
 A plate inside the body of :external:func:`~numpyro.contrib.control_flow.scan` whose ``subsample_size`` exceeds the rows it receives, as when the kernel gathers rows through its indices and :meth:`~aimz.ImpactModel.predict` or :meth:`~aimz.ImpactModel.sample_prior_predictive` splits the input, takes the rows in a random order that differs between draws, so give it no ``subsample_size`` at prediction or pass ``shard_axis="draw"``.
