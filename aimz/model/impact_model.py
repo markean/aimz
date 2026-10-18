@@ -1355,7 +1355,8 @@ class ImpactModel(BaseModel):
         """Run one SVI step on a batch, keeping the state internally.
 
         A later step continues from that state, which has no guide parameters for a
-        latent site that a new keyword argument adds; create a new model for one.
+        latent site that a new keyword argument adds; create a new model for one, with
+        a new guide, since an autoguide keeps the sites of its first call.
 
         Args:
             X: Input array with observations on the leading axis.
@@ -1423,7 +1424,9 @@ class ImpactModel(BaseModel):
         the guide; with MCMC, runs the sampler. Training continues from an existing SVI
         state; create a new model to start over, or to fit with a keyword argument that
         adds a latent site: that state has no guide parameters for it, so the posterior
-        lacks it and the predictive methods draw it from its prior.
+        lacks it and the predictive methods draw it from its prior. For such a site,
+        give the new model a new guide too, since an autoguide keeps the sites of its
+        first call.
 
         Args:
             X: Input array with observations on the leading axis.
@@ -1528,7 +1531,9 @@ class ImpactModel(BaseModel):
         observation covers only that batch. Training continues from an existing SVI
         state; create a new model to start over, or to fit with a keyword argument that
         adds a latent site: that state has no guide parameters for it, so the posterior
-        lacks it and the predictive methods draw it from its prior.
+        lacks it and the predictive methods draw it from its prior. For such a site,
+        give the new model a new guide too, since an autoguide keeps the sites of its
+        first call.
 
         Args:
             X: Input array with observations on the leading axis, or a data loader
