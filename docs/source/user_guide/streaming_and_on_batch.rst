@@ -155,7 +155,8 @@ The streaming methods and :meth:`~aimz.ImpactModel.fit` give each keyword argume
 * **Constant:** every other value is passed whole to every batch.
   Arrays, including 0-D arrays and NumPy scalars, are traced, so their values can change between calls without recompiling, but the kernel cannot read them, for example to set a shape.
   Other values, such as Python integers, floats, booleans, and strings, are passed as static Python values, so they can set shapes or drive control flow in the kernel.
-  Containers such as dictionaries are handled leaf by leaf in the same way.
+  A container such as a dictionary is passed whole and never split with the rows; its leaves are traced or static by the same rules.
+  So give a per-observation array a keyword argument of its own: inside a container, it fails with a broadcasting error once the rows are split, as in :meth:`~aimz.ImpactModel.fit` with a ``batch_size`` smaller than the input or :meth:`~aimz.ImpactModel.log_likelihood` on several devices.
 
 .. code-block:: python
 
@@ -170,7 +171,7 @@ The streaming methods and :meth:`~aimz.ImpactModel.fit` give each keyword argume
 
 Each new static value compiles the kernel again, so pass a number that changes from call to call, such as a swept hyperparameter, as a JAX or NumPy array.
 An array whose leading axis happens to equal the number of observations is treated as per-observation.
-To pass such an array whole, give the input as a data loader, alongside which every keyword argument is a constant.
+To pass such an array whole, wrap it in a dictionary, or give the input as a data loader, alongside which every keyword argument is a constant.
 
 
 Quick Recommendations

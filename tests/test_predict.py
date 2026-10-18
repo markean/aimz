@@ -373,6 +373,28 @@ def test_predict_loader_binds_fields_by_name(
         im.predict(no_input, progress=False)
 
 
+def test_predict_container_keyword_argument() -> None:
+    """A container keyword argument is passed whole, a ragged one included."""
+
+    def kernel(X: Array, pair: tuple, y: Array | None = None) -> None:
+        offset, weights = pair
+        b = sample("b", dist.Normal())
+        with plate("obs", X.shape[0]):
+            mu = deterministic("mu", b * X[:, 0] + offset.sum() + weights.sum())
+            sample("y", dist.Normal(mu, 1.0), obs=y)
+
+    X = np.linspace(-1.0, 1.0, 12).reshape(12, 1)
+    pair = (np.ones(3), np.ones((2, 2)))
+    im = ImpactModel(kernel, rng_key=random.key(0), inference=make_svi(kernel))
+    im.fit_on_batch(X, X[:, 0], pair=pair, num_steps=5, num_samples=5, progress=False)
+    dt = im.predict(X, pair=pair, store="memory", progress=False)
+    np.testing.assert_allclose(
+        dt.posterior_predictive["mu"],
+        im.predict_on_batch(X, pair=pair).posterior_predictive["mu"],
+        rtol=1e-6,
+    )
+
+
 def test_predict_blocked_intervention() -> None:
     """An intervention that the posterior draws of a latent site block warns."""
 
