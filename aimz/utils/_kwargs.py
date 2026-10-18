@@ -40,13 +40,17 @@ def _is_per_observation(value: object, n_obs: int | None) -> bool:
     """Return whether a value is an array with ``n_obs`` rows on its leading axis.
 
     ``n_obs`` is ``None`` when the input is a data loader or is replicated under
-    ``shard_axis="draw"``, so that no value is per observation.
+    ``shard_axis="draw"``, so that no value is per observation. Nor is a ragged
+    sequence, which has no shape.
     """
     if n_obs is None or not _is_arraylike(value):
         return False
-    arr = cast("ArrayLike", value)
+    try:
+        shape = np.shape(cast("ArrayLike", value))
+    except ValueError:
+        return False
 
-    return np.ndim(arr) >= 1 and np.shape(arr)[0] == n_obs
+    return len(shape) >= 1 and shape[0] == n_obs
 
 
 def _group_kwargs(

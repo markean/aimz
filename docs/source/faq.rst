@@ -121,7 +121,7 @@ aimz accepts NumPy or JAX arrays of any shape with at least one dimension; the l
 This covers tabular inputs (``(n, d)``), 1D inputs (``(n,)``), and higher-rank inputs such as sequences (``(n, seq_len, d)``) or images (``(n, h, w, c)``).
 Additional named arrays whose leading axis matches the input are treated as per-observation data, and other arrays, such as a vector of prior scales, are passed whole (see :ref:`streaming-keyword-arguments`).
 The output variable has the same flexibility: it can be 1D for scalar targets, 2D for multi-output regression, or higher-rank as the model requires, provided its leading axis matches the input.
-Ragged or nested structures are not currently supported.
+Ragged or nested structures are not currently supported as the input or the output; a keyword argument that holds one is passed whole.
 If native support for a specific structure is important for your use case, opening an issue helps prioritize it, and contributions are welcome.
 
 
