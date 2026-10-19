@@ -434,7 +434,7 @@ def test_predict_blocked_intervention() -> None:
         im.predict_on_batch(X, intervention={"z": 0.0})
 
 
-def test_predict_condition() -> None:
+def test_predict_condition(monkeypatch: pytest.MonkeyPatch) -> None:
     """A conditioned output gives an autoregressive recursion its observed history."""
 
     def ar1(X: Array, y: Array | None = None) -> None:
@@ -475,6 +475,18 @@ def test_predict_condition() -> None:
     im.fit_on_batch(X, y, num_steps=10, num_samples=4, progress=False)
     with pytest.warns(PerformanceWarning, match="`condition` values of site"):
         dt = im.predict(X, condition={"y": y}, store="memory", progress=False)
+    np.testing.assert_array_equal(
+        dt.posterior_predictive["y"].values,
+        np.broadcast_to(y, (1, 4, 12)),
+    )
+    # On one device, a whole batch splits nothing, so `draw` runs without a warning
+    monkeypatch.setattr("aimz.model.impact_model.local_device_count", lambda: 1)
+    im = ImpactModel(lm, rng_key=random.key(0), inference=make_svi(lm))
+    im.fit_on_batch(X, y, num_steps=10, num_samples=4, progress=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        dt = im.predict(X, condition={"y": y}, store="memory", progress=False)
+    assert dt.posterior_predictive.attrs["shard_axis"] == "draw"
     np.testing.assert_array_equal(
         dt.posterior_predictive["y"].values,
         np.broadcast_to(y, (1, 4, 12)),
