@@ -185,9 +185,9 @@ def _validate_condition(
     if condition is not None and not isinstance(condition, Mapping):
         msg = (
             "`condition` maps sample site names to their values, got "
-            f"{type(condition).__name__!r}. A kernel argument named `condition` does "
-            "not reach the kernel through the predictive methods, which take that "
-            "name themselves; rename it."
+            f"{type(condition).__name__!r}. A kernel argument named `condition` "
+            "cannot be passed by keyword to a method that takes that name itself; "
+            "rename it."
         )
         raise TypeError(msg)
     _validate_intervention(condition, kernel_spec, argument="condition")
