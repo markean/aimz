@@ -33,6 +33,7 @@ it means you neither matched the defaults nor overrode them.
 Fix it by renaming your arguments to ``X`` / ``y`` or supplying ``param_input`` / ``param_output`` as shown above.
 
 The methods that take an input keep their own ``X`` and ``y`` parameters whatever the kernel calls them, so pass the input as ``X`` and the output as ``y``, also in the argument dictionaries of :meth:`~aimz.ImpactModel.estimate_effect`, as in ``{"X": X}``; the kernel's own names, such as ``features=X``, raise a ``TypeError``.
+Their other parameters, such as ``intervention``, ``condition``, and ``rng_key``, do not reach the kernel either, so rename a kernel argument that shares a name with one; a ``condition`` that is not a mapping raises a ``TypeError`` saying so.
 The batches of a data loader, in contrast, are keyed by the kernel's own names (see :doc:`user_guide/dataloader`), and so are the keyword arguments of :meth:`~aimz.ImpactModel.sample`, which it passes to the kernel under MCMC and to the guide under SVI.
 
 

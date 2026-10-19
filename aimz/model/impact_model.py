@@ -652,10 +652,10 @@ class ImpactModel(BaseModel):
         a whole-input batch on a single device keeps them intact, so the call otherwise
         runs draw-parallel, with a warning. A call with such a ``condition`` value runs
         draw-parallel on a whole-input batch too, without a warning, since under
-        ``"obs"`` the streamer takes a site set from a whole value for one without the
-        observation axis. Deterministic posterior sites are exempt,
-        since the kernel recomputes them, but observed ones are not, since a call
-        without their data takes their draws.
+        ``"obs"`` the streamer can take a site set from a whole value for one without
+        the observation axis. Deterministic posterior sites are exempt, since the kernel
+        recomputes them, but observed ones are not, since a call without their data
+        takes their draws.
 
         Args:
             X: Input array, or a data loader, which batches itself.
@@ -722,9 +722,9 @@ class ImpactModel(BaseModel):
                 )
                 shard_axis, batch_size = "draw", None
             elif conditioned:
-                # One batch keeps the rows whole, but under `obs` the streamer rejects a
-                # site set from a whole `condition` value as having no observation axis;
-                # `draw` keeps the rows whole too and checks only the output
+                # One batch keeps the rows whole, but under `obs` the streamer can
+                # reject a site set from a whole `condition` value as having no
+                # observation axis; `draw` keeps them whole and checks only the output
                 shard_axis, batch_size = "draw", None
             elif batch_size is None:
                 batch_size = n_obs
@@ -2096,7 +2096,9 @@ class ImpactModel(BaseModel):
         Raises:
             NotFittedError: If the model is not fitted.
             TypeError: If :attr:`~aimz.ImpactModel.param_input` or
-                :attr:`~aimz.ImpactModel.param_output` is passed as an argument.
+                :attr:`~aimz.ImpactModel.param_output` is passed as an argument, or
+                ``condition`` is not a mapping, as when it is meant for a kernel
+                argument of that name, which has to be renamed.
             ValueError: If ``intervention`` or ``condition`` names a site that is not a
                 sample site of the kernel, or a posterior site that is not intervened
                 on does not fit the rows being evaluated, as a site with one value per
@@ -2235,8 +2237,10 @@ class ImpactModel(BaseModel):
         Raises:
             NotFittedError: If the model is not fitted.
             TypeError: If :attr:`~aimz.ImpactModel.param_input` or
-                :attr:`~aimz.ImpactModel.param_output` is passed as an argument, or
-                ``shard_axis="draw"`` is used with a data loader ``X``.
+                :attr:`~aimz.ImpactModel.param_output` is passed as an argument,
+                ``shard_axis="draw"`` is used with a data loader ``X``, or
+                ``condition`` is not a mapping, as when it is meant for a kernel
+                argument of that name, which has to be renamed.
             ValueError: If ``shard_axis`` is not ``"obs"`` or ``"draw"``, ``store`` is
                 not ``"persistent"`` or ``"memory"``, ``output_dir`` is passed with
                 ``store="memory"``, ``X`` is 0-D or empty, ``intervention`` or
@@ -2386,14 +2390,17 @@ class ImpactModel(BaseModel):
         Raises:
             NotFittedError: If the model is not fitted and ``output_baseline`` or
                 ``output_intervention`` is not provided.
+            TypeError: If a ``condition`` passed through ``args_baseline`` or
+                ``args_intervention`` is not a mapping, as when it is meant for a
+                kernel argument of that name, which has to be renamed.
             ValueError: If neither ``output_baseline`` nor ``args_baseline`` is
                 provided, if neither ``output_intervention`` nor
                 ``args_intervention`` is provided, if an ``intervention`` or
                 ``condition`` passed through ``args_baseline`` or
                 ``args_intervention`` names a site that is not a sample site of the
-                kernel, if a posterior site that is not
-                intervened on does not fit the rows a scenario evaluates, or if the
-                scenarios do not share a predictive group.
+                kernel, if a posterior site that is not intervened on does not fit the
+                rows a scenario evaluates, or if the scenarios do not share a
+                predictive group.
 
         Warns:
             OutputWarning: If the scenarios differ in dimension sizes or coordinate
@@ -2412,10 +2419,11 @@ class ImpactModel(BaseModel):
                     args.get("intervention"),
                     kernel_spec=self._kernel_spec,
                 )
-                _validate_intervention(
+                # The scenario's own call warns for sites the posterior holds
+                _validate_condition(
                     args.get("condition"),
                     kernel_spec=self._kernel_spec,
-                    argument="condition",
+                    fixed=frozenset(),
                 )
 
         if output_baseline is None and args_baseline is None:
