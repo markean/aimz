@@ -146,7 +146,7 @@ def test_kernel_across_observations_reruns_under_draw(
     assert dt.prior_predictive.attrs["shard_axis"] == "draw"
 
 
-@pytest.mark.filterwarnings("ignore:One or more posterior sample shapes")
+@pytest.mark.filterwarnings("ignore:The posterior site")
 def test_plan_execution_aligned_posterior(
     synthetic_data: tuple[Array, Array],
     im_latent_var_svi_fitted: ImpactModel,

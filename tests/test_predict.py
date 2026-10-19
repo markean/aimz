@@ -494,3 +494,44 @@ def test_predict_condition(monkeypatch: pytest.MonkeyPatch) -> None:
         dt.posterior_predictive["y"].values,
         np.broadcast_to(y, (1, 4, 12)),
     )
+
+
+def test_predict_untraced_kernel() -> None:
+    """A kernel that the call traces first is planned like a fitted one."""
+
+    def gp(X: Array, y: Array | None = None) -> None:
+        ls = sample("ls", dist.LogNormal(0.0, 0.3))
+        cov = jnp.exp(-0.5 * ((X[:, None] - X[None, :]) / ls) ** 2)
+        k = cov + 1e-2 * jnp.eye(X.shape[0])
+        sample("y", dist.MultivariateNormal(jnp.zeros(X.shape[0]), k), obs=y)
+
+    X = np.linspace(0.0, 3.0, 12, dtype=np.float32)
+    im = ImpactModel(gp, rng_key=random.key(0), inference=make_svi(gp))
+    im.set_posterior_sample({"ls": np.ones(4)})
+    # One event over all the rows keeps them whole
+    with pytest.warns(PerformanceWarning, match="computes across observations"):
+        dt = im.predict(X, store="memory", progress=False)
+    assert dt.posterior_predictive.attrs["shard_axis"] == "draw"
+    loader = ArrayLoader(
+        ArrayDataset(X=X),
+        rng_key=random.key(1),
+        batch_size=6,
+        shuffle=False,
+    )
+    with pytest.warns(OutputWarning, match="batches of a data loader split"):
+        im.predict(loader, store="memory", progress=False)
+
+    # A deterministic site of an imported posterior is recomputed, so nothing reruns
+    def linear(X: Array, y: Array | None = None) -> None:
+        w = sample("w", dist.Normal(0.0, 1.0).expand([2]).to_event(1))
+        with plate("obs", X.shape[0]):
+            sample("y", dist.Normal(deterministic("mu", X @ w), 1.0), obs=y)
+
+    X = np.linspace(-1.0, 1.0, 24, dtype=np.float32).reshape(12, 2)
+    w = np.ones((4, 2), dtype=np.float32)
+    im = ImpactModel(linear, rng_key=random.key(0), inference=make_svi(linear))
+    im.set_posterior_sample({"w": w, "mu": w @ X.T})
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", PerformanceWarning)
+        dt = im.predict(X, batch_size=6, store="memory", progress=False)
+    assert dt.posterior_predictive.attrs["shard_axis"] == "obs"

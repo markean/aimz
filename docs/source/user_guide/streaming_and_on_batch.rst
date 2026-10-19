@@ -181,7 +181,7 @@ Quick Recommendations
 * Need results beyond the model's lifetime: keep the default persistent store and pass an explicit ``output_dir``.
 * Results fit in RAM and you iterate on summaries, group-bys, or plots: pass ``store="memory"`` to skip the Zarr_ layer (same lazy Dask_ tree, chunks resident in memory) while keeping batched (and sharded) execution; see :ref:`in-memory-results`.
 * Small data, rapid iteration, CI, or read-only / ephemeral filesystem: use on-batch (``*_on_batch``), or streaming with ``store="memory"``, which also writes nothing.
-* If :meth:`~aimz.ImpactModel.predict` warns that posterior sample shapes are not compatible with ``shard_axis="obs"``, it automatically reruns under ``shard_axis="draw"``.
+* If :meth:`~aimz.ImpactModel.predict` warns that posterior sites are as long as the input's rows, it automatically reruns under ``shard_axis="draw"``.
   Pass ``shard_axis="draw"`` explicitly to silence the warning.
   For posterior shapes that remain incompatible with chunked execution, call :meth:`~aimz.ImpactModel.predict_on_batch` directly.
 * Custom training loop: iterate with :meth:`~aimz.ImpactModel.train_on_batch`.

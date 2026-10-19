@@ -20,6 +20,7 @@ import numpyro.distributions as dist
 import pytest
 from jax import Array, random
 from numpyro import plate, sample
+from numpyro.infer.util import log_likelihood
 
 from aimz import ImpactModel
 from tests.conftest import lm_subsample, make_svi
@@ -114,3 +115,29 @@ def test_log_likelihood_requires_output(
         im.log_likelihood(
             iter([{"X": X[:60], "y": X[:60, 0]}]), store="memory", progress=False
         )
+
+
+def test_log_likelihood_event_over_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An output drawn as one event over all the rows is scored under `draw`."""
+
+    def gp(X: Array, y: Array | None = None) -> None:
+        ls = sample("ls", dist.LogNormal(0.0, 0.3))
+        cov = jnp.exp(-0.5 * ((X[:, None] - X[None, :]) / ls) ** 2)
+        k = cov + 1e-2 * jnp.eye(X.shape[0])
+        sample("y", dist.MultivariateNormal(jnp.zeros(X.shape[0]), k), obs=y)
+
+    X = np.linspace(0.0, 3.0, 12, dtype=np.float32)
+    y = np.sin(X)
+    posterior = {"ls": np.linspace(0.5, 1.5, 4, dtype=np.float32)}
+    expected = log_likelihood(gp, posterior, X, y)["y"]
+    # One device and one batch keep the rows whole, yet only `draw` streams a
+    # log-likelihood without a row axis
+    monkeypatch.setattr("aimz.model.impact_model.local_device_count", lambda: 1)
+    im = ImpactModel(gp, rng_key=random.key(0), inference=make_svi(gp))
+    im.set_posterior_sample(posterior)
+    dt = im.log_likelihood(X, y, store="memory", progress=False)
+    np.testing.assert_allclose(
+        dt.log_likelihood["y"].values.ravel(),
+        expected,
+        rtol=1e-5,
+    )
