@@ -496,7 +496,7 @@ def test_predict_condition(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def test_predict_untraced_kernel() -> None:
+def test_predict_untraced_kernel(monkeypatch: pytest.MonkeyPatch) -> None:
     """A kernel that the call traces first is planned like a fitted one."""
 
     def gp(X: Array, y: Array | None = None) -> None:
@@ -535,3 +535,19 @@ def test_predict_untraced_kernel() -> None:
         warnings.simplefilter("error", PerformanceWarning)
         dt = im.predict(X, batch_size=6, store="memory", progress=False)
     assert dt.posterior_predictive.attrs["shard_axis"] == "obs"
+
+    # On one device, one batch of an array loader splits nothing, so it does not warn
+    monkeypatch.setattr("aimz.model.impact_model.local_device_count", lambda: 1)
+    X = np.linspace(0.0, 3.0, 12, dtype=np.float32)
+    im = ImpactModel(gp, rng_key=random.key(0), inference=make_svi(gp))
+    im.set_posterior_sample({"ls": np.ones(4)})
+    im.predict(X, store="memory", progress=False)
+    loader = ArrayLoader(
+        ArrayDataset(X=X),
+        rng_key=random.key(1),
+        batch_size=12,
+        shuffle=False,
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", OutputWarning)
+        im.predict(loader, store="memory", progress=False)

@@ -92,7 +92,7 @@ def test_chain_layout(
     im.sample_prior_predictive_on_batch(X, num_samples=2)
     with pytest.warns(OutputWarning, match="no draws for the latent site"):
         im.set_posterior_sample(partial)
-    # A site that no trace of the kernel records, such as a guide's own, is not used
+    # A site that no trace of the kernel records, such as a guide's own, warns
     extra = {**im_lm_svi_fitted.posterior, "_auto_latent": partial["b"]}
     with pytest.warns(AimzWarning, match="no trace of the kernel records"):
         im.set_posterior_sample(extra)
