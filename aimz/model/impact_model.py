@@ -650,7 +650,10 @@ class ImpactModel(BaseModel):
         observation axis, nor can a kernel that computes across observations, nor a
         ``condition`` value with one entry per observation, which is passed whole: only
         a whole-input batch on a single device keeps them intact, so the call otherwise
-        runs draw-parallel, with a warning. Deterministic posterior sites are exempt,
+        runs draw-parallel, with a warning. A call with such a ``condition`` value runs
+        draw-parallel on a whole-input batch too, without a warning, since under
+        ``"obs"`` the streamer takes a site set from a whole value for one without the
+        observation axis. Deterministic posterior sites are exempt,
         since the kernel recomputes them, but observed ones are not, since a call
         without their data takes their draws.
 
@@ -690,13 +693,11 @@ class ImpactModel(BaseModel):
                 if site not in deterministic
             )
         ):
-            if (
-                self._num_devices == 1
-                and batch_size is None
-                and _fits_single_batch(n_obs, item_nbytes=num_samples * row_nbytes)
+            if self._num_devices > 1 or (
+                batch_size < n_obs
+                if batch_size is not None
+                else not _fits_single_batch(n_obs, item_nbytes=num_samples * row_nbytes)
             ):
-                batch_size = n_obs
-            elif self._num_devices > 1 or batch_size is None or batch_size < n_obs:
                 reason = (
                     "The kernel computes across observations at site(s) "
                     f"{', '.join(map(repr, sorted(self._coupled_sites)))}, which "
@@ -720,6 +721,13 @@ class ImpactModel(BaseModel):
                     skip_file_prefixes=_SKIP_FILE_PREFIXES,
                 )
                 shard_axis, batch_size = "draw", None
+            elif conditioned:
+                # One batch keeps the rows whole, but under `obs` the streamer rejects a
+                # site set from a whole `condition` value as having no observation axis;
+                # `draw` keeps the rows whole too and checks only the output
+                shard_axis, batch_size = "draw", None
+            elif batch_size is None:
+                batch_size = n_obs
         if return_sites and (shard_axis == "obs" or self.param_output in return_sites):
             # A site without the observation axis, such as a global deterministic site,
             # has no rows to split. Abstract traces of this call, at its rows and at one
@@ -1724,6 +1732,9 @@ class ImpactModel(BaseModel):
                 # coupled site
                 except Exception:
                     follow = {}
+            # A global event that only matched the batch size keeps no mark for later
+            # calls either
+            self._coupled_sites.difference_update(k for k, f in follow.items() if not f)
             coupled = sorted(k for k in coupled if follow.get(k, True))
             if coupled:
                 msg = (
