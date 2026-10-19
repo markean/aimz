@@ -63,6 +63,7 @@ from aimz._exceptions import (
     _SKIP_FILE_PREFIXES,
     AimzWarning,
     FitWarning,
+    KernelValidationError,
     NotFittedError,
     OutputWarning,
     PerformanceWarning,
@@ -653,9 +654,10 @@ class ImpactModel(BaseModel):
         runs draw-parallel, with a warning. A call with such a ``condition`` value runs
         draw-parallel on a whole-input batch too, without a warning, since under
         ``"obs"`` the streamer can take a site set from a whole value for one without
-        the observation axis. Only the kernel's sample sites count: the kernel
-        recomputes a deterministic posterior site and ignores one it does not have, but
-        an observed one counts, since a call without its data takes its draws.
+        the observation axis. Deterministic posterior sites are exempt, since the kernel
+        recomputes them, but observed ones are not, since a call without their data
+        takes their draws, and neither is a site no trace records, which the kernel may
+        sample under other arguments.
 
         Args:
             X: Input array, or a data loader, which batches itself.
@@ -674,8 +676,13 @@ class ImpactModel(BaseModel):
             The sharding strategy and the batch size, ``None`` for a data loader.
         """
         if not isinstance(X, ArrayLike):
-            # A data loader's batches split the rows, and no rerun can keep them whole
-            if self._coupled_sites:
+            # A data loader's batches split the rows, except one array loader batch on
+            # one device, and no rerun can keep them whole
+            if self._coupled_sites and not (
+                self._num_devices == 1
+                and isinstance(X, ArrayLoader)
+                and X.batch_size >= len(X.dataset)
+            ):
                 msg = (
                     "The kernel computes across observations at site(s) "
                     f"{', '.join(map(repr, sorted(self._coupled_sites)))}, which the "
@@ -693,13 +700,14 @@ class ImpactModel(BaseModel):
         row_nbytes, rest_nbytes = nbytes
         min_aligned_ndim = 2
         spec = cast("KernelSpec", self._kernel_spec)
+        deterministic = set(spec.return_sites) - set(spec.sample_sites)
         conditioned = sorted(
             site for site, v in (condition or {}).items() if np.shape(v)[:1] == (n_obs,)
         )
         local = sorted(
             site
             for site, v in (posterior or {}).items()
-            if site in spec.sample_sites
+            if site not in deterministic
             and v.ndim >= min_aligned_ndim
             and v.shape[1] == n_obs
         )
@@ -1995,18 +2003,21 @@ class ImpactModel(BaseModel):
         Warns:
             AimzWarning: If the output site is in ``posterior_sample``; it is removed.
                 Also if the kernel has been traced and ``posterior_sample`` holds sites
-                that no trace of it records, such as a guide's ``_auto_latent``, which
-                aimz does not use.
+                that no trace of it records so far, such as a guide's ``_auto_latent``;
+                leave out any the kernel never samples, since one as long as the
+                input's rows can still make a call rerun under ``shard_axis="draw"``.
             OutputWarning: If the kernel has been traced and ``posterior_sample`` has
                 no draws for one of its latent sample sites, which the predictive
                 methods then draw from the prior.
 
         Note:
-            The kernel is not traced here. The first call with an array input traces
-            it, so until then a call with a data loader knows no deterministic sites,
-            which have to be requested through ``return_sites``. If the kernel has
-            ``param`` sites, also set :attr:`~aimz.ImpactModel.vi_result`, or the
-            predictive methods use their initial values.
+            The kernel is not traced here. Prior predictive sampling or the first call
+            with an array input traces it, and calls then return its deterministic
+            sites by default, as on a fitted model; until then a call with a data
+            loader knows no deterministic sites, which have to be requested through
+            ``return_sites``. If the kernel has ``param`` sites, also set
+            :attr:`~aimz.ImpactModel.vi_result`, or the predictive methods use their
+            initial values.
         """
         if self.param_output in posterior_sample:
             posterior_sample = {
@@ -2062,7 +2073,9 @@ class ImpactModel(BaseModel):
             ):
                 msg = (
                     f"`posterior_sample` holds site(s) {', '.join(map(repr, foreign))} "
-                    "that no trace of the kernel records, which aimz does not use."
+                    "that no trace of the kernel records so far; leave out any it "
+                    "never samples, since one as long as the input's rows can still "
+                    "make a call rerun under `shard_axis='draw'`."
                 )
                 warn(msg, category=AimzWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
         self._posterior = posterior_sample
@@ -2292,7 +2305,8 @@ class ImpactModel(BaseModel):
                 if the output site does not have one value per row of an array input;
                 under ``shard_axis="obs"`` the call then reruns under
                 ``shard_axis="draw"``. Also if the batches of a data loader split a
-                kernel that computes across observations.
+                kernel that computes across observations, once a call has traced the
+                kernel.
             PerformanceWarning: If ``shard_axis="obs"`` cannot split an array input,
                 as for a return site without an observation axis, a latent site with
                 one value per observation, or a ``condition`` value with one entry per
@@ -2720,7 +2734,7 @@ class ImpactModel(BaseModel):
 
         Warns:
             OutputWarning: If the batches of a data loader split a kernel that
-                computes across observations.
+                computes across observations, once a call has traced the kernel.
             PerformanceWarning: If ``shard_axis="obs"`` cannot split an array input,
                 as for a kernel that computes across observations or a posterior site
                 as long as the input's rows, so the call reruns under
@@ -2739,18 +2753,24 @@ class ImpactModel(BaseModel):
             )
             raise ValueError(msg)
         # A posterior set on a new model leaves the kernel untraced; planning needs its
-        # sites
+        # sites. A kernel that runs on its batches but not on all the rows at once, such
+        # as one whose subsampling plate is smaller than the input, plans untraced.
         if isinstance(X, ArrayLike) and not (
             self._kernel_spec and self._kernel_spec.traced
         ):
-            self._build_kernel_spec(
-                _to_jax(
-                    signature(self.kernel)
-                    .bind(**{self.param_input: X, self.param_output: y, **kwargs})
-                    .arguments,
-                ),
-                with_output=True,
-            )
+            try:
+                self._build_kernel_spec(
+                    _to_jax(
+                        signature(self.kernel)
+                        .bind(**{self.param_input: X, self.param_output: y, **kwargs})
+                        .arguments,
+                    ),
+                    with_output=True,
+                )
+            except Exception as e:
+                # A rule the kernel breaks, or a warning raised as an error, surfaces
+                if isinstance(e, (KernelValidationError, AimzWarning)):
+                    raise
 
         # Without a posterior there is nothing to shard by draw
         if not self.posterior:

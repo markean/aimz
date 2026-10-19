@@ -19,10 +19,10 @@ import numpy as np
 import numpyro.distributions as dist
 import pytest
 from jax import Array, random
-from numpyro import plate, sample
+from numpyro import deterministic, plate, sample
 from numpyro.infer.util import log_likelihood
 
-from aimz import ImpactModel
+from aimz import ImpactModel, KernelValidationError
 from tests.conftest import lm_subsample, make_svi
 
 
@@ -117,8 +117,8 @@ def test_log_likelihood_requires_output(
         )
 
 
-def test_log_likelihood_event_over_rows(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An output drawn as one event over all the rows is scored under `draw`."""
+def test_log_likelihood_untraced_kernel(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A kernel that the call traces first is scored like a fitted one."""
 
     def gp(X: Array, y: Array | None = None) -> None:
         ls = sample("ls", dist.LogNormal(0.0, 0.3))
@@ -141,3 +141,33 @@ def test_log_likelihood_event_over_rows(monkeypatch: pytest.MonkeyPatch) -> None
         expected,
         rtol=1e-5,
     )
+
+    # A kernel that runs on its batches but not on all the rows at once plans untraced
+    X = np.linspace(-1.0, 1.0, 600, dtype=np.float32).reshape(300, 2)
+    y = X @ np.array([1.0, -1.0], dtype=np.float32)
+    im = ImpactModel(
+        lm_subsample,
+        rng_key=random.key(0),
+        inference=make_svi(lm_subsample),
+    )
+    im.set_posterior_sample(
+        {"w": np.tile([1.0, -1.0], (4, 1)), "b": np.zeros(4), "sigma": np.ones(4)},
+    )
+    dt = im.log_likelihood(X, y, batch_size=60, store="memory", progress=False)
+    np.testing.assert_allclose(
+        dt.log_likelihood["y"].values[0],
+        np.full((4, 300), -0.5 * np.log(2 * np.pi)),
+        rtol=1e-5,
+    )
+
+    # A kernel that breaks a rule still raises when the call traces it
+    def reserved(X: Array, y: Array | None = None) -> None:
+        b = sample("b", dist.Normal())
+        deterministic("draw", 2.0 * b)
+        with plate("obs", X.shape[0]):
+            sample("y", dist.Normal(b * X[:, 0], 1.0), obs=y)
+
+    im = ImpactModel(reserved, rng_key=random.key(0), inference=make_svi(reserved))
+    im.set_posterior_sample({"b": np.ones(4)})
+    with pytest.raises(KernelValidationError, match="reserved"):
+        im.log_likelihood(X, y, store="memory", progress=False)
