@@ -466,6 +466,9 @@ def test_predict_condition(monkeypatch: pytest.MonkeyPatch) -> None:
     np.testing.assert_allclose(dt.posterior_predictive["mu"].values, expected)
     with pytest.raises(ValueError, match="Condition site"):
         im.predict_on_batch(X, condition={"mu": y})
+    # A value meant for a kernel argument named `condition` is not a mapping
+    with pytest.raises(TypeError, match="rename it"):
+        im.predict_on_batch(X, condition=y)
     with pytest.warns(OutputWarning, match="keep their posterior draws"):
         im.predict_on_batch(X, condition={"phi": 0.0})
 

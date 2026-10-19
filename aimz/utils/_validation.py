@@ -173,6 +173,8 @@ def _validate_condition(
     """Raise for a conditioned site that is not a sample site, and warn for a fixed one.
 
     Raises:
+        TypeError: If ``condition`` is not a mapping, as when it is meant for a kernel
+            argument of that name.
         ValueError: If ``condition`` names a site that is not a sample site of a traced
             kernel.
 
@@ -180,6 +182,14 @@ def _validate_condition(
         OutputWarning: If a conditioned site is fixed, as one whose values are taken
             from the posterior, so that it keeps them.
     """
+    if condition is not None and not isinstance(condition, Mapping):
+        msg = (
+            "`condition` maps sample site names to their values, got "
+            f"{type(condition).__name__!r}. A kernel argument named `condition` does "
+            "not reach the kernel through the predictive methods, which take that "
+            "name themselves; rename it."
+        )
+        raise TypeError(msg)
     _validate_intervention(condition, kernel_spec, argument="condition")
     if held := sorted((condition or {}).keys() & fixed):
         msg = (
