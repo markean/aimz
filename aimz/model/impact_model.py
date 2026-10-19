@@ -653,9 +653,9 @@ class ImpactModel(BaseModel):
         runs draw-parallel, with a warning. A call with such a ``condition`` value runs
         draw-parallel on a whole-input batch too, without a warning, since under
         ``"obs"`` the streamer can take a site set from a whole value for one without
-        the observation axis. Deterministic posterior sites are exempt, since the kernel
-        recomputes them, but observed ones are not, since a call without their data
-        takes their draws.
+        the observation axis. Only the kernel's sample sites count: the kernel
+        recomputes a deterministic posterior site and ignores one it does not have, but
+        an observed one counts, since a call without its data takes its draws.
 
         Args:
             X: Input array, or a data loader, which batches itself.
@@ -674,25 +674,36 @@ class ImpactModel(BaseModel):
             The sharding strategy and the batch size, ``None`` for a data loader.
         """
         if not isinstance(X, ArrayLike):
+            # A data loader's batches split the rows, and no rerun can keep them whole
+            if self._coupled_sites:
+                msg = (
+                    "The kernel computes across observations at site(s) "
+                    f"{', '.join(map(repr, sorted(self._coupled_sites)))}, which the "
+                    "batches of a data loader split. Pass the input as an array, which "
+                    "then runs under `shard_axis='draw'`."
+                )
+                warn(
+                    msg,
+                    category=OutputWarning,
+                    skip_file_prefixes=_SKIP_FILE_PREFIXES,
+                )
             return shard_axis, None
 
         n_obs = len(cast("Sized", X))
         row_nbytes, rest_nbytes = nbytes
         min_aligned_ndim = 2
         spec = cast("KernelSpec", self._kernel_spec)
-        deterministic = set(spec.return_sites) - set(spec.sample_sites)
         conditioned = sorted(
             site for site, v in (condition or {}).items() if np.shape(v)[:1] == (n_obs,)
         )
-        if shard_axis == "obs" and (
-            self._coupled_sites
-            or conditioned
-            or any(
-                v.ndim >= min_aligned_ndim and v.shape[1] == n_obs
-                for site, v in (posterior or {}).items()
-                if site not in deterministic
-            )
-        ):
+        local = sorted(
+            site
+            for site, v in (posterior or {}).items()
+            if site in spec.sample_sites
+            and v.ndim >= min_aligned_ndim
+            and v.shape[1] == n_obs
+        )
+        if shard_axis == "obs" and (self._coupled_sites or conditioned or local):
             if self._num_devices > 1 or (
                 batch_size < n_obs
                 if batch_size is not None
@@ -708,8 +719,9 @@ class ImpactModel(BaseModel):
                     "observation and are passed whole, so `shard_axis='obs'` cannot "
                     "split them"
                     if conditioned
-                    else "One or more posterior sample shapes are not compatible with "
-                    "`shard_axis='obs'`"
+                    else "The posterior site(s) "
+                    f"{', '.join(map(repr, local))} are as long as the input's rows in "
+                    "each draw, so `shard_axis='obs'` cannot split them"
                 )
                 msg = (
                     f"{reason}; rerunning with `shard_axis='draw'`. Pass "
@@ -1092,7 +1104,8 @@ class ImpactModel(BaseModel):
             OutputWarning: If a requested return site is intervened on, since it comes
                 back with its own draws, or if the output site does not have one value
                 per row of an array input; under ``shard_axis="obs"`` the call then
-                reruns under ``shard_axis="draw"``.
+                reruns under ``shard_axis="draw"``. Also if the batches of a data
+                loader split a kernel that computes across observations.
             PerformanceWarning: If ``shard_axis="obs"`` cannot split an array input,
                 as for a return site without an observation axis, so the call reruns
                 under ``shard_axis="draw"``.
@@ -1981,15 +1994,19 @@ class ImpactModel(BaseModel):
 
         Warns:
             AimzWarning: If the output site is in ``posterior_sample``; it is removed.
+                Also if the kernel has been traced and ``posterior_sample`` holds sites
+                that no trace of it records, such as a guide's ``_auto_latent``, which
+                aimz does not use.
             OutputWarning: If the kernel has been traced and ``posterior_sample`` has
                 no draws for one of its latent sample sites, which the predictive
                 methods then draw from the prior.
 
         Note:
-            The kernel is not traced here, so deterministic sites are not discovered
-            and must be requested through ``return_sites``. If the kernel has ``param``
-            sites, also set :attr:`~aimz.ImpactModel.vi_result`, or the predictive
-            methods use their initial values.
+            The kernel is not traced here. The first call with an array input traces
+            it, so until then a call with a data loader knows no deterministic sites,
+            which have to be requested through ``return_sites``. If the kernel has
+            ``param`` sites, also set :attr:`~aimz.ImpactModel.vi_result`, or the
+            predictive methods use their initial values.
         """
         if self.param_output in posterior_sample:
             posterior_sample = {
@@ -2040,6 +2057,14 @@ class ImpactModel(BaseModel):
                     category=OutputWarning,
                     skip_file_prefixes=_SKIP_FILE_PREFIXES,
                 )
+            if foreign := sorted(
+                posterior_sample.keys() - {*spec.sample_sites, *spec.return_sites},
+            ):
+                msg = (
+                    f"`posterior_sample` holds site(s) {', '.join(map(repr, foreign))} "
+                    "that no trace of the kernel records, which aimz does not use."
+                )
+                warn(msg, category=AimzWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
         self._posterior = posterior_sample
         self._num_chains = num_chains
         if self._kernel_spec is None:
@@ -2114,6 +2139,13 @@ class ImpactModel(BaseModel):
                 if the output site does not have one value per row of the input.
         """
         _check_is_fitted(self)
+        X = cast("Array", _validate_X_y_to_jax(X))
+
+        args_bound = _to_jax(self._bind_kernel_args(X, kwargs=kwargs))
+        # A posterior set on a new model leaves the kernel untraced; the checks below
+        # and the output's sites and names need its trace
+        if not (self._kernel_spec and self._kernel_spec.traced):
+            self._build_kernel_spec(args_bound, with_output=False)
         _validate_intervention(intervention, kernel_spec=self._kernel_spec)
         _validate_condition(
             condition,
@@ -2126,10 +2158,6 @@ class ImpactModel(BaseModel):
             parents=self._site_parents,
             fixed=(self._posterior or {}).keys(),
         )
-
-        X = cast("Array", _validate_X_y_to_jax(X))
-
-        args_bound = _to_jax(self._bind_kernel_args(X, kwargs=kwargs))
 
         if rng_key is None:
             self._rng_key, rng_key = random.split(self._rng_key)
@@ -2263,7 +2291,8 @@ class ImpactModel(BaseModel):
                 site is one the posterior holds, since it keeps its posterior draws, or
                 if the output site does not have one value per row of an array input;
                 under ``shard_axis="obs"`` the call then reruns under
-                ``shard_axis="draw"``.
+                ``shard_axis="draw"``. Also if the batches of a data loader split a
+                kernel that computes across observations.
             PerformanceWarning: If ``shard_axis="obs"`` cannot split an array input,
                 as for a return site without an observation axis, a latent site with
                 one value per observation, or a ``condition`` value with one entry per
@@ -2271,6 +2300,17 @@ class ImpactModel(BaseModel):
                 ``shard_axis="draw"``.
         """
         _check_is_fitted(self)
+        _validate_shard_axis(shard_axis, X=X)
+        _validate_batch_size(batch_size, X=X)
+        _validate_store(store, output_dir=output_dir)
+        _validate_aligned_inputs(X, y=None)
+
+        if isinstance(X, ArrayLike):
+            args_bound = self._bind_kernel_args(X, kwargs=kwargs)
+            # A posterior set on a new model leaves the kernel untraced; the checks
+            # below and planning need its sites
+            if not (self._kernel_spec and self._kernel_spec.traced):
+                self._build_kernel_spec(_to_jax(args_bound), with_output=False)
         _validate_intervention(intervention, kernel_spec=self._kernel_spec)
         _validate_condition(
             condition,
@@ -2283,13 +2323,6 @@ class ImpactModel(BaseModel):
             parents=self._site_parents,
             fixed=(self._posterior or {}).keys(),
         )
-        _validate_shard_axis(shard_axis, X=X)
-        _validate_batch_size(batch_size, X=X)
-        _validate_store(store, output_dir=output_dir)
-        _validate_aligned_inputs(X, y=None)
-
-        if isinstance(X, ArrayLike):
-            _ = self._bind_kernel_args(X, kwargs=kwargs)
 
         return_sites = self._coerce_return_sites(
             return_sites,
@@ -2684,6 +2717,14 @@ class ImpactModel(BaseModel):
                 the number of groups, does not fit another count.
             NotImplementedError: If a return site's axis-1 size does not match the
                 input batch size (``shard_axis="obs"`` only).
+
+        Warns:
+            OutputWarning: If the batches of a data loader split a kernel that
+                computes across observations.
+            PerformanceWarning: If ``shard_axis="obs"`` cannot split an array input,
+                as for a kernel that computes across observations or a posterior site
+                as long as the input's rows, so the call reruns under
+                ``shard_axis="draw"``.
         """
         _check_is_fitted(self)
         _validate_shard_axis(shard_axis, X=X)
@@ -2697,6 +2738,19 @@ class ImpactModel(BaseModel):
                 "Provide `y`, or give `X` as a data loader that carries it."
             )
             raise ValueError(msg)
+        # A posterior set on a new model leaves the kernel untraced; planning needs its
+        # sites
+        if isinstance(X, ArrayLike) and not (
+            self._kernel_spec and self._kernel_spec.traced
+        ):
+            self._build_kernel_spec(
+                _to_jax(
+                    signature(self.kernel)
+                    .bind(**{self.param_input: X, self.param_output: y, **kwargs})
+                    .arguments,
+                ),
+                with_output=True,
+            )
 
         # Without a posterior there is nothing to shard by draw
         if not self.posterior:
@@ -2711,6 +2765,23 @@ class ImpactModel(BaseModel):
             nbytes=(jnp.result_type(float).itemsize, 0),
             posterior=self.posterior,
         )
+        # One batch on one device keeps the rows of an output computed across them
+        # whole, but under `obs` the log-likelihood of one drawn as an event over the
+        # rows has no row axis to stream; `draw` keeps them whole too
+        if (
+            shard_axis == "obs"
+            and self.posterior
+            and isinstance(X, ArrayLike)
+            and self.param_output in self._coupled_sites
+        ):
+            shard_axis, batch_size = self._plan_execution(
+                X,
+                shard_axis="draw",
+                batch_size=None,
+                num_samples=self._num_samples,
+                nbytes=(jnp.result_type(float).itemsize, 0),
+                posterior=self.posterior,
+            )
 
         # Without a posterior every latent site is drawn from the prior, which needs a
         # seeded kernel; with one, the bare kernel keeps its identity for the cache
