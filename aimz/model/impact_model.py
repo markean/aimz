@@ -415,11 +415,15 @@ class ImpactModel(BaseModel):
         args_bound: Mapping[str, object],
         *,
         with_output: bool,
+        rows_more: int | None = None,
     ) -> None:
         """Trace the kernel and record its sites, unless a sufficient spec exists.
 
         A spec traced without an observed output is upgraded by a trace with one,
         merging the sites, since a kernel may define sites only when data are supplied.
+        The trace is abstract, unless the kernel reads a concrete value of an argument.
+        A site marked for an event as long as the rows keeps its mark only if its event
+        follows them in a trace at ``rows_more`` rows, twice the rows by default.
         """
         if self._kernel_spec:
             if with_output:
@@ -427,13 +431,51 @@ class ImpactModel(BaseModel):
                     return
             elif self._kernel_spec.traced:
                 return
-        with validation_enabled(is_validate=False):
-            model_trace = trace(
-                substitute(
-                    seed(self.kernel, rng_seed=self.rng_key),
-                    substitute_fn=init_to_sample,
-                ),
-            ).get_trace(**args_bound)
+        leaves, static = _partition(args_bound)
+
+        def sites_at(arrays: list) -> dict[str, dict]:
+            sites: dict[str, dict] = {}
+
+            def record(arrays: list) -> None:
+                with validation_enabled(is_validate=False):
+                    model_trace = trace(
+                        substitute(
+                            seed(self.kernel, rng_seed=self.rng_key),
+                            substitute_fn=init_to_sample,
+                        ),
+                    ).get_trace(**_combine(arrays, static))
+                # Each value keeps only its shape and type
+                sites.update(
+                    {
+                        k: {
+                            **v,
+                            "value": ShapeDtypeStruct(
+                                v["value"].shape,
+                                v["value"].dtype,
+                            ),
+                        }
+                        if hasattr(v.get("value"), "shape")
+                        else v
+                        for k, v in model_trace.items()
+                    },
+                )
+
+            eval_shape(record, arrays)
+
+            return sites
+
+        # An abstract trace runs nothing; a kernel that reads a concrete value of an
+        # argument, as through `int`, runs once instead
+        try:
+            model_trace = sites_at(leaves)
+        except Exception:
+            with validation_enabled(is_validate=False):
+                model_trace = trace(
+                    substitute(
+                        seed(self.kernel, rng_seed=self.rng_key),
+                        substitute_fn=init_to_sample,
+                    ),
+                ).get_trace(**args_bound)
         _validate_kernel_body(
             param_output=self.param_output,
             model_trace=model_trace,
@@ -464,6 +506,7 @@ class ImpactModel(BaseModel):
         taken = {"chain", "draw", *sample_sites, *return_sites}
         if prev is not None and prev.traced:
             taken |= {*prev.sample_sites, *prev.return_sites}
+        events = []
         for k, v in model_trace.items():
             if v["type"] not in {"sample", "deterministic"}:
                 continue
@@ -516,15 +559,41 @@ class ImpactModel(BaseModel):
             # a trace over all the rows clears a one-element event that a one-row trace
             # took for one over the rows.
             fn = v.get("fn")
-            if v.get("_control_flow_done") or (
+            if v.get("_control_flow_done"):
+                self._coupled_sites.add(k)
+            elif (
                 isinstance(fn, Distribution)
                 and not isinstance(fn, Independent)
                 and fn.batch_shape[:1] != rows
                 and fn.event_shape[:1] == rows
             ):
                 self._coupled_sites.add(k)
+                events.append(k)
             else:
                 self._coupled_sites.discard(k)
+        # An event that keeps its length on more rows is global, as long as the rows
+        # only by chance; a kernel that does not run on more rows keeps every mark
+        if events:
+            more = rows_more or 2 * math.prod(rows)
+            try:
+                wider = sites_at(
+                    [
+                        ShapeDtypeStruct(
+                            (more, *leaf.shape[1:])
+                            if leaf.shape[:1] == rows
+                            else leaf.shape,
+                            leaf.dtype,
+                        )
+                        for leaf in leaves
+                    ],
+                )
+            except Exception:
+                wider = {}
+            self._coupled_sites.difference_update(
+                k
+                for k in events
+                if getattr(wider.get(k, {}).get("fn"), "event_shape", ())[:1] == rows
+            )
         try:
             deps = get_dependencies(self.kernel, model_kwargs=dict(args_bound))
         except Exception:
@@ -1706,58 +1775,18 @@ class ImpactModel(BaseModel):
                     "`fit_on_batch`."
                 )
                 warn(msg, category=FitWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
+            # Batches split a site that counts as computing across observations: one
+            # recorded by control flow, or one drawn as an event whose size follows the
+            # rows, which the build tells at twice the batch's rows, or all of them
+            n_obs = len(dataloader.dataset)
             self._build_kernel_spec(
                 signature(self.kernel)
                 .bind(**_to_jax({**batch, **kwargs_extra}))
                 .arguments,
                 with_output=True,
+                rows_more=min(2 * dataloader.batch_size, n_obs),
             )
-            # Batches split a site that counts as computing across observations: one
-            # recorded by control flow, or one drawn as an event whose size follows the
-            # rows. An abstract trace at twice the batch's rows, or all of them, drops
-            # an event that keeps the batch size.
-            n_obs = len(dataloader.dataset)
-            batch_rows = dataloader.batch_size
-            rows_more = min(2 * batch_rows, n_obs)
-            coupled = set(self._coupled_sites)
-            follow: dict[str, bool] = {}
-            if coupled:
-                try:
-                    with validation_enabled(is_validate=False):
-                        eval_shape(
-                            lambda rows: follow.update(
-                                {
-                                    k: bool(v.get("_control_flow_done"))
-                                    or getattr(v.get("fn"), "event_shape", ())[:1]
-                                    != (batch_rows,)
-                                    for k, v in trace(
-                                        substitute(
-                                            seed(self.kernel, rng_seed=self.rng_key),
-                                            substitute_fn=init_to_sample,
-                                        ),
-                                    )
-                                    .get_trace(**rows, **_to_jax(kwargs_extra))
-                                    .items()
-                                    if k in coupled
-                                },
-                            ),
-                            {
-                                k: ShapeDtypeStruct(
-                                    (rows_more, *np.shape(v)[1:]),
-                                    jnp.result_type(v),
-                                )
-                                for k, v in batch.items()
-                            },
-                        )
-                # A kernel that does not run on another number of rows keeps every
-                # coupled site
-                except Exception:
-                    follow = {}
-            # A global event that only matched the batch size keeps no mark for later
-            # calls either
-            self._coupled_sites.difference_update(k for k, f in follow.items() if not f)
-            coupled = sorted(k for k in coupled if follow.get(k, True))
-            if coupled:
+            if coupled := sorted(self._coupled_sites):
                 msg = (
                     f"`fit` trains on batches of {dataloader.batch_size} of {n_obs} "
                     "observations, but the kernel computes across observations at "
@@ -2359,6 +2388,10 @@ class ImpactModel(BaseModel):
             self._rng_key, rng_key = random.split(self._rng_key)
 
         group = "posterior_predictive" if in_sample else "predictions"
+        # The kernel recomputes the posterior's deterministic sites, so under `obs` they
+        # stay off the devices
+        spec = self._kernel_spec
+        unread = set(spec.return_sites) - set(spec.sample_sites) if spec else set()
 
         return self._stream_to_datatree(
             lambda artifact_path: self._streamer.write_predictive(
@@ -2386,6 +2419,7 @@ class ImpactModel(BaseModel):
                 if self.vi_result is not None
                 else _to_jax(condition or {}),
                 intervention=intervention,
+                unread=unread,
             ),
             store=store,
             output_dir=output_dir,
@@ -2803,6 +2837,10 @@ class ImpactModel(BaseModel):
                 posterior=self.posterior,
             )
 
+        # The kernel recomputes the posterior's deterministic sites, so under `obs` they
+        # stay off the devices
+        spec = self._kernel_spec
+        unread = set(spec.return_sites) - set(spec.sample_sites) if spec else set()
         # Without a posterior every latent site is drawn from the prior, which needs a
         # seeded kernel; with one, the bare kernel keeps its identity for the cache
         kernel = (
@@ -2832,6 +2870,7 @@ class ImpactModel(BaseModel):
                 if self.vi_result is not None
                 else None,
                 y=y,
+                unread=unread,
             ),
             store=store,
             output_dir=output_dir,

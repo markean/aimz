@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field, replace
 from itertools import chain
 from typing import TYPE_CHECKING, Literal, NamedTuple, cast
@@ -123,7 +124,10 @@ class _OutputStreamer:
         """Set the runtime context and empty caches."""
         self._ctx = ctx
         self._fn_cache: dict[tuple[str, str, int, int], Callable] = {}
-        self._posterior_device_cache: dict[Sharding | None, dict[str, Array]] = {}
+        self._posterior_device_cache: dict[
+            tuple[Sharding | None, frozenset[str]],
+            dict[str, Array],
+        ] = {}
         self._posterior_device_src: dict[str, Array] | None = None
 
     def _cached_fn(
@@ -230,9 +234,12 @@ class _OutputStreamer:
         self,
         posterior: dict[str, Array] | None,
         sharding: Sharding | None,
+        *,
+        unread: AbstractSet[str] = frozenset(),
     ) -> dict[str, Array]:
-        """Return the posterior placed on devices, cached by ``sharding``.
+        """Return the posterior placed on devices, cached by sharding and unread sites.
 
+        The sites in ``unread``, which the kernel never reads, stay off the devices.
         The cache is rebuilt when ``posterior`` is replaced, by identity.
         """
         if not posterior:
@@ -241,11 +248,15 @@ class _OutputStreamer:
             self._posterior_device_cache = {}
             self._posterior_device_src = posterior
         cache = self._posterior_device_cache
-        if sharding not in cache:
+        key = (sharding, frozenset(unread))
+        if key not in cache:
             # Placed once, instead of being transferred on every jit call
-            cache[sharding] = device_put(posterior, device=sharding)
+            cache[key] = device_put(
+                {k: v for k, v in posterior.items() if k not in unread},
+                device=sharding,
+            )
 
-        return cache[sharding]
+        return cache[key]
 
     def write_predictive(
         self,
@@ -257,6 +268,7 @@ class _OutputStreamer:
         posterior: dict[str, Array] | None,
         params: Mapping[str, object] | None,
         intervention: dict | None = None,
+        unread: AbstractSet[str] = frozenset(),
         stream: (
             tuple[
                 Iterable[Mapping[str, Array | np.ndarray]],
@@ -378,7 +390,11 @@ class _OutputStreamer:
             if self._ctx.replicated_sharding is not None:
                 samples = device_put(samples, device=self._ctx.replicated_sharding)
         else:
-            samples = self.place_posterior(posterior, self._ctx.replicated_sharding)
+            samples = self.place_posterior(
+                posterior,
+                self._ctx.replicated_sharding,
+                unread=unread,
+            )
 
         return self._write_data(
             req,
@@ -398,6 +414,7 @@ class _OutputStreamer:
         posterior: dict[str, Array] | None,
         params: Mapping[str, object] | None,
         y: ArrayLike | None,
+        unread: AbstractSet[str] = frozenset(),
     ) -> dict[str, DaskArray] | None:
         """Stream the log-likelihood of the output site to the request's destination.
 
@@ -469,6 +486,7 @@ class _OutputStreamer:
             samples=self.place_posterior(
                 posterior,
                 self._ctx.replicated_sharding,
+                unread=unread,
             ),
             kwargs_key=kwargs_key,
             rng_key=None,

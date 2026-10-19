@@ -35,7 +35,6 @@ from aimz._exceptions import (
 )
 
 if TYPE_CHECKING:
-    from collections import OrderedDict
     from collections.abc import Callable, Iterable
     from pathlib import Path
 
@@ -376,7 +375,7 @@ def _validate_kernel_signature(
 def _validate_kernel_body(
     *,
     param_output: str,
-    model_trace: OrderedDict[str, dict],
+    model_trace: Mapping[str, dict],
     with_output: bool,
 ) -> None:
     """Raise for a trace with an unusable site name or without a usable output site.

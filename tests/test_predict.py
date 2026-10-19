@@ -551,3 +551,42 @@ def test_predict_untraced_kernel(monkeypatch: pytest.MonkeyPatch) -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("error", OutputWarning)
         im.predict(loader, store="memory", progress=False)
+
+
+def test_predict_global_event() -> None:
+    """An event over the rows keeps its mark; a global one as long as them does not."""
+
+    # A kernel that does not run on more rows keeps the mark of an event over them
+    def anchored(X: Array, y: Array | None = None) -> None:
+        ls = sample("ls", dist.LogNormal(0.0, 0.3))
+        cov = jnp.exp(-0.5 * ((X[:, None] - X[None, :]) / ls) ** 2)
+        k = cov + 1e-2 * jnp.eye(X.shape[0])
+        sample("y", dist.MultivariateNormal(jnp.zeros(X.shape[0]), k), obs=y)
+        # Offsets from a fixed grid of anchor points, which only twelve rows fit
+        deterministic("offset", X - jnp.linspace(0.0, 3.0, 12))
+
+    X = np.linspace(0.0, 3.0, 12, dtype=np.float32)
+    im = ImpactModel(anchored, rng_key=random.key(0), inference=make_svi(anchored))
+    im.set_posterior_sample({"ls": np.ones(4)})
+    with pytest.warns(PerformanceWarning, match="computes across observations"):
+        im.predict(X, store="memory", progress=False)
+
+    # A global event as long as the first call's rows is no event over them
+    def weights(X: Array, y: Array | None = None) -> None:
+        w = sample("w", dist.MultivariateNormal(jnp.zeros(6), jnp.eye(6)))
+        with plate("obs", X.shape[0]):
+            sample("y", dist.Normal(deterministic("mu", X @ w), 1.0), obs=y)
+
+    im = ImpactModel(weights, rng_key=random.key(0), inference=make_svi(weights))
+    im.set_posterior_sample({"w": np.ones((4, 6))})
+    with pytest.warns(PerformanceWarning, match="as long as the input's rows"):
+        im.predict(np.ones((6, 6)), return_sites="mu", store="memory", progress=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", PerformanceWarning)
+        dt = im.predict(
+            np.ones((12, 6)),
+            return_sites="mu",
+            store="memory",
+            progress=False,
+        )
+    assert dt.posterior_predictive.attrs["shard_axis"] == "obs"
