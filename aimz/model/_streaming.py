@@ -127,6 +127,8 @@ class _OutputStreamer:
         """Set the runtime context and empty caches."""
         self._ctx = ctx
         self._fn_cache: dict[tuple[str, str, int, int], Callable] = {}
+        # The outcome of `_recomputed` by the call's unread sites, shapes and constants
+        self._recomputed_cache: dict[tuple, AbstractSet[str]] = {}
         self._posterior_device_cache: dict[
             Sharding | None,
             tuple[frozenset[str], dict[str, Array]],
@@ -197,6 +199,15 @@ class _OutputStreamer:
         if not unread or self._ctx.replicated_sharding is None:
             return unread
         rows, _ = _split_intervention_fields(dict(batch))
+        leaves, static = _partition(constants)
+        key = (
+            frozenset(unread),
+            tuple((k, v.shape, v.dtype) for k, v in batch.items()),
+            tuple((jnp.shape(leaf), jnp.result_type(leaf)) for leaf in leaves),
+            static,
+        )
+        if key in self._recomputed_cache:
+            return self._recomputed_cache[key]
         deterministic: set[str] = set()
 
         def record(rows: Mapping[str, object]) -> None:
@@ -218,9 +229,10 @@ class _OutputStreamer:
         try:
             eval_shape(record, rows)
         except Exception:
-            return frozenset()
+            deterministic.clear()
+        self._recomputed_cache[key] = frozenset(unread & deterministic)
 
-        return unread & deterministic
+        return self._recomputed_cache[key]
 
     def setup_stream(
         self,
