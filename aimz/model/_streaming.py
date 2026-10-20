@@ -29,7 +29,7 @@ from itertools import chain
 from typing import TYPE_CHECKING, Literal, NamedTuple, cast
 
 import jax.numpy as jnp
-from jax import Array, device_get, device_put, eval_shape, random, tree
+from jax import Array, device_get, device_put, eval_shape, jit, random, tree
 from jax.typing import ArrayLike
 from numpyro import validation_enabled
 from numpyro.handlers import seed, substitute, trace
@@ -135,6 +135,13 @@ class _OutputStreamer:
             tuple[frozenset[str], dict[str, Array]],
         ] = {}
         self._posterior_device_src: dict[str, Array] | None = None
+        # The prior probe's two-row trace, cached per model: jit keys its trace cache
+        # on the wrapped function, so a fresh partial keeps the trace from outliving
+        # the model
+        self._probe = jit(
+            partial(_sample_probe),
+            static_argnames=("kernel", "kwargs_static"),
+        )
 
     def _cached_fn(
         self,
@@ -428,29 +435,40 @@ class _OutputStreamer:
             rng_key, rng_subkey = random.split(rng_key)
             rng_keys = random.split(rng_subkey, num=req.num_samples)
 
-            # The probe runs the kernel compiled, on JAX arrays, intervention values
-            # included, keeping the placement of the constants as passed; a repeated
-            # call reuses its program and its trace
-            probe = partial(
-                _sample_probe,
+            # The probe draws eagerly, on JAX arrays, intervention values included,
+            # keeping the placement of the constants as passed
+            kwargs_probe = {
+                "intervention": _to_jax(intervention),
+                "kwargs_const": _partition(_to_jax(kwargs_extra))[0],
+                "kwargs_static": kwargs_static,
+            }
+            samples = _sample_probe(
                 kernel,
                 rng_keys,
-                intervention=_to_jax(intervention),
-                kwargs_const=_partition(_to_jax(kwargs_extra))[0],
-                kwargs_static=kwargs_static,
+                {name: jnp.asarray(arr[:1]) for name, arr in first.items()},
+                **kwargs_probe,
             )
-            samples = probe({name: jnp.asarray(arr[:1]) for name, arr in first.items()})
             # A site whose shape follows the row count is per observation, so each
-            # batch draws it
+            # batch draws it; jit caches the trace, so a repeated call reuses it
             try:
                 shapes = eval_shape(
-                    probe,
+                    partial(
+                        self._probe,
+                        kernel,
+                        rng_keys,
+                        **kwargs_probe,
+                    ),
                     {name: arr[:1].repeat(2, axis=0) for name, arr in first.items()},
                 )
             # A kernel that does not run on two rows, such as one whose plate size is a
-            # fixed count, keeps the size check alone
+            # fixed count, leaves the sites in the output's plate to each batch
             except Exception:
-                shapes = {k: v for k, v in samples.items() if v.shape[1:2] != (1,)}
+                plates = set(req.dims.get(self._ctx.param_output, ())[:1])
+                shapes = {
+                    k: v
+                    for k, v in samples.items()
+                    if not plates & set(req.dims.get(k, ()))
+                }
             samples = {
                 k: v
                 for k, v in samples.items()

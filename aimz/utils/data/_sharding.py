@@ -342,7 +342,6 @@ def _replicate(arr: ArrayLike, sharding: Sharding | None) -> Array:
     return device_put(jnp.asarray(arr), device=sharding)
 
 
-@partial(jit, static_argnames=("kernel", "kwargs_static"))
 def _sample_probe(
     kernel: Callable,
     rng_keys: Array,
@@ -352,7 +351,7 @@ def _sample_probe(
     kwargs_const: list,
     kwargs_static: tuple,
 ) -> dict[str, Array]:
-    """Draw every site of the kernel on one batch, the draws vectorized."""
+    """Draw every site of the kernel on one batch."""
     model_kwargs, fields = _split_intervention_fields(batch)
 
     return _sample_forward(
@@ -363,7 +362,6 @@ def _sample_probe(
         params=None,
         intervention={**intervention, **fields},
         model_kwargs={**model_kwargs, **_combine(kwargs_const, kwargs_static)},
-        vectorize=True,
     )
 
 
