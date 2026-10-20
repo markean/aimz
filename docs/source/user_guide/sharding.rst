@@ -55,7 +55,7 @@ A data loader cannot rerun, so for such a kernel they warn with an :class:`~aimz
 :meth:`~aimz.ImpactModel.predict` and :meth:`~aimz.ImpactModel.sample_prior_predictive` also rerun when a return site has no observation axis, such as a global deterministic site that a reparameterization creates, since such a site cannot be split with the rows, and when the kernel does not run on fewer rows than the input, such as one whose plate size is a fixed count.
 A data loader cannot rerun, so such a site raises a ``NotImplementedError``; leave it out of ``return_sites`` when passing one.
 In :meth:`~aimz.ImpactModel.predict`, an intervened return site, and every return site of a kernel that does not run on one row fewer than a device evaluates (two rows when it evaluates one), such as one with a fixed-count plate, raises only when its length differs from the rows a device evaluates from a batch, so a global one of that length comes back tiled along the observations; leave such a site out of ``return_sites`` with a loader.
-In :meth:`~aimz.ImpactModel.sample_prior_predictive` with a loader, such a site comes back with a separate prior draw for each device and batch, and a kernel that does not run on one row fails with its own error whatever ``return_sites`` holds.
+In :meth:`~aimz.ImpactModel.sample_prior_predictive` with a loader, such a sample site comes back with a separate prior draw for each device and batch, and a kernel that does not run on one row fails with its own error whatever ``return_sites`` holds.
 See :ref:`faq-model-compatibility` for the model patterns that trigger a rerun.
 The kernels below contrast a compatible model with one that triggers the rerun; a runnable version is in :doc:`streaming_and_on_batch`.
 
@@ -90,7 +90,7 @@ When There Is No Posterior to Shard
 -----------------------------------
 
 * For :meth:`~aimz.ImpactModel.log_likelihood`, a model with no posterior samples has nothing to shard along the draw axis, so the data-parallel path runs regardless of ``shard_axis``.
-* :meth:`~aimz.ImpactModel.sample_prior_predictive` has no posterior to shard: under ``shard_axis="draw"`` it shards the prior draws instead, drawing a fresh prior sample per chunk against the whole input (request latent sites via ``return_sites``); under ``shard_axis="obs"`` it streams over observations and draws the global sites once from one row of the input, so a kernel that does not run on one row, such as one whose plate needs several rows, needs ``shard_axis="draw"``.
+* :meth:`~aimz.ImpactModel.sample_prior_predictive` has no posterior to shard: under ``shard_axis="draw"`` it shards the prior draws instead, drawing a fresh prior sample per chunk against the whole input (request latent sites via ``return_sites``); under ``shard_axis="obs"`` it streams over observations and draws the global sites once from one row of the input, so a kernel that does not run on one row, such as one whose plate needs several rows, reruns under ``shard_axis="draw"`` with a warning for an array input.
 
 
 Constraints

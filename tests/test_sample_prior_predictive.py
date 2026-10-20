@@ -141,8 +141,10 @@ def test_sample_prior_predictive_plate_sizes() -> None:
     # A plate of four rows, as many as each device evaluates from a batch
     def fixed(X: Array, y: Array | None = None) -> None:
         b = sample("b", dist.Normal().expand([4]).to_event(1))
+        c = sample("c", dist.Normal().expand([1]).to_event(1))
         with plate("obs", 4):
-            mu = deterministic("mu", b.sum() + X[:4])
+            z = sample("z", dist.Normal(X[:4], 1e-4))
+            mu = deterministic("mu", b.sum() + c[0] + z)
             sample("y", dist.Normal(mu, 1.0), obs=y)
 
     n = 4 * device_count()
@@ -154,6 +156,7 @@ def test_sample_prior_predictive_plate_sizes() -> None:
         store="memory",
         progress=False,
     )
-    # Every batch and device shares the draws of the global site
+    # Every batch and device shares the draws of the global sites and draws its own
+    # rows of the local one
     offset = dt.prior_predictive["mu"].values[0] - X
-    np.testing.assert_allclose(offset, offset[:, :1].repeat(len(X), axis=1), atol=1e-6)
+    np.testing.assert_allclose(offset, offset[:, :1].repeat(len(X), axis=1), atol=1e-3)

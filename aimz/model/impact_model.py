@@ -921,6 +921,7 @@ class ImpactModel(BaseModel):
                     for k, v in sorted(constants.items())
                 ),
                 tuple(sorted(intervention or {})),
+                posterior is None,
             )
             if key not in self._plan_cache:
                 shapes = shapes_at(n_obs)
@@ -932,6 +933,9 @@ class ImpactModel(BaseModel):
                         per_row &= {
                             k for k, v in fewer.items() if v.shape[:1] == (n_obs - 1,)
                         }
+                        # The prior draws its global sites from one row
+                        if posterior is None:
+                            shapes_at(1)
                 # A kernel that does not run on fewer rows, such as one whose plate size
                 # is a fixed count, cannot be split either
                 except Exception:
