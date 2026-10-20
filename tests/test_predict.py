@@ -608,3 +608,54 @@ def test_predict_global_event() -> None:
             progress=False,
         )
     assert dt.posterior_predictive.attrs["shard_axis"] == "draw"
+
+
+def test_predict_recomputed_sites() -> None:
+    """A deterministic site stays off the devices only in a call that recomputes it."""
+
+    # A latent that an argument fixed in the first call, as long as its rows
+    def switched(X: Array, y: Array | None = None, fixed: float | None = None) -> None:
+        g = (
+            deterministic("g", jnp.full(3, fixed))
+            if fixed is not None
+            else sample("g", dist.Normal().expand([3]).to_event(1))
+        )
+        with plate("obs", X.shape[0]):
+            mu = deterministic("mu", X + g.sum())
+            sample("y", dist.Normal(mu, 1.0), obs=y)
+
+    im = ImpactModel(switched, rng_key=random.key(0), inference=make_svi(switched))
+    im.set_posterior_sample({"g": np.ones((4, 3))})
+    im.predict(
+        np.zeros(3), fixed=0.0, return_sites="mu", store="memory", progress=False
+    )
+    X = np.linspace(0.0, 1.0, 12, dtype=np.float32)
+    dt = im.predict(X, return_sites="mu", store="memory", progress=False)
+    np.testing.assert_allclose(
+        dt.posterior_predictive["mu"].values,
+        np.broadcast_to(X + 3.0, (1, 4, 12)),
+    )
+
+    # A call whose own trace fails, as on a batch past a subsampling plate, keeps all
+    def subsampled(X: Array, y: Array | None = None) -> None:
+        b = sample("b", dist.Normal())
+        with plate("data", size=12, subsample_size=X.shape[0]):
+            mu = deterministic("mu", b + X)
+            sample("y", dist.Normal(mu, 1.0), obs=y)
+
+    X = np.linspace(0.0, 1.0, 24, dtype=np.float32)
+    im = ImpactModel(subsampled, rng_key=random.key(0), inference=make_svi(subsampled))
+    im.set_posterior_sample({"b": np.ones(4), "mu": np.ones((4, 24))})
+    im.predict(X[:12], return_sites="mu", store="memory", progress=False)
+    loader = ArrayLoader(
+        ArrayDataset(X=X),
+        rng_key=random.key(1),
+        batch_size=24,
+        shuffle=False,
+    )
+    dt = im.predict(loader, return_sites="mu", store="memory", progress=False)
+    np.testing.assert_allclose(
+        dt.posterior_predictive["mu"].values,
+        np.broadcast_to(1.0 + X, (1, 4, 24)),
+        rtol=1e-6,
+    )
