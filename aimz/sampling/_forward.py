@@ -39,13 +39,15 @@ def _sample_forward(
     params: dict[str, Array] | None,
     intervention: dict | None,
     model_kwargs: Mapping[str, object] | None,
+    vectorize: bool = False,
 ) -> dict[str, Array]:
     """Draw forward samples from a model, one trace per key in ``rng_keys``.
 
     Each draw conditions on its row of ``samples``, deterministic and observed sites
-    excepted. Under a trace the draws run as one :external:func:`jax.lax.map` loop;
-    eagerly they are vectorized with :external:func:`jax.vmap`, since an eager
-    ``lax.map`` would cache a program per call.
+    excepted. Under a trace the draws run as one :external:func:`jax.lax.map` loop,
+    unless ``vectorize`` is set; eagerly they are vectorized with
+    :external:func:`jax.vmap`, since an eager ``lax.map`` would cache a program per
+    call.
 
     Args:
         model: A probabilistic model with NumPyro primitives.
@@ -57,6 +59,7 @@ def _sample_forward(
             draws.
         intervention: Replacement values by sample site name.
         model_kwargs: Arguments passed to the model.
+        vectorize: Whether to vectorize the draws under a trace too.
 
     Returns:
         The traced values of each return site, with the draws on the leading axis.
@@ -101,7 +104,7 @@ def _sample_forward(
 
         return {k: v["value"] for k, v in model_trace.items() if k in sites}
 
-    if isinstance(rng_keys, Tracer):
+    if isinstance(rng_keys, Tracer) and not vectorize:
         return lax.map(_trace_one_sample, xs=(rng_keys, samples or {}))
 
     return vmap(_trace_one_sample)((rng_keys, samples or {}))

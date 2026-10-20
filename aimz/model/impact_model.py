@@ -1282,13 +1282,17 @@ class ImpactModel(BaseModel):
             obs_names = {self.param_input, *batch}
 
         # Trace a one-row probe of the per-observation arguments, on JAX arrays as the
-        # sampling step runs the kernel
+        # sampling step runs the kernel; a kernel that does not run on one row, such as
+        # one whose plate needs several rows, is traced on all the rows
         if not (self._kernel_spec and self._kernel_spec.traced):
             probe = {
                 k: (jnp.asarray(cast("Any", v)[:1]) if k in obs_names else v)
                 for k, v in args_bound.items()
             }
-            self._build_kernel_spec(_to_jax(probe), with_output=False)
+            try:
+                self._build_kernel_spec(_to_jax(probe), with_output=False)
+            except Exception:
+                self._build_kernel_spec(_to_jax(args_bound), with_output=False)
         _validate_intervention(intervention, kernel_spec=self._kernel_spec)
 
         return_sites = self._coerce_return_sites(

@@ -342,6 +342,31 @@ def _replicate(arr: ArrayLike, sharding: Sharding | None) -> Array:
     return device_put(jnp.asarray(arr), device=sharding)
 
 
+@partial(jit, static_argnames=("kernel", "kwargs_static"))
+def _sample_probe(
+    kernel: Callable,
+    rng_keys: Array,
+    batch: dict[str, Array],
+    *,
+    intervention: dict,
+    kwargs_const: list,
+    kwargs_static: tuple,
+) -> dict[str, Array]:
+    """Draw every site of the kernel on one batch, the draws vectorized."""
+    model_kwargs, fields = _split_intervention_fields(batch)
+
+    return _sample_forward(
+        kernel,
+        rng_keys=rng_keys,
+        return_sites=None,
+        samples=None,
+        params=None,
+        intervention={**intervention, **fields},
+        model_kwargs={**model_kwargs, **_combine(kwargs_const, kwargs_static)},
+        vectorize=True,
+    )
+
+
 @partial(jit, static_argnames="size")
 def _take_draws(arr: Array, start: int, *, size: int) -> Array:
     """Take ``size`` draws from ``start`` along the leading axis.

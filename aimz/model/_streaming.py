@@ -24,6 +24,7 @@ import logging
 from collections.abc import Mapping
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field, replace
+from functools import partial
 from itertools import chain
 from typing import TYPE_CHECKING, Literal, NamedTuple, cast
 
@@ -35,7 +36,6 @@ from numpyro.handlers import seed, substitute, trace
 from numpyro.infer import init_to_sample
 from tqdm.auto import tqdm
 
-from aimz.sampling._forward import _sample_forward
 from aimz.utils._kwargs import (
     _partition,
     _split_intervention,
@@ -57,6 +57,7 @@ from aimz.utils.data._sharding import (
     _create_sharded_sampler,
     _prepare_draw_chunk,
     _replicate,
+    _sample_probe,
 )
 
 if TYPE_CHECKING:
@@ -427,34 +428,35 @@ class _OutputStreamer:
             rng_key, rng_subkey = random.split(rng_key)
             rng_keys = random.split(rng_subkey, num=req.num_samples)
 
-            # The probe runs the kernel on JAX arrays, intervention values included,
-            # keeping the placement of the constants as passed
-            kwargs_probe = _to_jax(kwargs_extra)
-            intervention_probe = _to_jax(intervention)
-
-            def probe(batch: Mapping[str, object]) -> dict[str, Array]:
-                model_kwargs, fields = _split_intervention_fields(batch)
-                return _sample_forward(
-                    kernel,
-                    rng_keys=rng_keys,
-                    return_sites=None,
-                    samples=None,
-                    params=params,
-                    intervention={**intervention_probe, **fields},
-                    model_kwargs={**model_kwargs, **kwargs_probe},
-                )
-
+            # The probe runs the kernel compiled, on JAX arrays, intervention values
+            # included, keeping the placement of the constants as passed; a repeated
+            # call reuses its program and its trace
+            probe = partial(
+                _sample_probe,
+                kernel,
+                rng_keys,
+                intervention=_to_jax(intervention),
+                kwargs_const=_partition(_to_jax(kwargs_extra))[0],
+                kwargs_static=kwargs_static,
+            )
             samples = probe({name: jnp.asarray(arr[:1]) for name, arr in first.items()})
             # A site whose shape follows the row count is per observation, so each
             # batch draws it
-            shapes = eval_shape(
-                probe,
-                {name: arr[:1].repeat(2, axis=0) for name, arr in first.items()},
-            )
+            try:
+                shapes = eval_shape(
+                    probe,
+                    {name: arr[:1].repeat(2, axis=0) for name, arr in first.items()},
+                )
+            # A kernel that does not run on two rows, such as one whose plate size is a
+            # fixed count, keeps the size check alone
+            except Exception:
+                shapes = {k: v for k, v in samples.items() if v.shape[1:2] != (1,)}
             samples = {
                 k: v
                 for k, v in samples.items()
-                if k not in req.return_sites and v.shape == shapes[k].shape
+                if k not in req.return_sites
+                and k in shapes
+                and v.shape == shapes[k].shape
             }
             if self._ctx.replicated_sharding is not None:
                 samples = device_put(samples, device=self._ctx.replicated_sharding)

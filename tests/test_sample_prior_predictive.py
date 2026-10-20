@@ -17,10 +17,12 @@
 from pathlib import Path
 
 import numpy as np
+import numpyro.distributions as dist
 import pytest
-from jax import Array, random
+from jax import Array, device_count, random
+from numpyro import deterministic, plate, sample
 
-from aimz import ImpactModel
+from aimz import ImpactModel, OutputWarning
 from tests.conftest import latent_intervention_model, lm, make_svi
 
 
@@ -117,3 +119,41 @@ def test_sample_prior_predictive_per_observation_intervention() -> None:
         streamed["prior_predictive"]["mu"].values,
         whole["prior_predictive"]["mu"].values,
     )
+
+
+def test_sample_prior_predictive_plate_sizes() -> None:
+    """A kernel whose plate needs several rows, or has a fixed size, is sampled."""
+
+    # A lag: each row after the first regresses on the one before
+    def lag(X: Array, y: Array | None = None) -> None:
+        a = sample("a", dist.Normal())
+        with plate("t", X.shape[0] - 1):
+            sample("y", dist.Normal(a * X[:-1], 0.1), obs=None if y is None else y[1:])
+
+    X = np.linspace(0.0, 1.0, 8 * device_count(), dtype=np.float32)
+    im = ImpactModel(lag, rng_key=random.key(0), inference=make_svi(lag))
+    with pytest.warns(OutputWarning, match="one value per row"):
+        dt = im.sample_prior_predictive(
+            X, num_samples=4, store="memory", progress=False
+        )
+    assert dt.prior_predictive["y"].shape == (1, 4, len(X) - 1)
+
+    # A plate of four rows, as many as each device evaluates from a batch
+    def fixed(X: Array, y: Array | None = None) -> None:
+        b = sample("b", dist.Normal().expand([4]).to_event(1))
+        with plate("obs", 4):
+            mu = deterministic("mu", b.sum() + X[:4])
+            sample("y", dist.Normal(mu, 1.0), obs=y)
+
+    n = 4 * device_count()
+    im = ImpactModel(fixed, rng_key=random.key(0), inference=make_svi(fixed))
+    dt = im.sample_prior_predictive(
+        [{"X": X[:n]}, {"X": X[n:]}],
+        num_samples=4,
+        return_sites="mu",
+        store="memory",
+        progress=False,
+    )
+    # Every batch and device shares the draws of the global site
+    offset = dt.prior_predictive["mu"].values[0] - X
+    np.testing.assert_allclose(offset, offset[:, :1].repeat(len(X), axis=1), atol=1e-6)
