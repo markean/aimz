@@ -630,11 +630,13 @@ def test_predict_recomputed_sites() -> None:
         np.zeros(3), fixed=0.0, return_sites="mu", store="memory", progress=False
     )
     X = np.linspace(0.0, 1.0, 12, dtype=np.float32)
-    dt = im.predict(X, return_sites="mu", store="memory", progress=False)
-    np.testing.assert_allclose(
-        dt.posterior_predictive["mu"].values,
-        np.broadcast_to(X + 3.0, (1, 4, 12)),
-    )
+    # A repeated call reuses the outcome of its trace
+    for _ in range(2):
+        dt = im.predict(X, return_sites="mu", store="memory", progress=False)
+        np.testing.assert_allclose(
+            dt.posterior_predictive["mu"].values,
+            np.broadcast_to(X + 3.0, (1, 4, 12)),
+        )
 
     # A call whose own trace fails, as on a batch past a subsampling plate, keeps all
     def subsampled(X: Array, y: Array | None = None) -> None:

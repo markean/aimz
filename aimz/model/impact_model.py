@@ -912,7 +912,14 @@ class ImpactModel(BaseModel):
                 tuple((k, v.shape, v.dtype) for k, v in rows.items()),
                 tuple((np.shape(leaf), jnp.result_type(leaf)) for leaf in leaves),
                 static,
-                tuple((k, np.shape(v)) for k, v in sorted(constants.items())),
+                tuple(
+                    (
+                        k,
+                        np.shape(v),
+                        jnp.result_type(v if hasattr(v, "dtype") else np.asarray(v)),
+                    )
+                    for k, v in sorted(constants.items())
+                ),
                 tuple(sorted(intervention or {})),
             )
             if key not in self._plan_cache:
