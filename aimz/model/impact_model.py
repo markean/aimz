@@ -625,18 +625,17 @@ class ImpactModel(BaseModel):
         )
 
     def _recomputed_sites(self) -> set[str]:
-        """Return the posterior sites the kernel recomputes, to keep off the devices.
+        """Return the posterior sites traced as deterministic with a value per row.
 
-        These are the deterministic sites with a value per observation in the traces so
-        far, whose draws no device's share of the rows could read anyway. A global one
-        stays, as the kernel may sample it under other arguments.
+        A streamed call keeps off the devices those that its own trace also records as
+        deterministic, since the kernel recomputes them there.
         """
         spec = cast("KernelSpec", self._kernel_spec)
 
         return {
             k
             for k in set(spec.return_sites) - set(spec.sample_sites)
-            if self._site_sizes.get(k, (0, 0))[0]
+            if k in (self._posterior or {}) and self._site_sizes.get(k, (0, 0))[0]
         }
 
     def _coerce_return_sites(
