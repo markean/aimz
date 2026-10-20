@@ -93,12 +93,15 @@ def test_fit_minibatch_warnings(synthetic_data: tuple[Array, Array]) -> None:
             im_rows.fit(X, y, batch_size=20, epochs=1, progress=False)
     im_rows.fit_on_batch(X, y, num_steps=1, progress=False)
 
-    # An event over the rows is split; a global event as long as a batch is not.
+    # An event over the rows is split; a global event as long as a batch is not, even
+    # when an argument passed whole sizes it.
     def coupled(X: Array, y: Array | None = None) -> None:
         sample("y", dist.MultivariateNormal(X[:, 0], jnp.eye(X.shape[0])), obs=y)
 
-    def global_event(X: Array, y: Array | None = None) -> None:
-        w = sample("w", dist.MultivariateNormal(jnp.zeros(20), jnp.eye(20)))
+    def global_event(
+        X: Array, y: Array | None = None, loc: Array | None = None
+    ) -> None:
+        w = sample("w", dist.MultivariateNormal(loc, jnp.eye(20)))
         with plate("data", size=100, subsample_size=X.shape[0]):
             sample("y", dist.Normal(X[:, 0] + w.sum(), 1.0), obs=y)
 
@@ -141,7 +144,7 @@ def test_fit_minibatch_warnings(synthetic_data: tuple[Array, Array]) -> None:
         im.fit(X, y, batch_size=len(X), epochs=1, progress=False)
         im_scaled.fit(X, y, batch_size=20, epochs=1, progress=False)
         im_amortized.fit(X, y, batch_size=20, epochs=1, progress=False)
-        im_global.fit(X, y, batch_size=20, epochs=1, progress=False)
+        im_global.fit(X, y, batch_size=20, epochs=1, progress=False, loc=jnp.zeros(20))
 
 
 def test_fit_loader_with_custom_param_names(

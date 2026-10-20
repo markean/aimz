@@ -590,3 +590,21 @@ def test_predict_global_event() -> None:
             progress=False,
         )
     assert dt.posterior_predictive.attrs["shard_axis"] == "obs"
+
+    # An event over the rows sized by a covariance factor passed whole keeps its mark
+    def factored(X: Array, y: Array | None = None, factor: Array | None = None) -> None:
+        s = sample("s", dist.HalfNormal(1.0))
+        sample("y", dist.MultivariateNormal(s * jnp.sin(X), scale_tril=factor), obs=y)
+
+    X = np.linspace(0.0, 3.0, 12, dtype=np.float32)
+    cov = np.exp(-0.5 * (X[:, None] - X[None, :]) ** 2) + 1e-2 * np.eye(12)
+    im = ImpactModel(factored, rng_key=random.key(0), inference=make_svi(factored))
+    im.set_posterior_sample({"s": np.ones(4)})
+    with pytest.warns(PerformanceWarning, match="computes across observations"):
+        dt = im.predict(
+            X,
+            factor=np.linalg.cholesky(cov).astype(np.float32),
+            store="memory",
+            progress=False,
+        )
+    assert dt.posterior_predictive.attrs["shard_axis"] == "draw"

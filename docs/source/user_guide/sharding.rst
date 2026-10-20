@@ -22,7 +22,7 @@ A predictive pass has two axes worth sharding: the **observation axis** of the i
 
 Data parallelism (``shard_axis="obs"``, default)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-The input is sharded across devices along axis 0 (the observation axis), while the posterior samples are **replicated** on every device, apart from deterministic sites, which the kernel recomputes.
+The input is sharded across devices along axis 0 (the observation axis), while the posterior samples are **replicated** on every device, apart from deterministic sites with a value per observation, which the kernel recomputes, once a call has traced it.
 This is the standard `data-parallel <https://jax.readthedocs.io/en/latest/distributed_data_loading.html#data-parallelism>`__ pattern: each device holds the posterior and processes a slice of the observations.
 Because it streams the input (an array or a data loader, see :doc:`dataloader`), it scales to inputs larger than device memory.
 It does require a **replicable** posterior: every sample site must have a static shape that does not depend on the number of observations, which holds when all latents are global.
