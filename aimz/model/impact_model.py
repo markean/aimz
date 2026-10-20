@@ -109,7 +109,7 @@ from aimz.utils.data._input_setup import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping, Sized
+    from collections.abc import Callable, Collection, Iterable, Mapping, Sized
 
     from dask.array import Array as DaskArray
 
@@ -416,14 +416,17 @@ class ImpactModel(BaseModel):
         *,
         with_output: bool,
         rows_more: int | None = None,
+        whole: Collection[str] = (),
     ) -> None:
         """Trace the kernel and record its sites, unless a sufficient spec exists.
 
         A spec traced without an observed output is upgraded by a trace with one,
         merging the sites, since a kernel may define sites only when data are supplied.
         The trace is abstract, unless the kernel reads a concrete value of an argument.
-        A site marked for an event as long as the rows keeps its mark only if its event
-        follows them in a trace at ``rows_more`` rows, twice the rows by default.
+        A site marked for an event as long as the rows loses its mark when a trace at
+        ``rows_more`` rows, twice the rows by default, gives it the same event length;
+        the arguments named in ``whole`` keep their shape there, and a failed trace
+        keeps every mark.
         """
         if self._kernel_spec:
             if with_output:
@@ -576,15 +579,20 @@ class ImpactModel(BaseModel):
         if events:
             more = rows_more or 2 * math.prod(rows)
             try:
+                grows = [
+                    name not in whole
+                    for name, value in args_bound.items()
+                    for _ in _partition({name: value})[0]
+                ]
                 wider = sites_at(
                     [
                         ShapeDtypeStruct(
                             (more, *leaf.shape[1:])
-                            if leaf.shape[:1] == rows
+                            if grow and leaf.shape[:1] == rows
                             else leaf.shape,
                             leaf.dtype,
                         )
-                        for leaf in leaves
+                        for leaf, grow in zip(leaves, grows, strict=True)
                     ],
                 )
             except Exception:
@@ -592,7 +600,12 @@ class ImpactModel(BaseModel):
             self._coupled_sites.difference_update(
                 k
                 for k in events
-                if getattr(wider.get(k, {}).get("fn"), "event_shape", ())[:1] == rows
+                if (site := wider.get(k))
+                and getattr(site.get("fn"), "event_shape", ())[:1] == rows
+                # The value too, since a distribution may take its event size from an
+                # axis that the wider trace keeps, as `scale_tril` does
+                and getattr(site["value"], "shape", ())[-len(site["fn"].event_shape) :]
+                == site["fn"].event_shape
             )
         try:
             deps = get_dependencies(self.kernel, model_kwargs=dict(args_bound))
@@ -610,6 +623,21 @@ class ImpactModel(BaseModel):
             return_sites=return_sites,
             output_observed=output_observed,
         )
+
+    def _recomputed_sites(self) -> set[str]:
+        """Return the posterior sites the kernel recomputes, to keep off the devices.
+
+        These are the deterministic sites with a value per observation in the traces so
+        far, whose draws no device's share of the rows could read anyway. A global one
+        stays, as the kernel may sample it under other arguments.
+        """
+        spec = cast("KernelSpec", self._kernel_spec)
+
+        return {
+            k
+            for k in set(spec.return_sites) - set(spec.sample_sites)
+            if self._site_sizes.get(k, (0, 0))[0]
+        }
 
     def _coerce_return_sites(
         self,
@@ -1777,7 +1805,8 @@ class ImpactModel(BaseModel):
                 warn(msg, category=FitWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
             # Batches split a site that counts as computing across observations: one
             # recorded by control flow, or one drawn as an event whose size follows the
-            # rows, which the build tells at twice the batch's rows, or all of them
+            # rows, which the build tells at twice the batch's rows, or all of them,
+            # growing the batch's fields alone
             n_obs = len(dataloader.dataset)
             self._build_kernel_spec(
                 signature(self.kernel)
@@ -1785,6 +1814,7 @@ class ImpactModel(BaseModel):
                 .arguments,
                 with_output=True,
                 rows_more=min(2 * dataloader.batch_size, n_obs),
+                whole=kwargs_extra.keys(),
             )
             if coupled := sorted(self._coupled_sites):
                 msg = (
@@ -2388,10 +2418,6 @@ class ImpactModel(BaseModel):
             self._rng_key, rng_key = random.split(self._rng_key)
 
         group = "posterior_predictive" if in_sample else "predictions"
-        # The kernel recomputes the posterior's deterministic sites, so under `obs` they
-        # stay off the devices
-        spec = self._kernel_spec
-        unread = set(spec.return_sites) - set(spec.sample_sites) if spec else set()
 
         return self._stream_to_datatree(
             lambda artifact_path: self._streamer.write_predictive(
@@ -2419,7 +2445,7 @@ class ImpactModel(BaseModel):
                 if self.vi_result is not None
                 else _to_jax(condition or {}),
                 intervention=intervention,
-                unread=unread,
+                unread=self._recomputed_sites(),
             ),
             store=store,
             output_dir=output_dir,
@@ -2837,10 +2863,6 @@ class ImpactModel(BaseModel):
                 posterior=self.posterior,
             )
 
-        # The kernel recomputes the posterior's deterministic sites, so under `obs` they
-        # stay off the devices
-        spec = self._kernel_spec
-        unread = set(spec.return_sites) - set(spec.sample_sites) if spec else set()
         # Without a posterior every latent site is drawn from the prior, which needs a
         # seeded kernel; with one, the bare kernel keeps its identity for the cache
         kernel = (
@@ -2870,7 +2892,7 @@ class ImpactModel(BaseModel):
                 if self.vi_result is not None
                 else None,
                 y=y,
-                unread=unread,
+                unread=self._recomputed_sites(),
             ),
             store=store,
             output_dir=output_dir,

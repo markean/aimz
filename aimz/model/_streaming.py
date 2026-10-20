@@ -125,8 +125,8 @@ class _OutputStreamer:
         self._ctx = ctx
         self._fn_cache: dict[tuple[str, str, int, int], Callable] = {}
         self._posterior_device_cache: dict[
-            tuple[Sharding | None, frozenset[str]],
-            dict[str, Array],
+            Sharding | None,
+            tuple[frozenset[str], dict[str, Array]],
         ] = {}
         self._posterior_device_src: dict[str, Array] | None = None
 
@@ -237,10 +237,12 @@ class _OutputStreamer:
         *,
         unread: AbstractSet[str] = frozenset(),
     ) -> dict[str, Array]:
-        """Return the posterior placed on devices, cached by sharding and unread sites.
+        """Return the posterior placed on devices, cached by ``sharding``.
 
-        The sites in ``unread``, which the kernel never reads, stay off the devices.
-        The cache is rebuilt when ``posterior`` is replaced, by identity.
+        Replicated across devices, a site in ``unread``, which the kernel recomputes,
+        keeps no rows, so a call that samples it still fails on its shape.
+        A placement is replaced when the sites it holds whole change, and the cache is
+        rebuilt when ``posterior`` is replaced, by identity.
         """
         if not posterior:
             return {}
@@ -248,15 +250,25 @@ class _OutputStreamer:
             self._posterior_device_cache = {}
             self._posterior_device_src = posterior
         cache = self._posterior_device_cache
-        key = (sharding, frozenset(unread))
-        if key not in cache:
+        # One device holds a single copy, which keeps every site for a call that samples
+        # a site the traces recorded as deterministic
+        whole = frozenset(
+            posterior.keys() - unread if sharding is not None else posterior
+        )
+        if sharding not in cache or cache[sharding][0] != whole:
             # Placed once, instead of being transferred on every jit call
-            cache[key] = device_put(
-                {k: v for k, v in posterior.items() if k not in unread},
-                device=sharding,
+            cache[sharding] = (
+                whole,
+                device_put(
+                    {
+                        k: v[:, :0] if k not in whole and v.ndim > 1 else v
+                        for k, v in posterior.items()
+                    },
+                    device=sharding,
+                ),
             )
 
-        return cache[key]
+        return cache[sharding][1]
 
     def write_predictive(
         self,
