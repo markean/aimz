@@ -204,6 +204,9 @@ class ImpactModel(BaseModel):
     def _init_runtime_attrs(self) -> None:
         """Initialize runtime attributes."""
         self._fn_vi_update: Callable | None = None
+        # The return sites a streamed call cannot split, and whether the kernel failed
+        # on one row fewer, by the call's shapes and constants
+        self._plan_cache: dict[tuple, tuple[frozenset[str], bool]] = {}
         self._num_devices = local_device_count()
         if self._num_devices > 1:
             mesh = make_mesh(
@@ -288,6 +291,7 @@ class ImpactModel(BaseModel):
                 or k
                 in {
                     "_num_devices",
+                    "_plan_cache",
                     "_temp_dir",
                     "_streamer",
                 }
@@ -900,25 +904,42 @@ class ImpactModel(BaseModel):
                     leaves,
                 )
 
-            shapes = shapes_at(n_obs)
-            per_row = {k for k, v in shapes.items() if v.shape[:1] == (n_obs,)}
+            # The traces depend only on the call's shapes and constants, so a repeated
+            # call reuses their outcome
+            key = (
+                shard_axis,
+                return_sites,
+                tuple((k, v.shape, v.dtype) for k, v in rows.items()),
+                tuple((np.shape(leaf), jnp.result_type(leaf)) for leaf in leaves),
+                static,
+                tuple((k, np.shape(v)) for k, v in sorted(constants.items())),
+                tuple(sorted(intervention or {})),
+            )
+            if key not in self._plan_cache:
+                shapes = shapes_at(n_obs)
+                per_row = {k for k, v in shapes.items() if v.shape[:1] == (n_obs,)}
+                failed = False
+                try:
+                    if n_obs > 1 and shard_axis == "obs":
+                        fewer = shapes_at(n_obs - 1)
+                        per_row &= {
+                            k for k, v in fewer.items() if v.shape[:1] == (n_obs - 1,)
+                        }
+                # A kernel that does not run on fewer rows, such as one whose plate size
+                # is a fixed count, cannot be split either
+                except Exception:
+                    failed = True
+                self._plan_cache[key] = (frozenset(shapes.keys() - per_row), failed)
+            unsplit, failed = self._plan_cache[key]
             msg, category = None, PerformanceWarning
-            try:
-                if n_obs > 1 and shard_axis == "obs":
-                    fewer = shapes_at(n_obs - 1)
-                    per_row &= {
-                        k for k, v in fewer.items() if v.shape[:1] == (n_obs - 1,)
-                    }
-            # A kernel that does not run on fewer rows, such as one whose plate size is
-            # a fixed count, cannot be split either
-            except Exception:
+            if failed:
                 msg = (
                     "The kernel does not run on fewer rows than the input, so "
                     "`shard_axis='obs'` cannot split it; rerunning with "
                     "`shard_axis='draw'`. Pass `shard_axis='draw'` to silence this "
                     "warning."
                 )
-            whole = sorted(shapes.keys() - per_row)
+            whole = sorted(unsplit)
             if self.param_output in whole:
                 msg = (
                     f"The output site {self.param_output!r} does not have one value "
