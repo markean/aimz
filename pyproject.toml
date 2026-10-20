@@ -84,6 +84,8 @@ per-file-ignores = { "aimz/model/_core.py" = [
     "PLR0913", # too-many-arguments
     "PLR0915", # too-many-statements
     "SLF001",  # private-member-access
+], "aimz/model/_streaming.py" = [
+    "BLE001",  # blind-except
 ], "aimz/mlflow*" = [
     "ANN202",  # missing-return-type-private-function
     "ARG001",  # unused-function-argument

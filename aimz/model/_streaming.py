@@ -30,6 +30,8 @@ from typing import TYPE_CHECKING, Literal, NamedTuple, cast
 import jax.numpy as jnp
 from jax import Array, device_get, device_put, eval_shape, random, tree
 from jax.typing import ArrayLike
+from numpyro import validation_enabled
+from numpyro.handlers import seed, trace
 from tqdm.auto import tqdm
 
 from aimz.sampling._forward import _sample_forward
@@ -176,6 +178,42 @@ class _OutputStreamer:
         )
 
         return kwargs_key, {k: v for k, v in req.kwargs.items() if k not in batch}
+
+    def _recomputed(
+        self,
+        unread: AbstractSet[str],
+        *,
+        kernel: Callable,
+        batch: Mapping[str, Array | np.ndarray],
+        constants: Mapping[str, object],
+    ) -> AbstractSet[str]:
+        """Return the sites of ``unread`` that this call also records as deterministic.
+
+        The earlier traces' record may not hold for this call, whose arguments can make
+        the kernel sample such a site, so the kernel is traced abstractly on the first
+        batch. A kernel that this trace rejects keeps every site.
+        """
+        if not unread or self._ctx.replicated_sharding is None:
+            return unread
+        rows, _ = _split_intervention_fields(dict(batch))
+        deterministic: set[str] = set()
+
+        def record(rows: Mapping[str, object]) -> None:
+            with validation_enabled(is_validate=False):
+                model_trace = trace(seed(kernel, rng_seed=0)).get_trace(
+                    **rows,
+                    **constants,
+                )
+            deterministic.update(
+                k for k, v in model_trace.items() if v["type"] == "deterministic"
+            )
+
+        try:
+            eval_shape(record, rows)
+        except Exception:
+            return frozenset()
+
+        return unread & deterministic
 
     def setup_stream(
         self,
@@ -405,7 +443,12 @@ class _OutputStreamer:
             samples = self.place_posterior(
                 posterior,
                 self._ctx.replicated_sharding,
-                unread=unread,
+                unread=self._recomputed(
+                    unread,
+                    kernel=kernel,
+                    batch=stream[2],
+                    constants=kwargs_extra,
+                ),
             )
 
         return self._write_data(
@@ -498,7 +541,12 @@ class _OutputStreamer:
             samples=self.place_posterior(
                 posterior,
                 self._ctx.replicated_sharding,
-                unread=unread,
+                unread=self._recomputed(
+                    unread,
+                    kernel=kernel,
+                    batch=stream[2],
+                    constants=kwargs_extra,
+                ),
             ),
             kwargs_key=kwargs_key,
             rng_key=None,
