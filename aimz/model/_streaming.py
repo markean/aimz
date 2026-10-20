@@ -31,7 +31,8 @@ import jax.numpy as jnp
 from jax import Array, device_get, device_put, eval_shape, random, tree
 from jax.typing import ArrayLike
 from numpyro import validation_enabled
-from numpyro.handlers import seed, trace
+from numpyro.handlers import seed, substitute, trace
+from numpyro.infer import init_to_sample
 from tqdm.auto import tqdm
 
 from aimz.sampling._forward import _sample_forward
@@ -200,10 +201,16 @@ class _OutputStreamer:
 
         def record(rows: Mapping[str, object]) -> None:
             with validation_enabled(is_validate=False):
-                model_trace = trace(seed(kernel, rng_seed=0)).get_trace(
-                    **rows,
-                    **constants,
-                )
+                model_trace = trace(
+                    substitute(
+                        seed(kernel, rng_seed=0),
+                        # A site that already holds a value keeps it, and a prior that
+                        # cannot be sampled, as an improper one, is initialized instead
+                        substitute_fn=lambda msg: (
+                            None if msg["value"] is not None else init_to_sample(msg)
+                        ),
+                    ),
+                ).get_trace(**rows, **constants)
             deterministic.update(
                 k for k, v in model_trace.items() if v["type"] == "deterministic"
             )
@@ -277,8 +284,8 @@ class _OutputStreamer:
     ) -> dict[str, Array]:
         """Return the posterior placed on devices, cached by ``sharding``.
 
-        Replicated across devices, a site in ``unread``, which the kernel recomputes,
-        keeps no rows, so a call that samples it still fails on its shape.
+        Replicated across devices, a site in ``unread``, which the call recomputes,
+        keeps no rows.
         A placement is replaced when the sites it holds whole change, and the cache is
         rebuilt when ``posterior`` is replaced, by identity.
         """
@@ -443,10 +450,15 @@ class _OutputStreamer:
             samples = self.place_posterior(
                 posterior,
                 self._ctx.replicated_sharding,
+                # The sampler runs the kernel without the output, so the trace does too
                 unread=self._recomputed(
                     unread,
                     kernel=kernel,
-                    batch=stream[2],
+                    batch={
+                        k: v
+                        for k, v in stream[2].items()
+                        if k != self._ctx.param_output
+                    },
                     constants=kwargs_extra,
                 ),
             )
