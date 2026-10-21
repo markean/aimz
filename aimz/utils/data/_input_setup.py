@@ -199,7 +199,10 @@ def _setup_inputs(
         )
     elif isinstance(X, Iterable) and not isinstance(X, (str, bytes, Mapping)):
         if y is not None:
-            msg = "`y` must be `None` when `X` is already a data loader."
+            msg = (
+                "`y` must be `None` when `X` is already a data loader, got `X` of type "
+                f"{type(X).__name__!r}."
+            )
             raise TypeError(msg)
         if isinstance(X, ArrayLoader) and X.shuffle and not shuffle:
             msg = (
