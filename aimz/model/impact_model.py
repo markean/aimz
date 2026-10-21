@@ -1853,9 +1853,11 @@ class ImpactModel(BaseModel):
                 in an epoch.
 
         Warns:
-            FitWarning: If the batches are smaller than the data and the kernel gives
-                the output site no scale for a batch, so that each batch is weighed as
-                the whole data, or has a site that computes across observations, or a
+            FitWarning: If the batches are smaller than the data and the kernel scales
+                the output site for a batch by other than the number of observations
+                over the batch size, as when it gives no scale, while a latent site
+                outside the batch's plate, such as a global one, weighs against it, or
+                has a site that computes across observations, or a
                 latent site per observation that the guide does not compute from the
                 batch, such as one kept per position or plate index, which the batches
                 split. The checks run on the first ``batch_size`` observations of an
@@ -1933,42 +1935,60 @@ class ImpactModel(BaseModel):
 
         rng_key, rng_subkey = random.split(rng_key)
         # The scale a batch gives the output site tells whether the kernel scales it to
-        # the whole data
+        # the whole data, as it must when a latent site outside the batch's plate, such
+        # as a global one, weighs against it; otherwise every term follows the batch
         if isinstance(dataloader, ArrayLoader) and dataloader.batch_size < len(
             dataloader.dataset,
         ):
+            n_obs = len(dataloader.dataset)
             batch = {
                 k: v[: dataloader.batch_size]
                 for k, v in dataloader.dataset.arrays.items()
             }
             # The first batch already rejected an output site that is not observed
             with validation_enabled(is_validate=False):
-                site = (
-                    trace(
-                        substitute(
-                            seed(self.kernel, rng_seed=self.rng_key),
-                            substitute_fn=init_to_sample,
-                        ),
-                    )
-                    .get_trace(**_to_jax({**batch, **kwargs_extra}))
-                    .get(self.param_output, {})
+                model_trace = trace(
+                    substitute(
+                        seed(self.kernel, rng_seed=self.rng_key),
+                        substitute_fn=init_to_sample,
+                    ),
+                ).get_trace(**_to_jax({**batch, **kwargs_extra}))
+            site = model_trace.get(self.param_output, {})
+            # The output's outermost plate is the one over the batch's rows
+            rows = {
+                f.name
+                for f in sorted(
+                    site.get("cond_indep_stack") or (), key=lambda f: f.dim
+                )[:1]
+            }
+            scale = float(np.mean(1.0 if site.get("scale") is None else site["scale"]))
+            expected = n_obs / dataloader.batch_size
+            if (
+                site.get("is_observed")
+                and not np.isclose(scale, expected)
+                and any(
+                    v["type"] == "sample"
+                    and not v.get("is_observed")
+                    and not rows & {f.name for f in v.get("cond_indep_stack") or ()}
+                    for v in model_trace.values()
                 )
-            if site.get("is_observed") and (
-                site.get("scale") is None or np.all(site["scale"] == 1)
             ):
                 msg = (
-                    f"`fit` trains on batches of {dataloader.batch_size} of "
-                    f"{len(dataloader.dataset)} observations, but the kernel gives the "
-                    f"output site {self.param_output!r} no scale, so each batch is "
-                    "weighed as the whole data. Scale it in the kernel, or fit with "
-                    "`fit_on_batch`."
+                    f"`fit` trains on batches of {dataloader.batch_size} of {n_obs} "
+                    "observations, but the kernel scales the output site "
+                    f"{self.param_output!r} by {scale:g} for a batch rather than by "
+                    f"{n_obs}/{dataloader.batch_size} = {expected:g}, so a batch does "
+                    "not weigh as the whole data against the sites outside its plate. "
+                    "Scale it in the kernel, as a plate whose `size` is the number of "
+                    "observations and whose `subsample_size` is a batch's rows does, "
+                    "or fit with `fit_on_batch`; a scale chosen on purpose, as for "
+                    "tempering, can ignore this warning."
                 )
                 warn(msg, category=FitWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
             # Batches split a site that counts as computing across observations: one
             # recorded by control flow, or one drawn as an event whose size follows the
             # rows, which the build tells at twice the batch's rows, or all of them,
             # growing the batch's fields alone
-            n_obs = len(dataloader.dataset)
             self._build_kernel_spec(
                 signature(self.kernel)
                 .bind(**_to_jax({**batch, **kwargs_extra}))
