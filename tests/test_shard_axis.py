@@ -67,6 +67,18 @@ def test_local_latent_model(
     assert ll["log_likelihood"]["y"].shape == (1, n, len(X))
     with pytest.raises(ValueError, match="site 'z' has shape"):
         im.predict_on_batch(X[:5])
+    # So do streamed calls on new rows that device batches with the fitted row count
+    # would take, a padded last batch included
+    rows = np.concatenate([np.tile(X, (local_device_count(), 1)), X[:1]])
+    with pytest.raises(ValueError, match="site 'z' has shape"):
+        im.predict(rows, batch_size=len(X) * local_device_count(), progress=False)
+    with pytest.raises(ValueError, match="site 'z' has shape"):
+        im.log_likelihood(
+            rows,
+            np.concatenate([np.tile(y, local_device_count()), y[:1]]),
+            batch_size=len(X) * local_device_count(),
+            progress=False,
+        )
     dt = im.predict_on_batch(X[:5], intervention={"z": 0.0})
     assert dt["posterior_predictive"]["y"].shape == (1, n, 5)
 

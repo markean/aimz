@@ -97,7 +97,7 @@ A guide that computes the site from each observation's inputs, such as an amorti
 See :ref:`user-guide-sharding` for how the two sharding strategies differ, when to choose each, and a worked comparison of a compatible kernel and one that triggers the rerun.
 A local latent's posterior applies only to the observations the model was fitted on.
 For an array input with another number of observations, prediction and :meth:`~aimz.ImpactModel.log_likelihood` raise a ``ValueError`` that names the site, unless the site is intervened on.
-The fitted values are reused without notice for an input with the same number of observations, and, under ``shard_axis="obs"``, for one split into device batches with exactly the fitted number of rows, padding included.
+The fitted values are reused without notice for an input with the same number of observations.
 A data loader is checked one device batch at a time, so a loader batch that gives each device exactly the fitted number of rows passes too.
 A data loader cannot rerun under ``shard_axis="draw"``, so a call with one raises the error for the fitted observations too whenever its batches or the devices split them; pass them as an array instead.
 For an array input, the rerun also covers a local latent whose observations lie on another axis, as in nested plates, since it checks whether the shape of the site's draws follows the input's rows.
