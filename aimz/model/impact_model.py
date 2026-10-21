@@ -1853,19 +1853,21 @@ class ImpactModel(BaseModel):
                 in an epoch.
 
         Warns:
-            FitWarning: If the batches are smaller than the data and the kernel scales
-                the output site for a batch by other than the number of observations
-                over the batch size, as when it gives no scale, while a latent site
-                outside the batch's plate, such as a global one, weighs against it, or
-                has a site that computes across observations, or a
-                latent site per observation that the guide does not compute from the
-                batch, such as one kept per position or plate index, which the batches
-                split. The checks run on the first ``batch_size`` observations of an
-                array input or of an :class:`~aimz.utils.data.ArrayLoader`; another
-                data loader has no size to compare with. Of the sites drawn as one
-                event over the rows, only an event as long as the batch is checked, so
-                one padded beyond the rows, or offset from them, trains without the
-                warning.
+            FitWarning: If the batches are smaller than the data and the kernel does
+                not scale the output site of a batch to the whole data, by a plate
+                whose ``size`` is the number of observations or by the number of
+                observations over the batch size, while a site outside the output's
+                plate, such as a global latent or a penalty passed to ``factor``,
+                weighs against it; a scale given per row, as weights are, counts only
+                when it is one on every row. Also if the batches split a site that
+                computes across observations, or a latent site per observation that the
+                guide does not compute from the batch, such as one kept per position or
+                plate index. The checks run on the first ``batch_size`` observations
+                of an array input or of an :class:`~aimz.utils.data.ArrayLoader`;
+                another data loader has no size to compare with. Of the sites drawn as
+                one event over the rows, only an event as long as the batch is
+                checked, so one padded beyond the rows, or offset from them, trains
+                without the warning.
         """
         _validate_aligned_inputs(X, y=y)
         if y is None and isinstance(X, ArrayLike):
@@ -1935,8 +1937,9 @@ class ImpactModel(BaseModel):
 
         rng_key, rng_subkey = random.split(rng_key)
         # The scale a batch gives the output site tells whether the kernel scales it to
-        # the whole data, as it must when a latent site outside the batch's plate, such
-        # as a global one, weighs against it; otherwise every term follows the batch
+        # the whole data, as it must when a site outside the output's plate, such as a
+        # global latent or a penalty passed to `factor`, weighs against it; otherwise
+        # every term follows the batch
         if isinstance(dataloader, ArrayLoader) and dataloader.batch_size < len(
             dataloader.dataset,
         ):
@@ -1955,34 +1958,44 @@ class ImpactModel(BaseModel):
                 ).get_trace(**_to_jax({**batch, **kwargs_extra}))
             site = model_trace.get(self.param_output, {})
             # The output's outermost plate is the one over the batch's rows
-            rows = {
-                f.name
-                for f in sorted(
-                    site.get("cond_indep_stack") or (), key=lambda f: f.dim
-                )[:1]
-            }
-            scale = float(np.mean(1.0 if site.get("scale") is None else site["scale"]))
+            frames = sorted(site.get("cond_indep_stack") or (), key=lambda f: f.dim)[:1]
+            rows = {f.name for f in frames}
+            # A scale given per row weights the rows, which leaves nothing to compare
+            # unless every weight is one
+            scale = site.get("scale")
+            scale = 1.0 if scale is None or np.all(scale == 1) else scale
             expected = n_obs / dataloader.batch_size
             if (
                 site.get("is_observed")
+                # A plate whose size is all the observations scales a batch to them,
+                # whatever weights the kernel adds
+                and not any(
+                    model_trace.get(f.name, {}).get("args", (None,))[0] == n_obs
+                    for f in frames
+                )
+                and np.ndim(scale) == 0
                 and not np.isclose(scale, expected)
-                and any(
-                    v["type"] == "sample"
-                    and not v.get("is_observed")
-                    and not rows & {f.name for f in v.get("cond_indep_stack") or ()}
-                    for v in model_trace.values()
+                and (
+                    outside := [
+                        name
+                        for name, v in model_trace.items()
+                        if v["type"] == "sample"
+                        and name != self.param_output
+                        and not rows & {f.name for f in v.get("cond_indep_stack") or ()}
+                    ]
                 )
             ):
                 msg = (
                     f"`fit` trains on batches of {dataloader.batch_size} of {n_obs} "
                     "observations, but the kernel scales the output site "
-                    f"{self.param_output!r} by {scale:g} for a batch rather than by "
-                    f"{n_obs}/{dataloader.batch_size} = {expected:g}, so a batch does "
-                    "not weigh as the whole data against the sites outside its plate. "
+                    f"{self.param_output!r} by {scale:g} for a batch rather than "
+                    f"by {n_obs}/{dataloader.batch_size} = {expected:g}, so a batch "
+                    "does not weigh as the whole data against site(s) "
+                    f"{', '.join(map(repr, outside))} outside the output's plate. "
                     "Scale it in the kernel, as a plate whose `size` is the number of "
                     "observations and whose `subsample_size` is a batch's rows does, "
-                    "or fit with `fit_on_batch`; a scale chosen on purpose, as for "
-                    "tempering, can ignore this warning."
+                    "with any site per row and any factor chosen on purpose, as for "
+                    "tempering, inside that plate, or fit with `fit_on_batch`."
                 )
                 warn(msg, category=FitWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
             # Batches split a site that counts as computing across observations: one
