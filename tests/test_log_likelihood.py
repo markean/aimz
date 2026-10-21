@@ -14,15 +14,17 @@
 
 """Tests for the `.log_likelihood()` method."""
 
+import warnings
+
 import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
 import pytest
-from jax import Array, random
+from jax import Array, device_count, random
 from numpyro import deterministic, plate, sample
 from numpyro.infer.util import log_likelihood
 
-from aimz import ImpactModel, KernelValidationError
+from aimz import ImpactModel, KernelValidationError, PerformanceWarning
 from tests.conftest import lm_subsample, make_svi
 
 
@@ -171,3 +173,47 @@ def test_log_likelihood_untraced_kernel(monkeypatch: pytest.MonkeyPatch) -> None
     im.set_posterior_sample({"b": np.ones(4)})
     with pytest.raises(KernelValidationError, match="reserved"):
         im.log_likelihood(X, y, store="memory", progress=False)
+
+
+def test_log_likelihood_row_sizes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sites and arguments sized by the rows are scored on rows that fit them."""
+
+    # A random walk: increments in a plate of one row fewer, the level per row
+    def walk(X: Array, y: Array | None = None) -> None:
+        with plate("t", X.shape[0] - 1):
+            s = sample("s", dist.Normal(0.0, 0.1))
+        with plate("obs", X.shape[0]):
+            mu = X + jnp.concatenate([jnp.zeros(1), jnp.cumsum(s)])
+            sample("y", dist.Normal(mu, 1.0), obs=y)
+
+    X = np.linspace(0.0, 1.0, 8 * device_count(), dtype=np.float32)
+    y = X + np.linspace(0.0, 1.0, len(X), dtype=np.float32)
+    posterior = {"s": np.full((4, len(X) - 1), 0.05, dtype=np.float32)}
+    expected = log_likelihood(walk, posterior, X, y)["y"]
+    im = ImpactModel(walk, rng_key=random.key(0), inference=make_svi(walk))
+    im.set_posterior_sample(posterior)
+    with pytest.warns(PerformanceWarning, match="follows the input's rows"):
+        dt = im.log_likelihood(X, y, store="memory", progress=False)
+    np.testing.assert_allclose(dt.log_likelihood["y"].values[0], expected, rtol=1e-5)
+
+    # A keyword array as long as each device's rows, but not as the input, raises
+    def shifted(X: Array, y: Array | None = None, c: Array | None = None) -> None:
+        b = sample("b", dist.Normal())
+        with plate("obs", X.shape[0]):
+            sample("y", dist.Normal(b + X + c, 1.0), obs=y)
+
+    im = ImpactModel(shifted, rng_key=random.key(0), inference=make_svi(shifted))
+    im.set_posterior_sample({"b": np.zeros(4)})
+    with pytest.raises(TypeError, match="incompatible shapes"):
+        im.log_likelihood(
+            X, y, c=np.zeros(4), batch_size=len(X) // 2, store="memory", progress=False
+        )
+
+    # One device evaluates all the rows in one batch, which fits the walk
+    monkeypatch.setattr("aimz.model.impact_model.local_device_count", lambda: 1)
+    im = ImpactModel(walk, rng_key=random.key(0), inference=make_svi(walk))
+    im.set_posterior_sample(posterior)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", PerformanceWarning)
+        dt = im.log_likelihood(X, y, store="memory", progress=False)
+    np.testing.assert_allclose(dt.log_likelihood["y"].values[0], expected, rtol=1e-5)

@@ -27,11 +27,11 @@ from numpyro.optim import Adam
 
 from aimz import FitWarning, ImpactModel
 from aimz.utils.data import ArrayDataset, ArrayLoader
-from tests.conftest import lm, lm_subsample, make_svi
+from tests.conftest import lm, lm_subsample, lm_with_kwargs_array, make_svi
 
 
 def test_fit_argument_errors(synthetic_data: tuple[Array, Array]) -> None:
-    """MCMC inference, and kernel arguments that do not bind, are rejected."""
+    """MCMC inference, and kernel arguments that do not bind or fit the rows, raise."""
     X, y = synthetic_data
     mcmc = MCMC(NUTS(lm), num_warmup=10, num_samples=10, progress_bar=False)
     im = ImpactModel(lm, rng_key=random.key(42), inference=mcmc)
@@ -46,6 +46,15 @@ def test_fit_argument_errors(synthetic_data: tuple[Array, Array]) -> None:
         im.fit(X, y, batch_size=len(X), progress=False)
     with pytest.raises(TypeError, match="unexpected keyword argument 'extra'"):
         im.fit(X, y, arg=True, extra=True, batch_size=len(X), progress=False)
+
+    # A keyword array as long as a batch, but not as the data, is not reused
+    im = ImpactModel(
+        lm_with_kwargs_array,
+        rng_key=random.key(42),
+        inference=make_svi(lm_with_kwargs_array),
+    )
+    with pytest.raises(TypeError, match="incompatible shapes"):
+        im.fit(X, y, c=jnp.zeros(20), batch_size=20, progress=False)
 
 
 def test_fit_nan_warning(synthetic_data: tuple[Array, Array]) -> None:
