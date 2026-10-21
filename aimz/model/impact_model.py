@@ -206,7 +206,8 @@ class ImpactModel(BaseModel):
         self._fn_vi_update: Callable | None = None
         # The return sites a streamed call cannot split, whether the kernel failed on
         # one row fewer, and the posterior sites whose size follows the rows, by the
-        # call's shapes and constants
+        # call's shapes and constants, and the calls that passed `log_likelihood`'s
+        # check of keyword arrays as long as each device's rows
         self._plan_cache: dict[
             tuple,
             tuple[frozenset[str], bool, dict[str, tuple[int, ...]]],
@@ -854,8 +855,13 @@ class ImpactModel(BaseModel):
                 shard_axis, batch_size = "draw", None
             elif batch_size is None:
                 batch_size = n_obs
-        # Posterior sites a call under `obs` replicates, deterministic ones aside
-        latent = sorted(set(posterior or {}) - deterministic)
+        # Posterior sites a call under `obs` replicates, deterministic and scalar ones
+        # aside; their sizes matter only when the rows may be split or the batch is open
+        latent = sorted(
+            k
+            for k, v in (posterior or {}).items()
+            if k not in deterministic and v.ndim > 1 and (splits or batch_size is None)
+        )
         if (return_sites or latent) and (
             shard_axis == "obs" or self.param_output in return_sites
         ):
@@ -936,18 +942,12 @@ class ImpactModel(BaseModel):
                 ),
                 tuple(sorted(intervention or {})),
                 posterior is None,
-                tuple(latent),
+                tuple((k, cast("dict", posterior)[k].shape[1:]) for k in latent),
             )
             if key not in self._plan_cache:
-                try:
-                    shapes = shapes_at(n_obs)
-                # A call without return sites, as `log_likelihood`, keeps its plan for a
-                # kernel that runs on its batches but not on all the rows at once, such
-                # as one whose subsampling plate is smaller than the input
-                except Exception:
-                    if return_sites:
-                        raise
-                    shapes = {}
+                # A call without return sites, as `log_likelihood`, traces its rows only
+                # for a latent site whose draws do not fit one row fewer
+                shapes = shapes_at(n_obs) if return_sites else {}
                 per_row = {
                     k
                     for k, v in shapes.items()
@@ -955,8 +955,18 @@ class ImpactModel(BaseModel):
                 }
                 follows, failed = {}, False
                 try:
-                    if shapes and n_obs > 1 and shard_axis == "obs":
+                    if (
+                        (shapes or not return_sites)
+                        and n_obs > 1
+                        and shard_axis == "obs"
+                    ):
                         fewer = shapes_at(n_obs - 1)
+                        if not return_sites and any(
+                            fewer[k].shape != cast("dict", posterior)[k].shape[1:]
+                            for k in latent
+                            if k in fewer
+                        ):
+                            shapes = shapes_at(n_obs)
                         per_row &= {
                             k for k, v in fewer.items() if v.shape[:1] == (n_obs - 1,)
                         }
@@ -2978,7 +2988,7 @@ class ImpactModel(BaseModel):
         # A keyword array as long as the rows each device evaluates, but not as the
         # input, is passed whole, so every device would score its rows with the same
         # values; as in `predict`, the call fails when the kernel does not run on all
-        # the rows with it
+        # the rows with it but does once the array has as many
         if shard_axis == "obs" and isinstance(X, ArrayLike):
             n_obs = len(cast("Sized", X))
             rows = -(-cast("int", batch_size) // self._num_devices)
@@ -2989,17 +2999,50 @@ class ImpactModel(BaseModel):
                 arrays, static = _partition(
                     {self.param_input: X, self.param_output: y, **kwargs},
                 )
+                # The outcome depends only on the call's shapes, constants and rows per
+                # device, so a repeated call that passed reuses it
+                check = (
+                    "rows",
+                    rows,
+                    tuple((np.shape(a), jnp.result_type(a)) for a in arrays),
+                    static,
+                )
+                if check not in self._plan_cache:
 
-                def run(arrays: list) -> None:
-                    with validation_enabled(is_validate=False):
-                        trace(
-                            substitute(
-                                seed(self.kernel, rng_seed=self.rng_key),
-                                substitute_fn=init_to_sample,
-                            ),
-                        ).get_trace(**_combine(arrays, static))
+                    def run(arrays: list) -> None:
+                        with validation_enabled(is_validate=False):
+                            trace(
+                                substitute(
+                                    seed(self.kernel, rng_seed=self.rng_key),
+                                    substitute_fn=init_to_sample,
+                                ),
+                            ).get_trace(**_combine(arrays, static))
 
-                eval_shape(run, arrays)
+                    try:
+                        eval_shape(run, arrays)
+                    # A kernel that does not run on all the rows anyway, such as one
+                    # whose subsampling plate is smaller than the input, keeps its
+                    # batches
+                    except Exception:
+                        try:
+                            eval_shape(
+                                run,
+                                [
+                                    ShapeDtypeStruct(
+                                        (n_obs, *np.shape(leaf)[1:]),
+                                        jnp.result_type(leaf),
+                                    )
+                                    if np.shape(leaf)[:1] == (rows,)
+                                    else leaf
+                                    for leaf in arrays
+                                ],
+                            )
+                            misused = True
+                        except Exception:
+                            misused = False
+                        if misused:
+                            raise
+                    self._plan_cache[check] = (frozenset(), False, {})
 
         # Without a posterior every latent site is drawn from the prior, which needs a
         # seeded kernel; with one, the bare kernel keeps its identity for the cache
