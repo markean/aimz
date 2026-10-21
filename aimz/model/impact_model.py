@@ -924,7 +924,23 @@ class ImpactModel(BaseModel):
                     leaves,
                 )
 
-            # The traces depend only on the call's shapes and constants, so a repeated
+            # Whether each device evaluates one row fewer than the input, where draws
+            # that fit those rows would pass
+            fewer_rows = not return_sites and -(
+                -min(
+                    _resolve_batch_size(
+                        batch_size,
+                        axis_size=n_obs,
+                        other_size=num_samples,
+                        num_devices=self._num_devices,
+                        item_nbytes=num_samples * row_nbytes,
+                    ),
+                    n_obs,
+                )
+                // self._num_devices
+            ) == (n_obs - 1)
+            # The traces depend only on the call's shapes and constants, and for a call
+            # without return sites on the rows each device evaluates, so a repeated
             # call reuses their outcome
             key = (
                 shard_axis,
@@ -943,11 +959,12 @@ class ImpactModel(BaseModel):
                 tuple(sorted(intervention or {})),
                 posterior is None,
                 tuple((k, cast("dict", posterior)[k].shape[1:]) for k in latent),
+                fewer_rows,
             )
             if key not in self._plan_cache:
                 # A call without return sites, as `log_likelihood`, traces its rows
-                # after one row fewer and keeps its plan when either fails, as for a
-                # kernel whose subsampling plate is smaller than the input
+                # only for a latent site whose draws do not fit one row fewer, or when
+                # each device evaluates one row fewer, which would take such draws
                 shapes = shapes_at(n_obs) if return_sites else {}
                 per_row = {
                     k
@@ -962,7 +979,14 @@ class ImpactModel(BaseModel):
                         and shard_axis == "obs"
                     ):
                         fewer = shapes_at(n_obs - 1)
-                        if not return_sites:
+                        if not return_sites and (
+                            fewer_rows
+                            or any(
+                                fewer[k].shape != cast("dict", posterior)[k].shape[1:]
+                                for k in latent
+                                if k in fewer
+                            )
+                        ):
                             shapes = shapes_at(n_obs)
                         per_row &= {
                             k for k, v in fewer.items() if v.shape[:1] == (n_obs - 1,)
@@ -3006,7 +3030,7 @@ class ImpactModel(BaseModel):
         # the rows with it but does once the array has as many
         if shard_axis == "obs" and isinstance(X, ArrayLike):
             n_obs = len(cast("Sized", X))
-            rows = -(-cast("int", batch_size) // self._num_devices)
+            rows = -(-min(cast("int", batch_size), n_obs) // self._num_devices)
             if rows != n_obs and any(
                 np.shape(leaf)[:1] == (rows,)
                 for leaf in _partition(_group_kwargs(kwargs, n_obs=n_obs)[1])[0]
