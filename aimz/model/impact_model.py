@@ -204,9 +204,13 @@ class ImpactModel(BaseModel):
     def _init_runtime_attrs(self) -> None:
         """Initialize runtime attributes."""
         self._fn_vi_update: Callable | None = None
-        # The return sites a streamed call cannot split, and whether the kernel failed
-        # on one row fewer, by the call's shapes and constants
-        self._plan_cache: dict[tuple, tuple[frozenset[str], bool]] = {}
+        # The return sites a streamed call cannot split, whether the kernel failed on
+        # one row fewer, and the posterior sites whose size follows the rows, by the
+        # call's shapes and constants
+        self._plan_cache: dict[
+            tuple,
+            tuple[frozenset[str], bool, dict[str, tuple[int, ...]]],
+        ] = {}
         self._num_devices = local_device_count()
         if self._num_devices > 1:
             mesh = make_mesh(
@@ -811,12 +815,14 @@ class ImpactModel(BaseModel):
             and v.ndim >= min_aligned_ndim
             and v.shape[1] == n_obs
         )
+        # Under `obs`, several devices or batches split the rows
+        splits = self._num_devices > 1 or (
+            batch_size < n_obs
+            if batch_size is not None
+            else not _fits_single_batch(n_obs, item_nbytes=num_samples * row_nbytes)
+        )
         if shard_axis == "obs" and (self._coupled_sites or conditioned or local):
-            if self._num_devices > 1 or (
-                batch_size < n_obs
-                if batch_size is not None
-                else not _fits_single_batch(n_obs, item_nbytes=num_samples * row_nbytes)
-            ):
+            if splits:
                 reason = (
                     "The kernel computes across observations at site(s) "
                     f"{', '.join(map(repr, sorted(self._coupled_sites)))}, which "
@@ -848,13 +854,19 @@ class ImpactModel(BaseModel):
                 shard_axis, batch_size = "draw", None
             elif batch_size is None:
                 batch_size = n_obs
-        if return_sites and (shard_axis == "obs" or self.param_output in return_sites):
+        # Posterior sites a call under `obs` replicates, deterministic ones aside
+        latent = sorted(set(posterior or {}) - deterministic)
+        if (return_sites or latent) and (
+            shard_axis == "obs" or self.param_output in return_sites
+        ):
             # A site without the observation axis, such as a global deterministic site,
-            # has no rows to split. Abstract traces of this call, at its rows and at one
-            # row fewer, as in a device batch, tell the sites that follow the rows: an
-            # earlier trace may have had other arguments, and a global site may match
-            # the row count. Under `draw`, which keeps the rows whole and passes every
-            # argument whole, only the output is checked.
+            # has no rows to split, and a posterior site whose size follows the rows
+            # without one value per row, such as a random walk's increments in a plate
+            # of one row fewer, fits no device's rows. Abstract traces of this call, at
+            # its rows and at one row fewer, as in a device batch, tell the sites that
+            # follow the rows: an earlier trace may have had other arguments, and a
+            # global site may match the row count. Under `draw`, which keeps the rows
+            # whole and passes every argument whole, only the output is checked.
             n_split = n_obs if shard_axis == "obs" else None
             kwargs_rows, kwargs_const = _group_kwargs(kwargs or {}, n_obs=n_split)
             constants, fields = _split_intervention(intervention, n_split)
@@ -883,7 +895,9 @@ class ImpactModel(BaseModel):
                 ).get_trace(**model_kwargs, **_combine(leaves, static))
 
                 return {
-                    k: v["value"] for k, v in model_trace.items() if k in return_sites
+                    k: v["value"]
+                    for k, v in model_trace.items()
+                    if k in return_sites or k in latent
                 }
 
             rows = {
@@ -922,16 +936,36 @@ class ImpactModel(BaseModel):
                 ),
                 tuple(sorted(intervention or {})),
                 posterior is None,
+                tuple(latent),
             )
             if key not in self._plan_cache:
-                shapes = shapes_at(n_obs)
-                per_row = {k for k, v in shapes.items() if v.shape[:1] == (n_obs,)}
-                failed = False
                 try:
-                    if n_obs > 1 and shard_axis == "obs":
+                    shapes = shapes_at(n_obs)
+                # A call without return sites, as `log_likelihood`, keeps its plan for a
+                # kernel that runs on its batches but not on all the rows at once, such
+                # as one whose subsampling plate is smaller than the input
+                except Exception:
+                    if return_sites:
+                        raise
+                    shapes = {}
+                per_row = {
+                    k
+                    for k, v in shapes.items()
+                    if k in return_sites and v.shape[:1] == (n_obs,)
+                }
+                follows, failed = {}, False
+                try:
+                    if shapes and n_obs > 1 and shard_axis == "obs":
                         fewer = shapes_at(n_obs - 1)
                         per_row &= {
                             k for k, v in fewer.items() if v.shape[:1] == (n_obs - 1,)
+                        }
+                        follows = {
+                            k: shapes[k].shape
+                            for k in latent
+                            if k in shapes
+                            and k in fewer
+                            and fewer[k].shape != shapes[k].shape
                         }
                         # The prior draws its global sites from one row
                         if posterior is None:
@@ -940,10 +974,20 @@ class ImpactModel(BaseModel):
                 # is a fixed count, cannot be split either
                 except Exception:
                     failed = True
-                self._plan_cache[key] = (frozenset(shapes.keys() - per_row), failed)
-            unsplit, failed = self._plan_cache[key]
+                self._plan_cache[key] = (
+                    frozenset(shapes.keys() & set(return_sites)) - per_row,
+                    failed,
+                    follows,
+                )
+            unsplit, failed, follows = self._plan_cache[key]
+            # A posterior site follows the rows only if its draws fit them all
+            rowed = sorted(
+                k
+                for k, shape in follows.items()
+                if (posterior or {})[k].shape[1:] == shape
+            )
             msg, category = None, PerformanceWarning
-            if failed:
+            if failed and return_sites:
                 msg = (
                     "The kernel does not run on fewer rows than the input, so "
                     "`shard_axis='obs'` cannot split it; rerunning with "
@@ -970,6 +1014,16 @@ class ImpactModel(BaseModel):
                     "or leave the site(s) out of `return_sites`, to silence this "
                     "warning."
                 )
+            elif rowed and msg is None and splits:
+                msg = (
+                    f"The posterior site(s) {', '.join(map(repr, rowed))} have a size "
+                    "that follows the input's rows in each draw, so `shard_axis='obs'` "
+                    "cannot split them; rerunning with `shard_axis='draw'`. Pass "
+                    "`shard_axis='draw'` to silence this warning."
+                )
+            elif rowed and msg is None and batch_size is None:
+                # One batch on one device keeps the rows whole
+                batch_size = n_obs
             if msg is not None:
                 warn(msg, category=category, skip_file_prefixes=_SKIP_FILE_PREFIXES)
                 if shard_axis == "obs":
@@ -1802,6 +1856,29 @@ class ImpactModel(BaseModel):
             )
         else:
             signature(self.kernel).bind_partial(**kwargs)
+        # A keyword array as long as a batch, but not as the data, is passed whole, so
+        # every batch would get the same values; as in `fit_on_batch`, the fit fails
+        # when the kernel does not run on all the rows with it
+        if (
+            isinstance(dataloader, ArrayLoader)
+            and dataloader.batch_size < len(dataloader.dataset)
+            and any(
+                np.shape(leaf)[:1] == (dataloader.batch_size,)
+                for leaf in _partition(kwargs_extra)[0]
+            )
+        ):
+            arrays, static = _partition({**dataloader.dataset.arrays, **kwargs_extra})
+
+            def run(arrays: list) -> None:
+                with validation_enabled(is_validate=False):
+                    trace(
+                        substitute(
+                            seed(self.kernel, rng_seed=self.rng_key),
+                            substitute_fn=init_to_sample,
+                        ),
+                    ).get_trace(**_combine(arrays, static))
+
+            eval_shape(run, arrays)
         # Commit model state only once the inputs are accepted
         self._rng_key = rng_key_model
 
@@ -2403,9 +2480,9 @@ class ImpactModel(BaseModel):
                 kernel.
             PerformanceWarning: If ``shard_axis="obs"`` cannot split an array input,
                 as for a return site without an observation axis, a latent site with
-                one value per observation, or a ``condition`` value with one entry per
-                observation, which is passed whole, so the call reruns under
-                ``shard_axis="draw"``.
+                one value per observation or another size that follows the
+                observations, or a ``condition`` value with one entry per observation,
+                which is passed whole, so the call reruns under ``shard_axis="draw"``.
         """
         _check_is_fitted(self)
         _validate_shard_axis(shard_axis, X=X)
@@ -2832,8 +2909,8 @@ class ImpactModel(BaseModel):
                 computes across observations, once a call has traced the kernel.
             PerformanceWarning: If ``shard_axis="obs"`` cannot split an array input,
                 as for a kernel that computes across observations or a posterior site
-                as long as the input's rows, so the call reruns under
-                ``shard_axis="draw"``.
+                as long as the input's rows or with another size that follows them, so
+                the call reruns under ``shard_axis="draw"``.
         """
         _check_is_fitted(self)
         _validate_shard_axis(shard_axis, X=X)
@@ -2879,6 +2956,7 @@ class ImpactModel(BaseModel):
             num_samples=self._num_samples,
             nbytes=(jnp.result_type(float).itemsize, 0),
             posterior=self.posterior,
+            kwargs={**kwargs, self.param_output: y},
         )
         # One batch on one device keeps the rows of an output computed across them
         # whole, but under `obs` the log-likelihood of one drawn as an event over the
@@ -2897,6 +2975,31 @@ class ImpactModel(BaseModel):
                 nbytes=(jnp.result_type(float).itemsize, 0),
                 posterior=self.posterior,
             )
+        # A keyword array as long as the rows each device evaluates, but not as the
+        # input, is passed whole, so every device would score its rows with the same
+        # values; as in `predict`, the call fails when the kernel does not run on all
+        # the rows with it
+        if shard_axis == "obs" and isinstance(X, ArrayLike):
+            n_obs = len(cast("Sized", X))
+            rows = -(-cast("int", batch_size) // self._num_devices)
+            if rows != n_obs and any(
+                np.shape(leaf)[:1] == (rows,)
+                for leaf in _partition(_group_kwargs(kwargs, n_obs=n_obs)[1])[0]
+            ):
+                arrays, static = _partition(
+                    {self.param_input: X, self.param_output: y, **kwargs},
+                )
+
+                def run(arrays: list) -> None:
+                    with validation_enabled(is_validate=False):
+                        trace(
+                            substitute(
+                                seed(self.kernel, rng_seed=self.rng_key),
+                                substitute_fn=init_to_sample,
+                            ),
+                        ).get_trace(**_combine(arrays, static))
+
+                eval_shape(run, arrays)
 
         # Without a posterior every latent site is drawn from the prior, which needs a
         # seeded kernel; with one, the bare kernel keeps its identity for the cache

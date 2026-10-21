@@ -187,6 +187,15 @@ def test_predict_per_observation_intervention() -> None:
         streamed["posterior_predictive"]["mu"].values,
         whole["posterior_predictive"]["mu"].values,
     )
+    # A value of another length fails as on one batch, though it fits a batch's rows
+    with pytest.raises(TypeError, match="incompatible shapes"):
+        im.predict(
+            X,
+            intervention={**intervention, "z": intervention["z"][:6]},
+            batch_size=6,
+            store="memory",
+            progress=False,
+        )
 
 
 @pytest.mark.filterwarnings("ignore:subsample_size does not match")
