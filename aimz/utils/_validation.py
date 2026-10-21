@@ -303,11 +303,15 @@ def _validate_aligned_inputs(
     leading axis differs is a constant of the call.
 
     Raises:
+        TypeError: If ``X`` is an array and ``y`` is neither ``None`` nor an array.
         ValueError: If ``X`` or ``y`` is 0-D, ``X`` is empty, or ``y`` does not share
             ``X``'s leading-axis size.
     """
     if not isinstance(X, ArrayLike):
         return
+    if y is not None and not isinstance(y, ArrayLike):
+        msg = f"`y` must be an array-like, got {type(y).__name__!r}."
+        raise TypeError(msg)
     inputs: dict[str, ArrayLike] = {"X": X}
     if y is not None:
         inputs["y"] = y
@@ -458,9 +462,14 @@ def _validate_X_y_to_jax(
         ``X`` alone when ``y`` is ``None``, else ``(X, y)``.
 
     Raises:
+        TypeError: If ``X``, or ``y`` when given, is not an array.
         ValueError: If ``X`` or ``y`` is 0-D, or ``y`` does not share ``X``'s
             leading-axis size.
     """
+    for name, arr in (("X", X), ("y", y)):
+        if (name == "X" or arr is not None) and not isinstance(arr, ArrayLike):
+            msg = f"`{name}` must be an array-like, got {type(arr).__name__!r}."
+            raise TypeError(msg)
     device_x = X.device if isinstance(X, Array) and X.committed else None
     X = jnp.asarray(X, device=device_x)
     if X.ndim == 0:

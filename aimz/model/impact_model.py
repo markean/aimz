@@ -20,6 +20,7 @@ import copyreg
 import logging
 import math
 import pickle
+from collections.abc import Mapping
 from copy import copy
 from datetime import UTC, datetime
 from functools import partial
@@ -109,7 +110,7 @@ from aimz.utils.data._input_setup import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Collection, Iterable, Mapping, Sized
+    from collections.abc import Callable, Collection, Iterable, Sized
 
     from dask.array import Array as DaskArray
 
@@ -2116,6 +2117,12 @@ class ImpactModel(BaseModel):
             )
             pending: Array | None = None
             for batch in pbar:
+                if not isinstance(batch, Mapping):
+                    msg = (
+                        "`X` must be an array-like or a data loader yielding batch "
+                        f"mappings, got {type(X).__name__!r}."
+                    )
+                    raise TypeError(msg)
                 fields = dict(batch)
                 if missing := names - fields.keys():
                     msg = f"The data loader has no field named {min(missing)!r}."
