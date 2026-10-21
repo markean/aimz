@@ -209,6 +209,25 @@ def test_log_likelihood_row_sizes(monkeypatch: pytest.MonkeyPatch) -> None:
             X, y, c=np.zeros(4), batch_size=len(X) // 2, store="memory", progress=False
         )
 
+    # A kernel that does not run on all the rows anyway, as one whose subsampling plate
+    # is smaller than the input, scores a constant as long as each device's rows
+    def scaled(X: Array, y: Array | None = None, scale: Array | None = None) -> None:
+        w = sample("w", dist.Normal(jnp.zeros(X.shape[1]), scale).to_event(1))
+        with plate("data", size=100, subsample_size=X.shape[0]):
+            sample("y", dist.Normal(X @ w, 1.0), obs=y)
+
+    im = ImpactModel(scaled, rng_key=random.key(0), inference=make_svi(scaled))
+    im.set_posterior_sample({"w": np.zeros((4, 20), dtype=np.float32)})
+    dt = im.log_likelihood(
+        np.ones((300, 20), dtype=np.float32),
+        np.zeros(300, dtype=np.float32),
+        scale=np.ones(20, dtype=np.float32),
+        batch_size=20 * device_count(),
+        store="memory",
+        progress=False,
+    )
+    assert np.isfinite(dt.log_likelihood["y"].values).all()
+
     # One device evaluates all the rows in one batch, which fits the walk
     monkeypatch.setattr("aimz.model.impact_model.local_device_count", lambda: 1)
     im = ImpactModel(walk, rng_key=random.key(0), inference=make_svi(walk))
