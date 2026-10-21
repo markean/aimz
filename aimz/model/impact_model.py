@@ -945,8 +945,9 @@ class ImpactModel(BaseModel):
                 tuple((k, cast("dict", posterior)[k].shape[1:]) for k in latent),
             )
             if key not in self._plan_cache:
-                # A call without return sites, as `log_likelihood`, traces its rows only
-                # for a latent site whose draws do not fit one row fewer
+                # A call without return sites, as `log_likelihood`, traces its rows
+                # after one row fewer and keeps its plan when either fails, as for a
+                # kernel whose subsampling plate is smaller than the input
                 shapes = shapes_at(n_obs) if return_sites else {}
                 per_row = {
                     k
@@ -961,11 +962,7 @@ class ImpactModel(BaseModel):
                         and shard_axis == "obs"
                     ):
                         fewer = shapes_at(n_obs - 1)
-                        if not return_sites and any(
-                            fewer[k].shape != cast("dict", posterior)[k].shape[1:]
-                            for k in latent
-                            if k in fewer
-                        ):
+                        if not return_sites:
                             shapes = shapes_at(n_obs)
                         per_row &= {
                             k for k, v in fewer.items() if v.shape[:1] == (n_obs - 1,)
@@ -990,6 +987,24 @@ class ImpactModel(BaseModel):
                     follows,
                 )
             unsplit, failed, follows = self._plan_cache[key]
+            # A posterior site whose draws do not fit the rows fails as on one batch,
+            # though device batches with the fitted row count would take them
+            for k, shape in sorted(follows.items()):
+                draws = (posterior or {})[k].shape[1:]
+                if (
+                    k not in (intervention or {})
+                    and k not in self._observed_sites
+                    and len(draws) == len(shape)
+                    and draws != shape
+                ):
+                    err_msg = (
+                        f"Each posterior draw of site {k!r} has shape {draws}, which "
+                        f"does not fit the shape {shape} the site has for the rows "
+                        "being evaluated: a site with one value per observation fits "
+                        "only the fitted observations, and a site sized by a count "
+                        "read from the data fits only the fitted count."
+                    )
+                    raise ValueError(err_msg)
             # A posterior site follows the rows only if its draws fit them all
             rowed = sorted(
                 k
