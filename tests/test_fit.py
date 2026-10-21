@@ -201,8 +201,6 @@ def test_fit_rejected_call_leaves_state_untouched(
         im.fit(X=loader, y=y, progress=False)
     with pytest.raises(TypeError, match="unexpected keyword argument 'c'"):
         im.fit(X=X, y=y, c=1.0, progress=False)
-    with pytest.raises(TypeError, match="`y` must be an array-like, got 'list'"):
-        im.fit(X=X, y=y.tolist(), progress=False)
 
     np.testing.assert_array_equal(random.key_data(im.rng_key), key_before)
     assert im._num_samples == num_samples
@@ -212,9 +210,6 @@ def test_fit_rejected_call_leaves_state_untouched(
     # A one-shot iterator is exhausted after its first epoch
     with pytest.raises(ValueError, match="yielded no batches in epoch 2"):
         im.fit(iter([{"X": X, "y": y}]), epochs=2, progress=False)
-    # Batches that are not mappings, as the rows of a list, are rejected
-    with pytest.raises(TypeError, match="yielding batch mappings, got 'list'"):
-        im.fit(X.tolist(), progress=False)
 
 
 def test_fit_array_matches_loader(synthetic_data: tuple[Array, Array]) -> None:

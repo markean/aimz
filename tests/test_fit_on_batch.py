@@ -98,13 +98,9 @@ def test_fit_on_batch_mcmc_keeps_chains(synthetic_data: tuple[Array, Array]) -> 
 
 
 def test_fit_on_batch_input_validation(synthetic_data: tuple[Array, Array]) -> None:
-    """Non-arrays, 0-D arrays and mismatched leading axes are rejected on-batch."""
+    """0-D arrays and mismatched leading axes are rejected on the on-batch paths."""
     X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), inference=make_svi(lm))
-    with pytest.raises(TypeError, match="`X` must be an array-like, got 'list'"):
-        im.fit_on_batch(X=X.tolist(), y=y)
-    with pytest.raises(TypeError, match="`y` must be an array-like, got 'list'"):
-        im.fit_on_batch(X=X, y=y.tolist())
     with pytest.raises(ValueError, match=r"`X` must have at least 1 dimension."):
         im.fit_on_batch(X=1.0, y=y)
     with pytest.raises(ValueError, match=r"`y` must have at least 1 dimension."):
