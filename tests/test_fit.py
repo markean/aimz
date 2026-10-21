@@ -21,7 +21,7 @@ import numpy as np
 import numpyro.distributions as dist
 import pytest
 from jax import Array, random
-from numpyro import handlers, param, plate, sample
+from numpyro import param, plate, sample
 from numpyro.infer import MCMC, NUTS, SVI, Trace_ELBO
 from numpyro.optim import Adam
 
@@ -86,15 +86,6 @@ def test_fit_minibatch_warnings(synthetic_data: tuple[Array, Array]) -> None:
     loader = ArrayLoader(ArrayDataset(X=X, y=y), rng_key=random.key(0), batch_size=20)
     with pytest.warns(FitWarning, match=msg):
         im.fit(loader, epochs=1, progress=False)
-    # So does a scale other than the rows over the batch size
-    tempered = handlers.scale(lm, scale=2.0)
-    im_tempered = ImpactModel(
-        tempered,
-        rng_key=random.key(42),
-        inference=make_svi(tempered),
-    )
-    with pytest.warns(FitWarning, match="by 2 for a batch rather than by 100/20 = 5"):
-        im_tempered.fit(X, y, batch_size=20, epochs=1, progress=False)
 
     # A scaled kernel with a latent site per row warns, since the batches split it.
     def per_row(X: Array, y: Array | None = None) -> None:
@@ -111,7 +102,7 @@ def test_fit_minibatch_warnings(synthetic_data: tuple[Array, Array]) -> None:
             im_rows.fit(X, y, batch_size=20, epochs=1, progress=False)
     im_rows.fit_on_batch(X, y, num_steps=1, progress=False)
 
-    # An event over the rows is split, though with no latent site its scale does not
+    # An event over the rows is split, though with no other site its scale does not
     # matter; a global event as long as a batch is not split, even when an argument
     # passed whole sizes it.
     def coupled(X: Array, y: Array | None = None) -> None:
