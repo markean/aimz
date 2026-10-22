@@ -1996,9 +1996,10 @@ class ImpactModel(BaseModel):
                     "does not weigh as the whole data against site(s) "
                     f"{', '.join(map(repr, outside))} outside the output's plate. "
                     "Scale it in the kernel, as a plate whose `size` is the number of "
-                    "observations and whose `subsample_size` is the batch size does, "
-                    "with any site per observation and any factor chosen on purpose, "
-                    "as for tempering, inside that plate, or fit with `fit_on_batch`."
+                    "observations and whose `subsample_size` is the number in each "
+                    "batch does, with any site per observation and any factor chosen "
+                    "on purpose, as for tempering, inside that plate, or fit with "
+                    "`fit_on_batch`."
                 )
                 warn(msg, category=FitWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
             # Batches split a site that counts as computing across observations: one

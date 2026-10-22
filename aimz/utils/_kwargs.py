@@ -45,7 +45,7 @@ def _is_per_observation(value: object, n_obs: int | None) -> bool:
 
     Raises:
         ValueError: If a ragged sequence holds one entry per observation, since it
-            cannot be split with the rows.
+            cannot be split with the observations.
     """
     if n_obs is None or not _is_arraylike(value):
         return False
