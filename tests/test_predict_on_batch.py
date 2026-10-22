@@ -157,3 +157,20 @@ def test_predict_on_batch_default_names_skip_sites(
         dt = im.predict_on_batch(X)
     assert dt.posterior_predictive["mu"].dims == ("chain", "draw", "obs", "mu_dim_1")
     assert "mu_dim_0" in dt.posterior_predictive.data_vars
+
+
+def test_predict_on_batch_output_named_otherwise_without_data() -> None:
+    """A fitted kernel that names its output otherwise without data still predicts."""
+
+    def kernel(X: Array, y: Array | None = None) -> None:
+        b = sample("b", dist.Normal())
+        with plate("obs", X.shape[0]):
+            mu = deterministic("mu", b * X)
+            sample("y" if y is not None else "y_new", dist.Normal(mu, 1.0), obs=y)
+
+    X = np.linspace(-1.0, 1.0, 12)
+    im = ImpactModel(kernel, rng_key=random.key(0), inference=make_svi(kernel))
+    im.fit_on_batch(X, 2 * X, num_steps=5, num_samples=4, progress=False)
+    dt = im.predict_on_batch(X, return_sites="y_new")
+
+    assert set(dt.posterior_predictive.data_vars) == {"y_new"}

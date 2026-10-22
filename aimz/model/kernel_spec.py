@@ -21,10 +21,14 @@ from dataclasses import dataclass
 class KernelSpec:
     """The kernel structure that its traces recorded.
 
-    The kernel is traced once for each set of call arguments, told apart by their names
-    and values other than arrays, and each trace merges its sites into the spec, so a
-    site that the kernel records only for some arguments is in it once a call with
-    them has run.
+    The training and predictive methods trace the kernel once for each set of call
+    arguments, told apart by their names and values other than arrays, and each trace
+    merges its sites into the spec, so a site that the kernel records only for some
+    arguments is in it once such a call with them has run. A posterior predictive call
+    with a data loader, which has nothing to trace before its batches, and, on a traced
+    kernel, :meth:`~aimz.ImpactModel.log_likelihood` and a predictive call whose trace
+    fails, as when the kernel names the output otherwise without data, use the sites
+    traced so far.
 
     Attributes:
         traced: Whether a trace has run.

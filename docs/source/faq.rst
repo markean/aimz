@@ -239,7 +239,7 @@ A site inside the body of :external:func:`~numpyro.contrib.control_flow.scan` ke
 A deterministic site there keeps them only in a kernel with a sample site inside the body of a ``scan``; otherwise it is named like any other site, so when the number of steps equals the size of every plate around it, the plate names apply from its leading time axis on, each one axis early, and otherwise it keeps the default names.
 In a kernel with such a sample site, a deterministic site inside :external:func:`~numpyro.contrib.control_flow.cond` also keeps the default names.
 A default name that is itself a site of the group skips to the next free number, also with an :class:`~aimz.OutputWarning`.
-The plate names come from a trace of the kernel, which fitting and prior predictive sampling run, as does the first call with an array input on a model never traced before, so a posterior set with :meth:`~aimz.ImpactModel.set_posterior_sample` on a new model keeps the default names only in calls with a data loader made before then.
+The plate names come from a trace of the kernel, which fitting and prior predictive sampling run, as does each predictive call with an array input whose arguments, told apart by their names and values other than arrays, no earlier call had, so a posterior set with :meth:`~aimz.ImpactModel.set_posterior_sample` on a new model keeps the default names only in calls with a data loader made before then.
 Trees from the streaming methods are lazy, and ArviZ functions operate on loaded arrays, so call :external:meth:`~xarray.DataTree.load` on the tree first, or on a reduced result when the tree does not fit in memory.
 If desired, you can pass ``return_datatree=False`` to methods such as :meth:`~aimz.ImpactModel.predict_on_batch` to return a plain dictionary instead.
 
@@ -260,5 +260,5 @@ Calls made with ``store="memory"`` write nothing and return a Dask-backed tree w
 Does serialization persist the posterior samples?
 -------------------------------------------------
 Yes.
-Pickling (or MLflow integration via :mod:`aimz.mlflow`) preserves the posterior samples (if set) and the cached :class:`~aimz.model.KernelSpec` so retracing / re-fitting is unnecessary upon load.
+Pickling (or MLflow integration via :mod:`aimz.mlflow`) preserves the posterior samples (if set) and the cached :class:`~aimz.model.KernelSpec`, so re-fitting is unnecessary upon load.
 See :doc:`user_guide/model_persistence` or :doc:`user_guide/mlflow` for more details.

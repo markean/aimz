@@ -249,7 +249,7 @@ def _warn_missing_return_sites(
     if missing := [site for site in return_sites if site not in returned]:
         msg = (
             f"Return site(s) {', '.join(map(repr, missing))} are missing from the "
-            "output, since the kernel does not record them for the call's arguments."
+            "output, since the call does not record them for its arguments."
         )
         warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
 

@@ -20,6 +20,7 @@ import copyreg
 import logging
 import math
 import pickle
+from contextlib import suppress
 from copy import copy
 from datetime import UTC, datetime
 from functools import partial
@@ -172,6 +173,7 @@ class ImpactModel(BaseModel):
         self._dims: dict[str, tuple[str, ...]] = {}
         self._site_sizes: dict[str, tuple[int, int]] = {}
         self._observed_sites: set[str] = set()
+        self._fitted_sites: set[str] = set()
         self._coupled_sites: set[str] = set()
         self._site_parents: dict[str, set[str]] = {}
         if isinstance(rng_key, Array) and rng_key.dtype == jnp.uint32:
@@ -316,6 +318,13 @@ class ImpactModel(BaseModel):
         self.__dict__.setdefault("_dims", {})
         self.__dict__.setdefault("_site_sizes", {})
         self.__dict__.setdefault("_observed_sites", set())
+        # A model pickled by an earlier version traced only the arguments it was
+        # first called or fitted with
+        spec = self.__dict__.get("_kernel_spec")
+        self.__dict__.setdefault(
+            "_fitted_sites",
+            set(spec.sample_sites) if spec is not None and spec.traced else set(),
+        )
         self.__dict__.setdefault("_coupled_sites", set())
         self.__dict__.setdefault("_site_parents", {})
         self._init_runtime_attrs()
@@ -481,10 +490,13 @@ class ImpactModel(BaseModel):
             return sites
 
         # An abstract trace runs nothing; a kernel that reads a concrete value of an
-        # argument, as through `int`, runs once instead
+        # argument, as through `int`, runs once instead, on JAX arrays that the
+        # dependency trace below then keeps as given
         try:
             model_trace = sites_at(leaves)
         except Exception:
+            args_bound = _to_jax(args_bound)
+            leaves = _partition(args_bound)[0]
             with validation_enabled(is_validate=False):
                 model_trace = trace(
                     substitute(
@@ -571,9 +583,13 @@ class ImpactModel(BaseModel):
                 self._observed_sites.add(k)
             # A site recorded by control flow, which NumPyro marks alike for `scan` and
             # `cond`, or drawn as one event over the rows, counts as computing across
-            # observations. Each trace decides anew for the sites it records, so
-            # a trace over all the rows clears a one-element event that a one-row trace
-            # took for one over the rows.
+            # observations. The first trace and each trace with the output decide anew
+            # for the sites they record, so a trace over all the rows clears a
+            # one-element event that a one-row trace took for one over the rows; a
+            # trace with other arguments and no output keeps the marks, which every
+            # call reads.
+            if prev is not None and prev.traced and not with_output:
+                continue
             fn = v.get("fn")
             if v.get("_control_flow_done"):
                 self._coupled_sites.add(k)
@@ -620,10 +636,34 @@ class ImpactModel(BaseModel):
                 and getattr(site["value"], "shape", ())[-len(site["fn"].event_shape) :]
                 == site["fn"].event_shape
             )
-        try:
-            deps = get_dependencies(self.kernel, model_kwargs=dict(args_bound))
-        except Exception:
-            deps = {"prior_dependencies": {}}
+        # Abstract arrays stand in for NumPy arrays, uncopied, so that the kernel's
+        # operations on them are recorded, not run, as on JAX arrays; JAX arrays and
+        # scalars stay as given, as `_to_jax` keeps them. Without NumPy arrays nothing
+        # encloses the trace: JAX compares the site scales of NumPyro's abstract trace
+        # with those of an earlier one, and an enclosing trace records that comparison
+        # instead of running it
+        deps: dict[str, object] = {"prior_dependencies": {}}
+        with suppress(Exception):
+            if not any(isinstance(leaf, np.ndarray) and leaf.ndim for leaf in leaves):
+                deps = get_dependencies(self.kernel, model_kwargs=dict(args_bound))
+            else:
+                eval_shape(
+                    lambda arrays: deps.update(
+                        get_dependencies(
+                            self.kernel,
+                            model_kwargs=_combine(
+                                (
+                                    a
+                                    if isinstance(leaf, np.ndarray) and leaf.ndim
+                                    else leaf
+                                    for a, leaf in zip(arrays, leaves, strict=True)
+                                ),
+                                static,
+                            ),
+                        ),
+                    ),
+                    leaves,
+                )
         for k, v in cast("Mapping[str, Mapping]", deps["prior_dependencies"]).items():
             self._site_parents[k] = set(v) - {k}
         spec = KernelSpec(
@@ -632,6 +672,10 @@ class ImpactModel(BaseModel):
             return_sites=return_sites,
             output_observed=bool(with_output),
         )
+        # A posterior covers the sample sites of the same traces, not those only a later
+        # prediction samples, such as a forecast
+        if with_output or prev is None or not prev.traced:
+            self._fitted_sites.update(sample_sites)
         self._specs[static] = spec
         self._kernel_spec = (
             KernelSpec(
@@ -649,18 +693,24 @@ class ImpactModel(BaseModel):
     def _call_spec(self, args_bound: Mapping[str, object]) -> KernelSpec | None:
         """Return the spec of a trace of the kernel with a call's arguments.
 
-        The arguments become JAX arrays only for a new trace, as the sampling step
-        sees them. A kernel that does not run on them at once, as one whose
-        subsampling plate is smaller than the input, keeps the model's spec, for every
-        later call with these arguments too.
+        The trace is abstract, so the arguments are copied into JAX arrays only when it
+        fails, as for a kernel that reads a concrete value of an argument, which then
+        runs once on them. A traced kernel that does not run on them at once, as one
+        whose subsampling plate is smaller than the input, keeps the model's spec, for
+        every later call with these arguments too.
         """
         static = _partition(args_bound)[1]
         if static not in self._specs:
             try:
-                return self._build_kernel_spec(_to_jax(args_bound), with_output=False)
-            except (KernelValidationError, AimzWarning):
+                return self._build_kernel_spec(args_bound, with_output=False)
+            except AimzWarning:
                 raise
             except Exception:
+                # A traced kernel keeps its spec for arguments it cannot be traced
+                # with, as when it names the output otherwise without data; an
+                # untraced one has none to fall back on
+                if not (self._kernel_spec and self._kernel_spec.traced):
+                    raise
                 self._specs[static] = None
 
         return self._specs[static] or self._kernel_spec
@@ -1170,12 +1220,14 @@ class ImpactModel(BaseModel):
         output_dir: str | Path | None,
         group: str,
         attrs: Mapping[str, object] | None = None,
+        requested: Iterable[str] = (),
     ) -> xr.DataTree:
         """Run one streamed write and assemble its output tree.
 
         ``write`` streams into the artifact path, or into host memory for ``None``, and
         returns the retained site arrays, if any. A failed persistent write removes its
-        artifact path.
+        artifact path, also when a ``requested`` site missing from the output warns
+        with a warning raised as an error.
         """
         artifact_path = (
             self._create_artifact_path(output_dir) if store == "persistent" else None
@@ -1194,6 +1246,7 @@ class ImpactModel(BaseModel):
                 dims=self._dims,
                 attrs=attrs,
             )
+            _warn_missing_return_sites(requested, returned=dt[group].data_vars)
         except BaseException:
             if artifact_path is not None:
                 rmtree(artifact_path, ignore_errors=True)
@@ -1424,7 +1477,12 @@ class ImpactModel(BaseModel):
             for k, v in args_bound.items()
         }
         try:
-            spec = self._build_kernel_spec(_to_jax(probe), with_output=False)
+            static = _partition(probe)[1]
+            spec = (
+                self._specs[static] or self._kernel_spec
+                if static in self._specs
+                else self._build_kernel_spec(_to_jax(probe), with_output=False)
+            )
         except Exception:
             spec = self._call_spec(args_bound)
         _validate_intervention(intervention, kernel_spec=spec)
@@ -1450,7 +1508,7 @@ class ImpactModel(BaseModel):
         if rng_key is None:
             self._rng_key, rng_key = random.split(self._rng_key)
 
-        dt = self._stream_to_datatree(
+        return self._stream_to_datatree(
             lambda artifact_path: self._streamer.write_predictive(
                 _WriteRequest(
                     shard_axis,
@@ -1481,14 +1539,8 @@ class ImpactModel(BaseModel):
                 shard_axis=shard_axis,
                 batch_size=batch_size,
             ),
+            requested=return_sites if requested else (),
         )
-        if requested:
-            _warn_missing_return_sites(
-                return_sites,
-                returned=dt["prior_predictive"].data_vars,
-            )
-
-        return dt
 
     def sample(
         self,
@@ -1710,11 +1762,14 @@ class ImpactModel(BaseModel):
         # The setup runs the kernel outside the compiled step, on JAX arrays as the step
         # sees them, since `fit` keeps its data in NumPy. A result set through
         # `vi_result` may come with an SVI object that needs no initialization, so the
-        # trace does not depend on it
-        self._build_kernel_spec(
-            signature(self.kernel).bind(**_to_jax(batch)).arguments,
-            with_output=True,
-        )
+        # trace does not depend on it. The step's static part keys the spec too, so a
+        # step with known arguments neither binds nor converts them
+        leaves, static = _partition(batch)
+        if static not in self._specs:
+            self._specs[static] = self._build_kernel_spec(
+                signature(self.kernel).bind(**_to_jax(batch)).arguments,
+                with_output=True,
+            )
         if self._vi_state is None or svi.constrain_fn is None:
             if rng_key is None:
                 self._rng_key, rng_key = random.split(self._rng_key)
@@ -1732,7 +1787,6 @@ class ImpactModel(BaseModel):
                 return svi.update(state, **_combine(leaves, static))
 
             self._fn_vi_update = jit(update, static_argnums=2)
-        leaves, static = _partition(batch)
         self._vi_state, loss = self._fn_vi_update(self._vi_state, leaves, static)
 
         return self._vi_state, loss
@@ -2354,7 +2408,7 @@ class ImpactModel(BaseModel):
         (self._num_samples,) = batch_shapes.pop()
         spec = self._kernel_spec
         if spec is not None and spec.traced:
-            latent = set(spec.sample_sites) - self._observed_sites - {self.param_output}
+            latent = self._fitted_sites - {*self._observed_sites, self.param_output}
             if missing := sorted(latent - posterior_sample.keys()):
                 msg = (
                     "`posterior_sample` has no draws for the latent site(s) "
@@ -2665,7 +2719,7 @@ class ImpactModel(BaseModel):
 
         group = "posterior_predictive" if in_sample else "predictions"
 
-        dt = self._stream_to_datatree(
+        return self._stream_to_datatree(
             lambda artifact_path: self._streamer.write_predictive(
                 _WriteRequest(
                     shard_axis,
@@ -2702,11 +2756,8 @@ class ImpactModel(BaseModel):
                 shard_axis=shard_axis,
                 batch_size=batch_size,
             ),
+            requested=return_sites if requested else (),
         )
-        if requested:
-            _warn_missing_return_sites(return_sites, returned=dt[group].data_vars)
-
-        return dt
 
     def estimate_effect(
         self,
