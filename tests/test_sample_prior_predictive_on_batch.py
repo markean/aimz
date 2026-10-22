@@ -15,10 +15,11 @@
 """Tests for the `.sample_prior_predictive_on_batch()` method."""
 
 import numpy as np
+import pytest
 from jax import Array, random
 
 from aimz import ImpactModel
-from tests.conftest import lm, make_svi
+from tests.conftest import lm, lm_subsample, make_svi
 
 
 def test_sample_prior_predictive_on_batch_lm(
@@ -62,3 +63,15 @@ def test_sample_prior_predictive_on_batch_intervention() -> None:
 
     expected = np.broadcast_to(X.sum(axis=1) + 2, (1, 9, len(X)))
     np.testing.assert_allclose(draws[1] - draws[0], expected, atol=1e-6)
+
+
+def test_sample_prior_predictive_on_batch_kernel_error() -> None:
+    """A new model passes on the error of a kernel that cannot run on the input."""
+    X = np.ones((300, 2), dtype=np.float32)
+    im = ImpactModel(
+        lm_subsample,
+        rng_key=random.key(0),
+        inference=make_svi(lm_subsample),
+    )
+    with pytest.raises(ValueError, match="Incompatible shapes"):
+        im.sample_prior_predictive_on_batch(X)
