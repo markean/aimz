@@ -172,7 +172,8 @@ The streaming methods and :meth:`~aimz.ImpactModel.fit` give each keyword argume
 
 Each new static value compiles the kernel again, so pass a number that changes from call to call, such as a swept hyperparameter, as a JAX or NumPy array.
 An array whose leading axis happens to equal the number of observations is treated as per-observation.
-To pass such an array whole, bind it to the kernel with :external:func:`functools.partial` when creating the :class:`~aimz.ImpactModel`, wrap it in a dictionary, or give the input as a data loader, alongside which every keyword argument is a constant.
+To pass such an array whole, bind it to the kernel with :external:func:`functools.partial`, wrap it in a dictionary, or give the input as a data loader, alongside which every keyword argument is a constant.
+Pass the bound kernel wherever the kernel goes: to the :class:`~aimz.ImpactModel`, to its inference object, and to any autoguide.
 
 
 Quick Recommendations
