@@ -25,6 +25,7 @@ from numpyro.handlers import substitute, trace
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
+    from collections.abc import Set as AbstractSet
 
     from numpyro._typing import Message
 
@@ -58,7 +59,11 @@ def _pin_subsample_indices(msg: Message, n_rows: int) -> Array | None:
     return jnp.arange(subsample_size)
 
 
-def _substitute_latent(msg: Message, sample: dict[str, Array]) -> Array | None:
+def _substitute_latent(
+    msg: Message,
+    sample: dict[str, Array],
+    intervened: AbstractSet[str] = frozenset(),
+) -> Array | None:
     """Return the posterior value of a latent sample site, else ``None``.
 
     Deterministic sites are recomputed and observed sites keep their data, so neither
@@ -67,12 +72,13 @@ def _substitute_latent(msg: Message, sample: dict[str, Array]) -> Array | None:
     Raises:
         ValueError: If the value has as many dimensions as the site but another shape,
             as for a site with one value per observation and other observations, or a
-            site sized by a count and another count, unless the site is intervened on.
+            site sized by a count and another count, unless the site is in
+            ``intervened``.
     """
     if msg["type"] == "deterministic" or msg.get("is_observed", False):
         return None
     value = sample.get(msg["name"])
-    if value is not None and msg["type"] == "sample" and "_intervener_id" not in msg:
+    if value is not None and msg["type"] == "sample" and msg["name"] not in intervened:
         shape = msg["fn"].shape(msg["kwargs"]["sample_shape"])
         if jnp.ndim(value) == len(shape) and jnp.shape(value) != shape:
             err_msg = (
