@@ -54,7 +54,7 @@ A custom likelihood given as a :external:func:`~numpyro.primitives.factor` term 
 Record the output from a generative form in that case, as the spend model of :doc:`examples/hillstrom` does.
 A custom guide takes the kernel's arguments under the same names, since aimz passes them to the guide by keyword, as to the kernel: a guide with other names or positional-only parameters, which NumPyro's own ``SVI.run`` accepts by passing them positionally, fails with a ``TypeError`` when aimz fits it.
 
-A kernel without an input matrix, such as the eight schools model, takes another array with one value per row as its input:
+A kernel without covariates, such as the eight schools model, takes another array with one value per observation as its input:
 
 .. code-block:: python
 
@@ -90,7 +90,7 @@ A :external:func:`~numpyro.primitives.sample` call inside a :external:class:`~nu
 The default observation-sharded execution splits the observations between batches and devices, so such a posterior, which covers all of them, cannot be replicated there.
 
 For **local latent variables**, :meth:`~aimz.ImpactModel.predict` and :meth:`~aimz.ImpactModel.log_likelihood` detect the incompatible posterior shape, warn, and automatically rerun under draw-parallel sharding (``shard_axis="draw"``), which never splits the observation axis.
-They tell such a site by the shape of its draws, so a global latent site whose draws happen to be as long as the input's rows reruns the call too; its results stay correct, and passing ``shard_axis="draw"`` skips the check.
+They tell such a site by the shape of its draws, so a global latent site whose draws happen to be as long as the number of observations reruns the call too; its results stay correct, and passing ``shard_axis="draw"`` skips the check.
 :meth:`~aimz.ImpactModel.fit` with a ``batch_size`` smaller than the input warns with a :class:`~aimz.FitWarning` when the guide does not compute such a site from the batch, as when it keeps a value per position or plate index like :external:class:`~numpyro.infer.autoguide.AutoNormal`, since its batches then pair those values with other observations.
 A guide that computes the site from each observation's inputs, such as an amortized encoder, trains on batches without the warning.
 :meth:`~aimz.ImpactModel.sample_prior_predictive` has no posterior to replicate and needs no rerun: under ``shard_axis="obs"`` it draws local latents within each batch and shares only the global latents across batches.
@@ -98,12 +98,12 @@ See :ref:`user-guide-sharding` for how the two sharding strategies differ, when 
 A local latent's posterior applies only to the observations the model was fitted on.
 For an array input with another number of observations, prediction and :meth:`~aimz.ImpactModel.log_likelihood` raise a ``ValueError`` that names the site, unless the site is intervened on.
 The fitted values are reused without notice for an input with the same number of observations.
-A data loader is checked one device batch at a time, so a loader batch that gives each device exactly the fitted number of rows passes too.
+A data loader is checked one device batch at a time, so a loader batch that gives each device exactly the fitted number of observations passes too.
 A data loader cannot rerun under ``shard_axis="draw"``, so a call with one raises the error for the fitted observations too whenever its batches or the devices split them; pass them as an array instead.
-For an array input, the rerun also covers a local latent whose observations lie on another axis, as in nested plates, since it checks whether the shape of the site's draws follows the input's rows.
+For an array input, the rerun also covers a local latent whose observations lie on another axis, as in nested plates, since it checks whether the shape of the site's draws follows the number of observations.
 To predict other observations, draw the site from the prior: set a posterior without it, or, if it is the only latent site, use :meth:`~aimz.ImpactModel.sample_prior_predictive`, which runs ``param`` sites at their initial values.
 If it is the only latent site of a kernel with learned ``param`` sites, such as a network, pass draws of it for the new observations to :meth:`~aimz.ImpactModel.set_posterior_sample` instead, drawn from its prior or, for a guide that computes the site from the inputs, by :meth:`~aimz.ImpactModel.sample` with the new inputs; the learned values stay in use.
-A latent site inside the body of :external:func:`~numpyro.contrib.control_flow.scan` follows NumPyro's scan instead, intervened on or not: an input with fewer rows than the fitted ones raises NumPyro's ``RuntimeError``, and one with more rows takes the fitted values for the leading rows and draws the rest.
+A latent site inside the body of :external:func:`~numpyro.contrib.control_flow.scan` follows NumPyro's scan instead, intervened on or not: an input with fewer observations than the fitted ones raises NumPyro's ``RuntimeError``, and one with more takes the fitted values for the leading observations and draws the rest.
 
 A model with nested plates whose :external:func:`~numpyro.primitives.sample` sites are all observed (``obs=``) or whose latent shapes are fixed remains compatible; a model with a single plate containing one unobserved :external:func:`~numpyro.primitives.sample` site triggers the draw-parallel rerun.
 
@@ -136,23 +136,23 @@ Can my kernel compute across observations?
 ------------------------------------------
 Only when the observation axis stays whole and in order.
 aimz treats the leading axis as the observation axis and assumes observations are independent given the model parameters, so it may split and reorder that axis to scale.
-:meth:`~aimz.ImpactModel.fit` trains on batches of the rows and, when ``batch_size`` splits them, shuffles them by default.
+:meth:`~aimz.ImpactModel.fit` trains on batches of the observations and, when ``batch_size`` splits them, shuffles them by default.
 The streaming methods (:meth:`~aimz.ImpactModel.predict`, :meth:`~aimz.ImpactModel.sample_posterior_predictive`, :meth:`~aimz.ImpactModel.sample_prior_predictive`, and :meth:`~aimz.ImpactModel.log_likelihood`) process the input in batches and, under the default ``shard_axis="obs"``, split each batch across devices.
-A kernel that computes across observations, for example through a cumulative sum, a moving average, a value from a previous row, or a statistic such as the mean over all rows, then sees only part of the rows or sees them out of order.
-This happens without an error or a warning, unless the kernel's trace shows the dependence: a site recorded by :external:func:`~numpyro.contrib.control_flow.scan`, or a site drawn as one event over all the rows, such as a :external:class:`~numpyro.distributions.continuous.MultivariateNormal` over the observations.
-For such a kernel and an array input, the streaming methods warn with a :class:`~aimz.PerformanceWarning` and rerun under ``shard_axis="draw"``, which keeps the rows whole and in order, while a data loader still splits them, with an :class:`~aimz.OutputWarning`, and so does :meth:`~aimz.ImpactModel.fit` with a ``batch_size`` smaller than the input, which warns with a :class:`~aimz.FitWarning`.
+A kernel that computes across observations, for example through a cumulative sum, a moving average, a value from a previous observation, or a statistic such as the mean over all observations, then sees only part of the observations or sees them out of order.
+This happens without an error or a warning, unless the kernel's trace shows the dependence: a site recorded by :external:func:`~numpyro.contrib.control_flow.scan`, or a site drawn as one event over all the observations, such as a :external:class:`~numpyro.distributions.continuous.MultivariateNormal`.
+For such a kernel and an array input, the streaming methods warn with a :class:`~aimz.PerformanceWarning` and rerun under ``shard_axis="draw"``, which keeps the observations whole and in order, while a data loader still splits them, with an :class:`~aimz.OutputWarning`, and so does :meth:`~aimz.ImpactModel.fit` with a ``batch_size`` smaller than the input, which warns with a :class:`~aimz.FitWarning`.
 The check needs a trace of the kernel, which prior predictive sampling and the first call with an array input run, so on a model whose posterior was set with :meth:`~aimz.ImpactModel.set_posterior_sample`, a data loader given to the other streaming methods before either splits such a kernel without the warning.
-:meth:`~aimz.ImpactModel.fit` and the streaming methods count only an event exactly as long as the rows they trace, the batch for :meth:`~aimz.ImpactModel.fit`, so an event over the rows that is padded beyond them, as to a multiple of eight when their number is not a multiple of eight, or offset from them, as by an anchor point, gets neither the warning of :meth:`~aimz.ImpactModel.fit` nor the rerun of the streaming methods.
-A global event that only happens to be as long as those rows, such as a weight vector with as many entries, counts neither when the kernel also runs on more rows, since a second trace on more rows shows that its length does not follow them.
-A site recorded by :external:func:`~numpyro.contrib.control_flow.cond` counts as one recorded by ``scan``, so a kernel with such a site reruns and warns the same way, even when it computes each row from that row's inputs alone.
+:meth:`~aimz.ImpactModel.fit` and the streaming methods count only an event exactly as long as the observations they trace, the batch for :meth:`~aimz.ImpactModel.fit`, so an event over the observations that is padded beyond them, as to a multiple of eight when their number is not a multiple of eight, or offset from them, as by an anchor point, gets neither the warning of :meth:`~aimz.ImpactModel.fit` nor the rerun of the streaming methods.
+A global event that only happens to be as long as those observations, such as a weight vector with as many entries, counts neither when the kernel also runs on more observations, since a second trace on more observations shows that its length does not follow them.
+A site recorded by :external:func:`~numpyro.contrib.control_flow.cond` counts as one recorded by ``scan``, so a kernel with such a site reruns and warns the same way, even when it computes each observation from that observation's inputs alone.
 Whether a split happens depends on the input size, ``batch_size``, and the number of devices, so such a kernel can give correct results on a small input on one device and wrong results on a larger input or on several devices.
-A plate inside the body of :external:func:`~numpyro.contrib.control_flow.scan` whose ``subsample_size`` exceeds the rows it receives, as when the kernel gathers rows through its indices and :meth:`~aimz.ImpactModel.predict` or :meth:`~aimz.ImpactModel.sample_prior_predictive` splits the input, takes the rows in a random order that differs between draws, so give it no ``subsample_size`` at prediction or pass ``shard_axis="draw"``.
+A plate inside the body of :external:func:`~numpyro.contrib.control_flow.scan` whose ``subsample_size`` exceeds the observations it receives, as when the kernel gathers observations through its indices and :meth:`~aimz.ImpactModel.predict` or :meth:`~aimz.ImpactModel.sample_prior_predictive` splits the input, takes the observations in a random order that differs between draws, so give it no ``subsample_size`` at prediction or pass ``shard_axis="draw"``.
 
 There are two ways to make such a kernel safe:
 
 * **Make each observation self-contained**
 
-  Pass what each observation needs from the rest of the input as part of its own inputs, for example a precomputed statistic repeated for every row, or ``L`` related rows gathered along an extra axis to give shape ``(n, L, d)``.
+  Pass what each observation needs from the rest of the input as part of its own inputs, for example a precomputed statistic repeated for every observation, or ``L`` related observations gathered along an extra axis to give shape ``(n, L, d)``.
   Observations are then independent, so every method and execution mode gives the same result.
 
 * **Keep the observation axis whole and in order**
@@ -172,7 +172,7 @@ Inside ``scan``, a history shorter than ``X`` conditions only the leading steps,
 ``condition`` takes any sample site, but a site whose values the posterior holds keeps its posterior draws, with an :class:`~aimz.OutputWarning`, so set a latent site through ``intervention`` instead.
 Conditioning the output does not draw an enumerated discrete site that the posterior does not hold, such as a mixture assignment, from its posterior given the data: the site comes from its prior given each draw, as from NumPyro's :external:class:`~numpyro.infer.util.Predictive` without ``infer_discrete``.
 For draws from its posterior, pass the site's draws from ``Predictive(..., infer_discrete=True)`` to :meth:`~aimz.ImpactModel.set_posterior_sample` with the other posterior sites.
-The values of ``condition`` are passed whole: under ``shard_axis="obs"``, a value with one entry per row of ``X`` makes the call run under ``shard_axis="draw"``, with a :class:`~aimz.PerformanceWarning` when ``"obs"`` would split the rows, as a ``scan`` kernel does anyway, and a data loader passes such a value to each of its batches, which it does not fit.
+The values of ``condition`` are passed whole: under ``shard_axis="obs"``, a value with one entry per observation of ``X`` makes the call run under ``shard_axis="draw"``, with a :class:`~aimz.PerformanceWarning` when ``"obs"`` would split the observations, as a ``scan`` kernel does anyway, and a data loader passes such a value to each of its batches, which it does not fit.
 The history can also be passed as data: as a keyword argument that the recursion reads in place of the output, or as lag features in ``X``, such as the previous value of the output in a column.
 
 
