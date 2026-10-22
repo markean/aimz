@@ -132,7 +132,7 @@ def test_sample_prior_predictive_plate_sizes() -> None:
 
     X = np.linspace(0.0, 1.0, 8 * device_count(), dtype=np.float32)
     im = ImpactModel(lag, rng_key=random.key(0), inference=make_svi(lag))
-    with pytest.warns(OutputWarning, match="one value per row"):
+    with pytest.warns(OutputWarning, match="one value per observation"):
         dt = im.sample_prior_predictive(
             X, num_samples=4, store="memory", progress=False
         )

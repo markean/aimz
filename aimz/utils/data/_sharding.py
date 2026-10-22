@@ -150,8 +150,8 @@ def _create_sharded_sampler(
                 msg = (
                     f"Return site(s) {', '.join(map(repr, whole))} have no "
                     "observation axis, so streaming cannot split them with the "
-                    'rows. Pass an array input with `shard_axis="draw"`, or leave '
-                    "the site(s) out of `return_sites`."
+                    'observations. Pass an array input with `shard_axis="draw"`, or '
+                    "leave the site(s) out of `return_sites`."
                 )
                 raise NotImplementedError(msg)
             for site, value in out.items():

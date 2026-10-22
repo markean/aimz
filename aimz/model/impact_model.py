@@ -835,8 +835,8 @@ class ImpactModel(BaseModel):
                     "split them"
                     if conditioned
                     else "The posterior site(s) "
-                    f"{', '.join(map(repr, local))} are as long as the input's rows in "
-                    "each draw, so `shard_axis='obs'` cannot split them"
+                    f"{', '.join(map(repr, local))} are as long as the number of "
+                    "observations in each draw, so `shard_axis='obs'` cannot split them"
                 )
                 msg = (
                     f"{reason}; rerunning with `shard_axis='draw'`. Pass "
@@ -1023,10 +1023,11 @@ class ImpactModel(BaseModel):
                 ):
                     err_msg = (
                         f"Each posterior draw of site {k!r} has shape {draws}, which "
-                        f"does not fit the shape {shape} the site has for the rows "
-                        "being evaluated: a site with one value per observation fits "
-                        "only the fitted observations, and a site sized by a count "
-                        "read from the data fits only the fitted count."
+                        f"does not fit the shape {shape} the site has for the "
+                        "observations being evaluated: a site with one value per "
+                        "observation fits only the fitted observations, and a site "
+                        "sized by a count read from the data fits only the fitted "
+                        "count."
                     )
                     raise ValueError(err_msg)
             # A posterior site follows the rows only if its draws fit them all
@@ -1038,7 +1039,7 @@ class ImpactModel(BaseModel):
             msg, category = None, PerformanceWarning
             if failed and return_sites:
                 msg = (
-                    "The kernel does not run on fewer rows than the input, so "
+                    "The kernel does not run on fewer observations than the input, so "
                     "`shard_axis='obs'` cannot split it; rerunning with "
                     "`shard_axis='draw'`. Pass `shard_axis='draw'` to silence this "
                     "warning."
@@ -1047,7 +1048,7 @@ class ImpactModel(BaseModel):
             if self.param_output in whole:
                 msg = (
                     f"The output site {self.param_output!r} does not have one value "
-                    "per row of the input"
+                    "per observation of the input"
                 ) + (
                     ", so `shard_axis='obs'` cannot split it; rerunning with "
                     "`shard_axis='draw'`."
@@ -1066,9 +1067,10 @@ class ImpactModel(BaseModel):
             elif rowed and msg is None and splits:
                 msg = (
                     f"The posterior site(s) {', '.join(map(repr, rowed))} have a size "
-                    "that follows the input's rows in each draw, so `shard_axis='obs'` "
-                    "cannot split them; rerunning with `shard_axis='draw'`. Pass "
-                    "`shard_axis='draw'` to silence this warning."
+                    "that follows the number of observations in each draw, so "
+                    "`shard_axis='obs'` cannot split them; rerunning with "
+                    "`shard_axis='draw'`. Pass `shard_axis='draw'` to silence this "
+                    "warning."
                 )
             elif rowed and msg is None and batch_size is None:
                 # One batch on one device keeps the rows whole
@@ -1254,7 +1256,7 @@ class ImpactModel(BaseModel):
         if out is not None and np.shape(out)[1:2] != (len(X),):
             msg = (
                 f"The output site {self.param_output!r} does not have one value per "
-                "row of the input."
+                "observation of the input."
             )
             warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
 
@@ -1994,9 +1996,9 @@ class ImpactModel(BaseModel):
                     "does not weigh as the whole data against site(s) "
                     f"{', '.join(map(repr, outside))} outside the output's plate. "
                     "Scale it in the kernel, as a plate whose `size` is the number of "
-                    "observations and whose `subsample_size` is a batch's rows does, "
-                    "with any site per row and any factor chosen on purpose, as for "
-                    "tempering, inside that plate, or fit with `fit_on_batch`."
+                    "observations and whose `subsample_size` is the batch size does, "
+                    "with any site per observation and any factor chosen on purpose, "
+                    "as for tempering, inside that plate, or fit with `fit_on_batch`."
                 )
                 warn(msg, category=FitWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
             # Batches split a site that counts as computing across observations: one
@@ -2328,8 +2330,8 @@ class ImpactModel(BaseModel):
                 msg = (
                     f"`posterior_sample` holds site(s) {', '.join(map(repr, foreign))} "
                     "that no trace of the kernel records so far; leave out any it "
-                    "never samples, since one as long as the input's rows can still "
-                    "make a call rerun under `shard_axis='draw'`."
+                    "never samples, since one as long as the number of observations "
+                    "can still make a call rerun under `shard_axis='draw'`."
                 )
                 warn(msg, category=AimzWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
         self._posterior = posterior_sample
@@ -2453,7 +2455,7 @@ class ImpactModel(BaseModel):
         if out is not None and np.shape(out)[1:2] != (len(X),):
             msg = (
                 f"The output site {self.param_output!r} does not have one value per "
-                "row of the input."
+                "observation of the input."
             )
             warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
 
