@@ -1220,9 +1220,9 @@ class ImpactModel(BaseModel):
                 still draws its own value first; NumPyro's error names no site.
 
         Warns:
-            OutputWarning: If the output site does not have one value per row of the
-                input, or a requested return site is intervened on, since it comes back
-                with its own draws.
+            OutputWarning: If the output site does not have one value per observation
+                of the input, or a requested return site is intervened on, since it
+                comes back with its own draws.
 
         See Also:
             :meth:`~aimz.ImpactModel.sample_prior_predictive`
@@ -1335,15 +1335,16 @@ class ImpactModel(BaseModel):
             NotImplementedError: If a site's prior cannot be sampled, as for an
                 improper prior, also when the site is intervened on; or, with a data
                 loader, if a return site has no observation axis, unless it is
-                intervened on or the kernel does not run on one row fewer than a device
-                evaluates (two rows when it evaluates one), or if its axis-1 size does
-                not match the rows a device evaluates from a batch.
+                intervened on or the kernel does not run on one observation fewer than
+                a device evaluates (two when it evaluates one), or if its axis-1 size
+                does not match the number of observations a device evaluates from a
+                batch.
 
         Warns:
             OutputWarning: If a requested return site is intervened on, since it comes
                 back with its own draws, or if the output site does not have one value
-                per row of an array input; under ``shard_axis="obs"`` the call then
-                reruns under ``shard_axis="draw"``. Also if the batches of a data
+                per observation of an array input; under ``shard_axis="obs"`` the call
+                then reruns under ``shard_axis="draw"``. Also if the batches of a data
                 loader split a kernel that computes across observations.
             PerformanceWarning: If ``shard_axis="obs"`` cannot split an array input,
                 as for a return site without an observation axis, so the call reruns
@@ -1858,16 +1859,16 @@ class ImpactModel(BaseModel):
                 whose ``size`` is the number of observations or by the number of
                 observations over the batch size, while a site outside the output's
                 plate, such as a global latent or a penalty passed to ``factor``,
-                weighs against it; a scale given per row, as weights are, counts only
-                when it is one on every row. Also if the batches split a site that
-                computes across observations, or a latent site per observation that the
-                guide does not compute from the batch, such as one kept per position or
-                plate index. The checks run on the first ``batch_size`` observations
-                of an array input or of an :class:`~aimz.utils.data.ArrayLoader`;
-                another data loader has no size to compare with. Of the sites drawn as
-                one event over the rows, only an event as long as the batch is
-                checked, so one padded beyond the rows, or offset from them, trains
-                without the warning.
+                weighs against it; a scale given per observation, as weights are,
+                counts only when it is one on every observation. Also if the batches
+                split a site that computes across observations, or a latent site per
+                observation that the guide does not compute from the batch, such as one
+                kept per position or plate index. The checks run on the first
+                ``batch_size`` observations of an array input or of an
+                :class:`~aimz.utils.data.ArrayLoader`; another data loader has no size
+                to compare with. Of the sites drawn as one event over the observations,
+                only an event as long as the batch is checked, so one padded beyond the
+                observations, or offset from them, trains without the warning.
         """
         _validate_aligned_inputs(X, y=y)
         if y is None and isinstance(X, ArrayLike):
@@ -2257,8 +2258,8 @@ class ImpactModel(BaseModel):
             AimzWarning: If the output site is in ``posterior_sample``; it is removed.
                 Also if the kernel has been traced and ``posterior_sample`` holds sites
                 that no trace of it records so far, such as a guide's ``_auto_latent``;
-                leave out any the kernel never samples, since one as long as the
-                input's rows can still make a call rerun under ``shard_axis="draw"``.
+                leave out any the kernel never samples, since one as long as the number
+                of observations can still make a call rerun under ``shard_axis="draw"``.
             OutputWarning: If the kernel has been traced and ``posterior_sample`` has
                 no draws for one of its latent sample sites, which the predictive
                 methods then draw from the prior.
@@ -2392,9 +2393,9 @@ class ImpactModel(BaseModel):
                 argument of that name, which has to be renamed.
             ValueError: If ``intervention`` or ``condition`` names a site that is not a
                 sample site of the kernel, or a posterior site that is not intervened
-                on does not fit the rows being evaluated, as a site with one value per
-                observation does not fit other observations, and a site sized by a
-                count, such as the number of groups, does not fit another count.
+                on does not fit the observations being evaluated, as a site with one
+                value per observation does not fit other observations, and a site sized
+                by a count, such as the number of groups, does not fit another count.
 
         Warns:
             OutputWarning: If an intervened site reaches the output only through sites
@@ -2402,7 +2403,7 @@ class ImpactModel(BaseModel):
                 the draws do not respond to it, if a requested return site is
                 intervened on, since it comes back with its own draws, if a conditioned
                 site is one the posterior holds, since it keeps its posterior draws, or
-                if the output site does not have one value per row of the input.
+                if the output site does not have one value per observation of the input.
         """
         _check_is_fitted(self)
         X = cast("Array", _validate_X_y_to_jax(X))
@@ -2539,15 +2540,15 @@ class ImpactModel(BaseModel):
                 not ``"persistent"`` or ``"memory"``, ``output_dir`` is passed with
                 ``store="memory"``, ``X`` is 0-D or empty, ``intervention`` or
                 ``condition`` names a site that is not a sample site of the kernel, or
-                a posterior site that is not intervened on does not fit the rows being
-                evaluated, as a site with one value per observation does not fit other
-                observations, and a site sized by a count, such as the number of
+                a posterior site that is not intervened on does not fit the observations
+                being evaluated, as a site with one value per observation does not fit
+                other observations, and a site sized by a count, such as the number of
                 groups, does not fit another count.
             NotImplementedError: With a data loader, if a return site has no
                 observation axis, unless it is intervened on or the kernel does not
-                run on one row fewer than a device evaluates (two rows when it
-                evaluates one), or if its axis-1 size does not match the rows a device
-                evaluates from a batch.
+                run on one observation fewer than a device evaluates (two when it
+                evaluates one), or if its axis-1 size does not match the number of
+                observations a device evaluates from a batch.
 
         Warns:
             OutputWarning: If an intervened site reaches the output only through sites
@@ -2555,8 +2556,8 @@ class ImpactModel(BaseModel):
                 the draws do not respond to it, if a requested return site is
                 intervened on, since it comes back with its own draws, if a conditioned
                 site is one the posterior holds, since it keeps its posterior draws, or
-                if the output site does not have one value per row of an array input;
-                under ``shard_axis="obs"`` the call then reruns under
+                if the output site does not have one value per observation of an array
+                input; under ``shard_axis="obs"`` the call then reruns under
                 ``shard_axis="draw"``. Also if the batches of a data loader split a
                 kernel that computes across observations, once a call has traced the
                 kernel.
@@ -2700,7 +2701,7 @@ class ImpactModel(BaseModel):
                 ``condition`` passed through ``args_baseline`` or
                 ``args_intervention`` names a site that is not a sample site of the
                 kernel, if a posterior site that is not intervened on does not fit the
-                rows a scenario evaluates, or if the scenarios do not share a
+                observations a scenario evaluates, or if the scenarios do not share a
                 predictive group.
 
         Warns:
@@ -2980,9 +2981,9 @@ class ImpactModel(BaseModel):
                 not ``"persistent"`` or ``"memory"``, ``output_dir`` is passed with
                 ``store="memory"``, ``y`` is missing when ``X`` is array-like, ``y``
                 does not share ``X``'s leading-axis size, or a posterior site does not
-                fit the rows being evaluated, as a site with one value per observation
-                does not fit other observations, and a site sized by a count, such as
-                the number of groups, does not fit another count.
+                fit the observations being evaluated, as a site with one value per
+                observation does not fit other observations, and a site sized by a
+                count, such as the number of groups, does not fit another count.
             NotImplementedError: If a return site's axis-1 size does not match the
                 input batch size (``shard_axis="obs"`` only).
 
@@ -2991,8 +2992,8 @@ class ImpactModel(BaseModel):
                 computes across observations, once a call has traced the kernel.
             PerformanceWarning: If ``shard_axis="obs"`` cannot split an array input,
                 as for a kernel that computes across observations or a posterior site
-                as long as the input's rows or with another size that follows them, so
-                the call reruns under ``shard_axis="draw"``.
+                as long as the number of observations or with another size that
+                follows it, so the call reruns under ``shard_axis="draw"``.
         """
         _check_is_fitted(self)
         _validate_shard_axis(shard_axis, X=X)

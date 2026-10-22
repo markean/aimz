@@ -79,7 +79,7 @@ Artifacts
   - Conda / requirements / Python environment descriptors (for reproducibility)
   - Optional input example and signature (if ``log_input_examples`` or ``log_model_signatures`` are enabled and ``log_models=True``), where:
 
-    + An input example is copied from the first few rows of the data passed to :meth:`~aimz.ImpactModel.fit` or :meth:`~aimz.ImpactModel.fit_on_batch`, before training starts.
+    + An input example is copied from the first few observations of the data passed to :meth:`~aimz.ImpactModel.fit` or :meth:`~aimz.ImpactModel.fit_on_batch`, before training starts.
     + If the first positional argument (``X``) is an :class:`~aimz.utils.data.ArrayLoader`, the example is built from its underlying arrays except for the output variable.
     + A signature is inferred by running a short forward pass through :meth:`~aimz.ImpactModel.predict` on the input example, with the ``progress``, ``return_datatree``, and ``seed`` parameters recorded in the signature so they can be passed at inference time.
     + Non-array keyword arguments passed to the kernel, such as a scalar hyperparameter, are logged as parameters.

@@ -18,7 +18,7 @@ Each batch must satisfy the following:
 * Field names and the shapes beyond the leading axis stay the same from batch to batch.
 
 Batches may differ in size, and the loader does not need to define ``__len__``.
-Padding for multi-device sharding and device placement are handled by aimz one batch at a time, so a loader yields exactly its own rows.
+Padding for multi-device sharding and device placement are handled by aimz one batch at a time, so a loader yields exactly its own observations.
 Streamed results are written in the order the batches arrive, so a loader used for prediction or likelihood evaluation should yield the data in a fixed order.
 
 A generator is the simplest data loader:
@@ -145,7 +145,7 @@ With ``batch_size=None``, :meth:`~aimz.ImpactModel.fit` uses the whole dataset a
 
 .. note::
 
-    :class:`~aimz.utils.data.ArrayLoader` does not shuffle by default (``shuffle=False``), which is what prediction requires: streamed output is written in input order, so a ``shuffle=True`` loader would misalign the results with the input rows.
+    :class:`~aimz.utils.data.ArrayLoader` does not shuffle by default (``shuffle=False``), which is what prediction requires: streamed output is written in input order, so a ``shuffle=True`` loader would misalign the results with the input's observations.
     Enable ``shuffle=True`` only for training/fit loops.
 
 

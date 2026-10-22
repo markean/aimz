@@ -155,9 +155,9 @@ The streaming methods and :meth:`~aimz.ImpactModel.fit` give each keyword argume
 * **Constant:** every other value is passed whole to every batch.
   Arrays, including 0-D arrays and NumPy scalars, are traced, so their values can change between calls without recompiling, but the kernel cannot read them, for example to set a shape.
   Other values, such as Python integers, floats, booleans, and strings, are passed as static Python values, so they can set shapes or drive control flow in the kernel.
-  A dictionary is passed whole and never split with the rows, and so is a list or tuple without one entry per observation; their leaves are traced or static by the same rules.
-  A list or tuple with one entry per observation is batched as the array NumPy stacks it into, and raises a ``ValueError`` when NumPy cannot stack it, as for entries of different shapes, so pad its entries into an array, or wrap one whose length matches the rows only by chance in a dictionary.
-  So give a per-observation array a keyword argument of its own: inside a dictionary, it keeps all its rows when the input is split, so :meth:`~aimz.ImpactModel.log_likelihood` on several devices and :meth:`~aimz.ImpactModel.fit` with a ``batch_size`` smaller than the input raise an error, except that :meth:`~aimz.ImpactModel.fit` with a ``batch_size`` of one gives wrong results without an error.
+  A dictionary is passed whole and never split with the observations, and so is a list or tuple without one entry per observation; their leaves are traced or static by the same rules.
+  A list or tuple with one entry per observation is batched as the array NumPy stacks it into, and raises a ``ValueError`` when NumPy cannot stack it, as for entries of different shapes, so pad its entries into an array, or wrap one whose length matches the number of observations only by chance in a dictionary.
+  So give a per-observation array a keyword argument of its own: inside a dictionary, it keeps all its observations when the input is split, so :meth:`~aimz.ImpactModel.log_likelihood` on several devices and :meth:`~aimz.ImpactModel.fit` with a ``batch_size`` smaller than the input raise an error, except that :meth:`~aimz.ImpactModel.fit` with a ``batch_size`` of one gives wrong results without an error.
 
 .. code-block:: python
 
@@ -181,7 +181,7 @@ Quick Recommendations
 * Need results beyond the model's lifetime: keep the default persistent store and pass an explicit ``output_dir``.
 * Results fit in RAM and you iterate on summaries, group-bys, or plots: pass ``store="memory"`` to skip the Zarr_ layer (same lazy Dask_ tree, chunks resident in memory) while keeping batched (and sharded) execution; see :ref:`in-memory-results`.
 * Small data, rapid iteration, CI, or read-only / ephemeral filesystem: use on-batch (``*_on_batch``), or streaming with ``store="memory"``, which also writes nothing.
-* If :meth:`~aimz.ImpactModel.predict` warns that posterior sites are as long as the input's rows, it automatically reruns under ``shard_axis="draw"``.
+* If :meth:`~aimz.ImpactModel.predict` warns that posterior sites are as long as the number of observations, it automatically reruns under ``shard_axis="draw"``.
   Pass ``shard_axis="draw"`` explicitly to silence the warning.
   For posterior shapes that remain incompatible with chunked execution, call :meth:`~aimz.ImpactModel.predict_on_batch` directly.
 * Custom training loop: iterate with :meth:`~aimz.ImpactModel.train_on_batch`.
