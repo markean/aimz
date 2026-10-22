@@ -99,6 +99,7 @@ from aimz.utils._validation import (
     _validate_shard_axis,
     _validate_store,
     _validate_X_y_to_jax,
+    _warn_missing_return_sites,
     _warn_unreachable_intervention,
 )
 from aimz.utils.data import ArrayLoader
@@ -212,6 +213,8 @@ class ImpactModel(BaseModel):
             tuple,
             tuple[frozenset[str], bool, dict[str, tuple[int, ...]]],
         ] = {}
+        # The spec of each set of call arguments traced so far, by their static part
+        self._specs: dict[tuple, KernelSpec | None] = {}
         self._num_devices = local_device_count()
         if self._num_devices > 1:
             mesh = make_mesh(
@@ -297,6 +300,7 @@ class ImpactModel(BaseModel):
                 in {
                     "_num_devices",
                     "_plan_cache",
+                    "_specs",
                     "_temp_dir",
                     "_streamer",
                 }
@@ -426,24 +430,24 @@ class ImpactModel(BaseModel):
         with_output: bool,
         rows_more: int | None = None,
         whole: Collection[str] = (),
-    ) -> None:
-        """Trace the kernel and record its sites, unless a sufficient spec exists.
+    ) -> KernelSpec:
+        """Trace the kernel once for each set of call arguments and record its sites.
 
-        A spec traced without an observed output is upgraded by a trace with one,
-        merging the sites, since a kernel may define sites only when data are supplied.
-        The trace is abstract, unless the kernel reads a concrete value of an argument.
-        A site marked for an event as long as the rows loses its mark when a trace at
-        ``rows_more`` rows, twice the rows by default, gives it the same event length;
-        the arguments named in ``whole`` keep their shape there, and a failed trace
-        keeps every mark.
+        The sets differ by the arguments' names and values other than arrays, since a
+        kernel may define sites only for some of them, as when data are supplied or a
+        forecast is asked for. A new set merges its sites into the model's spec and
+        keeps a spec of its own. The trace is abstract, unless the kernel reads a
+        concrete value of an argument. A site marked for an event as long as the rows
+        loses its mark when a trace at ``rows_more`` rows, twice the rows by default,
+        gives it the same event length; the arguments named in ``whole`` keep their
+        shape there, and a failed trace keeps every mark.
+
+        Returns:
+            The spec of the trace with these arguments.
         """
-        if self._kernel_spec:
-            if with_output:
-                if self._kernel_spec.output_observed:
-                    return
-            elif self._kernel_spec.traced:
-                return
         leaves, static = _partition(args_bound)
+        if (spec := self._specs.get(static)) is not None:
+            return spec
 
         def sites_at(arrays: list) -> dict[str, dict]:
             sites: dict[str, dict] = {}
@@ -622,16 +626,44 @@ class ImpactModel(BaseModel):
             deps = {"prior_dependencies": {}}
         for k, v in cast("Mapping[str, Mapping]", deps["prior_dependencies"]).items():
             self._site_parents[k] = set(v) - {k}
-        if prev is not None and prev.traced:
-            sample_sites = tuple(dict.fromkeys(prev.sample_sites + sample_sites))
-            return_sites = tuple(dict.fromkeys(return_sites + prev.return_sites))
-        output_observed = bool(with_output)
-        self._kernel_spec = KernelSpec(
+        spec = KernelSpec(
             traced=True,
             sample_sites=sample_sites,
             return_sites=return_sites,
-            output_observed=output_observed,
+            output_observed=bool(with_output),
         )
+        self._specs[static] = spec
+        self._kernel_spec = (
+            KernelSpec(
+                traced=True,
+                sample_sites=tuple(dict.fromkeys(prev.sample_sites + sample_sites)),
+                return_sites=tuple(dict.fromkeys(return_sites + prev.return_sites)),
+                output_observed=prev.output_observed or bool(with_output),
+            )
+            if prev is not None and prev.traced
+            else spec
+        )
+
+        return spec
+
+    def _call_spec(self, args_bound: Mapping[str, object]) -> KernelSpec | None:
+        """Return the spec of a trace of the kernel with a call's arguments.
+
+        The arguments become JAX arrays only for a new trace, as the sampling step
+        sees them. A kernel that does not run on them at once, as one whose
+        subsampling plate is smaller than the input, keeps the model's spec, for every
+        later call with these arguments too.
+        """
+        static = _partition(args_bound)[1]
+        if static not in self._specs:
+            try:
+                return self._build_kernel_spec(_to_jax(args_bound), with_output=False)
+            except (KernelValidationError, AimzWarning):
+                raise
+            except Exception:
+                self._specs[static] = None
+
+        return self._specs[static] or self._kernel_spec
 
     def _recomputed_sites(self) -> set[str]:
         """Return the posterior sites traced as deterministic with a value per row.
@@ -651,36 +683,24 @@ class ImpactModel(BaseModel):
         self,
         return_sites: str | Iterable[str] | None,
         intervention: Mapping[str, object] | None = None,
+        spec: KernelSpec | None = None,
     ) -> tuple[str, ...]:
         """Return the requested site names as a tuple, or the default return sites.
 
+        The defaults are those of ``spec``, the spec of the call's arguments, or else
+        of the model's spec.
+
         Warns:
-            OutputWarning: If a requested site was not seen in any trace so far; the
-                name is passed through, since a kernel may define it only at sampling
-                time. Also if a requested site is intervened on, since it comes back
+            OutputWarning: If a requested site is intervened on, since it comes back
                 with its own draws, not the set value.
         """
-        spec = self._kernel_spec
         if return_sites is None:
-            return cast("KernelSpec", spec).return_sites
+            return cast("KernelSpec", spec or self._kernel_spec).return_sites
         requested = (
             (return_sites,)
             if isinstance(return_sites, str)
             else tuple(str(s) for s in return_sites)
         )
-        if spec is not None and spec.traced:
-            known = set(spec.sample_sites) | set(spec.return_sites)
-            unknown = [site for site in requested if site not in known]
-            if unknown:
-                msg = (
-                    f"Return site(s) not seen in any trace so far: "
-                    f"{', '.join(map(repr, unknown))}. They are passed through, but "
-                    "will be missing from the output unless the kernel defines them "
-                    "at sampling time."
-                )
-                warn(
-                    msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES
-                )
         if intervened := [site for site in requested if site in (intervention or {})]:
             msg = (
                 f"Return site(s) {', '.join(map(repr, intervened))} are intervened on, "
@@ -1224,7 +1244,7 @@ class ImpactModel(BaseModel):
         Warns:
             OutputWarning: If the output site does not have one value per observation
                 of the input, or a requested return site is intervened on, since it
-                comes back with its own draws.
+                comes back with its own draws, or missing from the output.
 
         See Also:
             :meth:`~aimz.ImpactModel.sample_prior_predictive`
@@ -1232,8 +1252,13 @@ class ImpactModel(BaseModel):
         X = cast("Array", _validate_X_y_to_jax(X))
 
         args_bound = _to_jax(self._bind_kernel_args(X, kwargs=kwargs))
-        self._build_kernel_spec(args_bound, with_output=False)
-        _validate_intervention(intervention, kernel_spec=self._kernel_spec)
+        spec = self._call_spec(args_bound)
+        _validate_intervention(intervention, kernel_spec=spec)
+        sites = self._coerce_return_sites(
+            return_sites,
+            intervention=intervention,
+            spec=spec,
+        )
 
         if rng_key is None:
             self._rng_key, rng_key = random.split(self._rng_key)
@@ -1242,16 +1267,15 @@ class ImpactModel(BaseModel):
             _sample_forward(
                 self.kernel,
                 rng_keys=random.split(rng_key, num=num_samples),
-                return_sites=self._coerce_return_sites(
-                    return_sites,
-                    intervention=intervention,
-                ),
+                return_sites=sites,
                 samples=None,
                 params=None,
                 intervention=_to_jax(intervention or {}),
                 model_kwargs=args_bound,
             ),
         )
+        if return_sites is not None:
+            _warn_missing_return_sites(sites, returned=prior_predictive_samples)
         out = prior_predictive_samples.get(self.param_output)
         if out is not None and np.shape(out)[1:2] != (len(X),):
             msg = (
@@ -1344,10 +1368,11 @@ class ImpactModel(BaseModel):
 
         Warns:
             OutputWarning: If a requested return site is intervened on, since it comes
-                back with its own draws, or if the output site does not have one value
-                per observation of an array input; under ``shard_axis="obs"`` the call
-                then reruns under ``shard_axis="draw"``. Also if the batches of a data
-                loader split a kernel that computes across observations.
+                back with its own draws, or missing from the output, or if the output
+                site does not have one value per observation of an array input; under
+                ``shard_axis="obs"`` the call then reruns under ``shard_axis="draw"``.
+                Also if the batches of a data loader split a kernel that computes
+                across observations.
             PerformanceWarning: If ``shard_axis="obs"`` cannot split an array input,
                 as for a return site without an observation axis, so the call reruns
                 under ``shard_axis="draw"``.
@@ -1394,20 +1419,21 @@ class ImpactModel(BaseModel):
         # Trace a one-row probe of the per-observation arguments, on JAX arrays as the
         # sampling step runs the kernel; a kernel that does not run on one row, such as
         # one whose plate needs several rows, is traced on all the rows
-        if not (self._kernel_spec and self._kernel_spec.traced):
-            probe = {
-                k: (jnp.asarray(cast("Any", v)[:1]) if k in obs_names else v)
-                for k, v in args_bound.items()
-            }
-            try:
-                self._build_kernel_spec(_to_jax(probe), with_output=False)
-            except Exception:
-                self._build_kernel_spec(_to_jax(args_bound), with_output=False)
-        _validate_intervention(intervention, kernel_spec=self._kernel_spec)
+        probe = {
+            k: (jnp.asarray(cast("Any", v)[:1]) if k in obs_names else v)
+            for k, v in args_bound.items()
+        }
+        try:
+            spec = self._build_kernel_spec(_to_jax(probe), with_output=False)
+        except Exception:
+            spec = self._call_spec(args_bound)
+        _validate_intervention(intervention, kernel_spec=spec)
 
+        requested = return_sites is not None
         return_sites = self._coerce_return_sites(
             return_sites,
             intervention=intervention,
+            spec=spec,
         )
         shard_axis, batch_size = self._plan_execution(
             X,
@@ -1424,7 +1450,7 @@ class ImpactModel(BaseModel):
         if rng_key is None:
             self._rng_key, rng_key = random.split(self._rng_key)
 
-        return self._stream_to_datatree(
+        dt = self._stream_to_datatree(
             lambda artifact_path: self._streamer.write_predictive(
                 _WriteRequest(
                     shard_axis,
@@ -1456,6 +1482,13 @@ class ImpactModel(BaseModel):
                 batch_size=batch_size,
             ),
         )
+        if requested:
+            _warn_missing_return_sites(
+                return_sites,
+                returned=dt["prior_predictive"].data_vars,
+            )
+
+        return dt
 
     def sample(
         self,
@@ -1492,6 +1525,9 @@ class ImpactModel(BaseModel):
                 is not passed when the inference method is MCMC, or SVI whose guide has
                 not run yet, as with a ``vi_result`` from another SVI object; one
                 missing argument is named at a time.
+
+        Warns:
+            OutputWarning: If a requested return site is missing from the output.
         """
         kwargs = _to_jax(kwargs)
         if isinstance(self.inference, MCMC):
@@ -1540,15 +1576,19 @@ class ImpactModel(BaseModel):
                 rng_key, rng_init = random.split(rng_key)
                 self.inference.init(rng_init, **args_bound)
             spec = self._kernel_spec
+            requested = return_sites is not None
             if return_sites is None and spec is not None and spec.output_observed:
                 return_sites = spec.sample_sites
+            sites = (
+                self._coerce_return_sites(return_sites)
+                if return_sites is not None
+                else None
+            )
             posterior_samples = device_get(
                 _sample_forward(
                     self.inference.guide,
                     rng_keys=random.split(rng_key, num=num_samples),
-                    return_sites=self._coerce_return_sites(return_sites)
-                    if return_sites is not None
-                    else None,
+                    return_sites=sites,
                     samples=None,
                     params={
                         **self.vi_result.params,
@@ -1558,6 +1598,8 @@ class ImpactModel(BaseModel):
                     model_kwargs=kwargs,
                 ),
             )
+            if requested:
+                _warn_missing_return_sites(sites or (), returned=posterior_samples)
 
         if not return_datatree:
             return posterior_samples
@@ -1669,11 +1711,10 @@ class ImpactModel(BaseModel):
         # sees them, since `fit` keeps its data in NumPy. A result set through
         # `vi_result` may come with an SVI object that needs no initialization, so the
         # trace does not depend on it
-        if not (self._kernel_spec and self._kernel_spec.output_observed):
-            self._build_kernel_spec(
-                signature(self.kernel).bind(**_to_jax(batch)).arguments,
-                with_output=True,
-            )
+        self._build_kernel_spec(
+            signature(self.kernel).bind(**_to_jax(batch)).arguments,
+            with_output=True,
+        )
         if self._vi_state is None or svi.constrain_fn is None:
             if rng_key is None:
                 self._rng_key, rng_key = random.split(self._rng_key)
@@ -2268,8 +2309,8 @@ class ImpactModel(BaseModel):
                 methods then draw from the prior.
 
         Note:
-            The kernel is not traced here. Prior predictive sampling or the first call
-            with an array input traces it, and calls then return its deterministic
+            The kernel is not traced here. Prior predictive sampling or a call with an
+            array input traces it, and calls then return its deterministic
             sites by default, as on a fitted model; until then a call with a data
             loader knows no deterministic sites, which have to be requested through
             ``return_sites``. If the kernel has ``param`` sites, also set
@@ -2404,22 +2445,22 @@ class ImpactModel(BaseModel):
             OutputWarning: If an intervened site reaches the output only through sites
                 whose values are taken from the posterior or intervened on, so that
                 the draws do not respond to it, if a requested return site is
-                intervened on, since it comes back with its own draws, if a conditioned
-                site is one the posterior holds, since it keeps its posterior draws, or
-                if the output site does not have one value per observation of the input.
+                intervened on, since it comes back with its own draws, or missing from
+                the output, if a conditioned site is one the posterior holds, since it
+                keeps its posterior draws, or if the output site does not have one value
+                per observation of the input.
         """
         _check_is_fitted(self)
         X = cast("Array", _validate_X_y_to_jax(X))
 
         args_bound = _to_jax(self._bind_kernel_args(X, kwargs=kwargs))
-        # A posterior set on a new model leaves the kernel untraced; the checks below
-        # and the output's sites and names need its trace
-        if not (self._kernel_spec and self._kernel_spec.traced):
-            self._build_kernel_spec(args_bound, with_output=False)
-        _validate_intervention(intervention, kernel_spec=self._kernel_spec)
+        # The checks below and the output's sites and names follow a trace of the
+        # kernel with the call's own arguments
+        spec = self._call_spec(args_bound)
+        _validate_intervention(intervention, kernel_spec=spec)
         _validate_condition(
             condition,
-            kernel_spec=self._kernel_spec,
+            kernel_spec=spec,
             fixed=(self._posterior or {}).keys(),
         )
         _warn_unreachable_intervention(
@@ -2432,14 +2473,16 @@ class ImpactModel(BaseModel):
         if rng_key is None:
             self._rng_key, rng_key = random.split(self._rng_key)
 
+        sites = self._coerce_return_sites(
+            return_sites,
+            intervention=intervention,
+            spec=spec,
+        )
         samples = device_get(
             _sample_forward(
                 self.kernel,
                 rng_keys=random.split(rng_key, num=self._num_samples),
-                return_sites=self._coerce_return_sites(
-                    return_sites,
-                    intervention=intervention,
-                ),
+                return_sites=sites,
                 samples=self._streamer.place_posterior(self.posterior, sharding=None),
                 params={
                     **self.vi_result.params,
@@ -2452,6 +2495,8 @@ class ImpactModel(BaseModel):
                 model_kwargs=args_bound,
             ),
         )
+        if return_sites is not None:
+            _warn_missing_return_sites(sites, returned=samples)
         out = samples.get(self.param_output)
         if out is not None and np.shape(out)[1:2] != (len(X),):
             msg = (
@@ -2557,10 +2602,11 @@ class ImpactModel(BaseModel):
             OutputWarning: If an intervened site reaches the output only through sites
                 whose values are taken from the posterior or intervened on, so that
                 the draws do not respond to it, if a requested return site is
-                intervened on, since it comes back with its own draws, if a conditioned
-                site is one the posterior holds, since it keeps its posterior draws, or
-                if the output site does not have one value per observation of an array
-                input; under ``shard_axis="obs"`` the call then reruns under
+                intervened on, since it comes back with its own draws, or missing from
+                the output, if a conditioned site is one the posterior holds, since it
+                keeps its posterior draws, or if the output site does not have one value
+                per observation of an array input; under ``shard_axis="obs"`` the call
+                then reruns under
                 ``shard_axis="draw"``. Also if the batches of a data loader split a
                 kernel that computes across observations, once a call has traced the
                 kernel.
@@ -2576,16 +2622,16 @@ class ImpactModel(BaseModel):
         _validate_store(store, output_dir=output_dir)
         _validate_aligned_inputs(X, y=None)
 
+        # The checks below and planning follow a trace of the kernel with the call's
+        # own arguments; a data loader has none before its batches, so it takes the
+        # sites of every trace so far
+        spec = self._kernel_spec
         if isinstance(X, ArrayLike):
-            args_bound = self._bind_kernel_args(X, kwargs=kwargs)
-            # A posterior set on a new model leaves the kernel untraced; the checks
-            # below and planning need its sites
-            if not (self._kernel_spec and self._kernel_spec.traced):
-                self._build_kernel_spec(_to_jax(args_bound), with_output=False)
-        _validate_intervention(intervention, kernel_spec=self._kernel_spec)
+            spec = self._call_spec(self._bind_kernel_args(X, kwargs=kwargs))
+        _validate_intervention(intervention, kernel_spec=spec)
         _validate_condition(
             condition,
-            kernel_spec=self._kernel_spec,
+            kernel_spec=spec,
             fixed=(self._posterior or {}).keys(),
         )
         _warn_unreachable_intervention(
@@ -2595,9 +2641,11 @@ class ImpactModel(BaseModel):
             fixed=(self._posterior or {}).keys(),
         )
 
+        requested = return_sites is not None
         return_sites = self._coerce_return_sites(
             return_sites,
             intervention=intervention,
+            spec=spec,
         )
         shard_axis, batch_size = self._plan_execution(
             X,
@@ -2617,7 +2665,7 @@ class ImpactModel(BaseModel):
 
         group = "posterior_predictive" if in_sample else "predictions"
 
-        return self._stream_to_datatree(
+        dt = self._stream_to_datatree(
             lambda artifact_path: self._streamer.write_predictive(
                 _WriteRequest(
                     shard_axis,
@@ -2655,6 +2703,10 @@ class ImpactModel(BaseModel):
                 batch_size=batch_size,
             ),
         )
+        if requested:
+            _warn_missing_return_sites(return_sites, returned=dt[group].data_vars)
+
+        return dt
 
     def estimate_effect(
         self,
@@ -2715,19 +2767,37 @@ class ImpactModel(BaseModel):
         """
         if output_baseline is None or output_intervention is None:
             _check_is_fitted(self)
+        _predict = cast(
+            "Callable[..., xr.DataTree]",
+            self.predict_on_batch if on_batch else self.predict,
+        )
+        named = {
+            name
+            for name, p in signature(_predict).parameters.items()
+            if p.kind is not p.VAR_KEYWORD
+        }
         for output, args in (
             (output_baseline, args_baseline),
             (output_intervention, args_intervention),
         ):
             if output is None and args is not None:
-                _validate_intervention(
-                    args.get("intervention"),
-                    kernel_spec=self._kernel_spec,
+                # As its call does, a scenario with an array input is checked against
+                # a trace of the kernel with its own arguments
+                spec = (
+                    self._call_spec(
+                        self._bind_kernel_args(
+                            args["X"],
+                            kwargs={k: v for k, v in args.items() if k not in named},
+                        ),
+                    )
+                    if isinstance(args.get("X"), ArrayLike)
+                    else self._kernel_spec
                 )
+                _validate_intervention(args.get("intervention"), kernel_spec=spec)
                 # The scenario's own call warns for sites the posterior holds
                 _validate_condition(
                     args.get("condition"),
-                    kernel_spec=self._kernel_spec,
+                    kernel_spec=spec,
                     fixed=frozenset(),
                 )
 
@@ -2740,10 +2810,6 @@ class ImpactModel(BaseModel):
             )
             raise ValueError(msg)
 
-        _predict = cast(
-            "Callable[..., xr.DataTree]",
-            self.predict_on_batch if on_batch else self.predict,
-        )
         overrides = {"return_datatree": True} if on_batch else {}
 
         # Lazily generated scenarios share one sampling key

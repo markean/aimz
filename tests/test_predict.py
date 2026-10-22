@@ -133,7 +133,7 @@ def test_predict_warns_on_unknown_return_site(
 ) -> None:
     """`.predict()` warns on a return site absent from the kernel trace."""
     X, _ = synthetic_data
-    with pytest.warns(OutputWarning, match=r"not seen in any trace so far: 'typo'"):
+    with pytest.warns(OutputWarning, match=r"'typo' are missing from the output"):
         im_lm_svi_fitted.predict(X=X, return_sites="typo", progress=False)
 
 
