@@ -223,7 +223,8 @@ def test_estimate_effect_scenario_compatibility(
         )
 
     # A site named differently in the two scenarios takes the intervention's names, or
-    # new default names where the baseline uses those, keeping its labels
+    # new default names where the baseline uses those, keeping its labels; the event
+    # name that a site of one branch takes gives way in both
     def kernel(X: Array, y: Array | None = None, *, report: bool = False) -> None:
         w = sample(
             "w", dist.Normal().expand([4]).to_event(1), infer={"event_dims": ["q"]}
@@ -252,11 +253,9 @@ def test_estimate_effect_scenario_compatibility(
                 args_intervention=args_intervention,
                 on_batch=True,
             )
-        assert any(
-            "'mu', 'w' have other dimension names" in str(w.message) for w in record
-        )
+        assert any("'mu' have other dimension names" in str(w.message) for w in record)
         w, mu = effect.posterior_predictive["w"], effect.posterior_predictive["mu"]
-        assert w.dims == ("chain", "draw", f"w_dim_{i}")
+        assert w.dims == ("chain", "draw", "w_dim_1")
         assert mu.dims == ("chain", "draw", "obs", f"mu_dim_{i}")
         assert "obs" in mu.coords
         assert (w == 0).all()

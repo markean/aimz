@@ -19,18 +19,19 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class KernelSpec:
-    """The kernel structure that a trace recorded.
+    """The kernel structure that its traces recorded.
 
-    A trace with an observed output upgrades a spec traced without one, merging the
-    sites. Sites that appear only under specific arguments are not discovered and must
-    be requested through ``return_sites``.
+    The kernel is traced once for each set of call arguments, told apart by their names
+    and values other than arrays, and each trace merges its sites into the spec, so a
+    site that the kernel records only for some arguments is in it once a call with
+    them has run.
 
     Attributes:
         traced: Whether a trace has run.
         sample_sites: The sample sites, latent and observed, seen in traces.
         return_sites: The default return sites: the output, then the deterministic
             sites.
-        output_observed: Whether the output site was observed in the validating trace.
+        output_observed: Whether a trace observed the output site.
     """
 
     traced: bool

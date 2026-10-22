@@ -210,8 +210,8 @@ See :doc:`user_guide/streaming_and_on_batch` for a detailed comparison of both a
 
 How do I control which variables (sites) are sampled?
 -----------------------------------------------------
-By default, prediction and sampling methods use the set of return sites cached in :attr:`~aimz.model.KernelSpec.return_sites`, typically the model output plus any deterministic sites discovered during the first trace.
-To override this behavior, pass ``return_sites=(...)`` explicitly to the relevant methods.
+By default, a call returns the output and the deterministic sites that a trace of the kernel with the call's arguments records; :meth:`~aimz.ImpactModel.predict` with a data loader, which has nothing to trace before its batches, returns those of every trace so far, :attr:`~aimz.model.KernelSpec.return_sites`.
+To override this, pass ``return_sites=(...)``; a requested site missing from the output warns with an :class:`~aimz.OutputWarning`.
 
 
 How to ensure reproducible results?

@@ -185,6 +185,6 @@ def test_dual_branch_kernel_sites(synthetic_data: tuple[Array, Array]) -> None:
     assert "z" in im.kernel_spec.sample_sites
     assert im.kernel_spec.return_sites == ("y", "mu")
     with warnings.catch_warnings():
-        warnings.filterwarnings("error", message=".*not seen in any trace.*")
+        warnings.filterwarnings("error", message=".*missing from the output.*")
         dt = im.predict_on_batch(X, return_sites=["z"])
     assert "z" in dt["posterior_predictive"]

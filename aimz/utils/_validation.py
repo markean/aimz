@@ -35,7 +35,7 @@ from aimz._exceptions import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Container, Iterable
     from pathlib import Path
 
     import xarray as xr
@@ -233,6 +233,23 @@ def _warn_unreachable_intervention(
             f"Intervention site(s) {', '.join(map(repr, blocked))} reach the output "
             f"site {output!r} only through sites whose values are taken from the "
             "posterior or intervened on, so the draws do not respond to them."
+        )
+        warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
+
+
+def _warn_missing_return_sites(
+    return_sites: Iterable[str],
+    returned: Container[str],
+) -> None:
+    """Warn for the requested return sites that the output lacks.
+
+    Warns:
+        OutputWarning: If a requested return site is missing from the output.
+    """
+    if missing := [site for site in return_sites if site not in returned]:
+        msg = (
+            f"Return site(s) {', '.join(map(repr, missing))} are missing from the "
+            "output, since the kernel does not record them for the call's arguments."
         )
         warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
 

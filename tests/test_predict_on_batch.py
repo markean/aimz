@@ -123,14 +123,13 @@ def test_predict_on_batch_warns_on_dimension_names_that_cannot_apply() -> None:
         im.fit_on_batch(X, y, num_steps=5, num_samples=4, progress=False, observed=True)
     dt = im.predict_on_batch(X, observed=True)
     assert dt.posterior["w"].dims == ("chain", "draw", "w_dim_0")
-    # A fit before any prior trace stores the name, which the tree then drops
+    # A fit before any prior trace stores the name, which the prior's trace drops
     im = ImpactModel(branched, rng_key=random.key(0), inference=make_svi(branched))
     im.fit_on_batch(X, y, num_steps=5, num_samples=4, progress=False)
-    with pytest.warns(OutputWarning) as record:
+    with pytest.warns(OutputWarning, match="names .* of site 'w' cannot apply"):
         dt = im.sample_prior_predictive_on_batch(
             X, num_samples=4, return_sites=["q", "w"]
         )
-    assert any("'q' would name a site" in str(w.message) for w in record)
     assert dt.prior_predictive["w"].dims == ("chain", "draw", "w_dim_0")
     assert "q" in dt.prior_predictive.data_vars
 
