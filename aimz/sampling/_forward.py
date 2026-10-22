@@ -83,7 +83,11 @@ def _sample_forward(
         masked_model = mask(model, mask=False)
         substituted_model = substitute(
             masked_model,
-            substitute_fn=partial(_substitute_latent, sample=sample),
+            substitute_fn=partial(
+                _substitute_latent,
+                sample=sample,
+                intervened=(intervention or {}).keys(),
+            ),
         )
         model_trace = trace(seed(substituted_model, rng_seed=rng_key)).get_trace(
             **(model_kwargs or {}),
