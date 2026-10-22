@@ -56,9 +56,9 @@ def _is_per_observation(value: object, n_obs: int | None) -> bool:
             return False
         msg = (
             "A ragged keyword argument with one entry per observation cannot be "
-            "split with the rows. Pad its entries into an array with one row per "
-            "observation, or, if its length matches the rows only by chance, wrap it "
-            "in a dictionary to pass it whole."
+            "split with the observations. Pad its entries into an array, or, if its "
+            "length matches the number of observations only by chance, wrap it in a "
+            "dictionary to pass it whole."
         )
         raise ValueError(msg) from None
 

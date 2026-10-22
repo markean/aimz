@@ -96,19 +96,27 @@ def test_predict_site_without_observation_axis(
     im = ImpactModel(counted, rng_key=random.key(0), inference=make_svi(counted))
     im.set_posterior_sample({"mu": jnp.zeros(5)})
     # A plate sized by the number of rows does not run on fewer rows
-    with pytest.warns(PerformanceWarning, match="does not run on fewer rows"):
+    with pytest.warns(PerformanceWarning, match="does not run on fewer observations"):
         dt = im.predict(X, progress=False)
     assert dt.posterior_predictive.attrs["shard_axis"] == "draw"
     # An output sized by another count does not follow the rows
-    with pytest.warns(OutputWarning, match="'y' does not have one value per row"):
+    with pytest.warns(
+        OutputWarning, match="'y' does not have one value per observation"
+    ):
         dt = im.predict(X, n=3, progress=False)
     assert dt.posterior_predictive["y"].shape == (1, 5, 3)
     # So does it under `draw`, which keeps the rows whole, and in the on-batch methods
-    with pytest.warns(OutputWarning, match="'y' does not have one value per row"):
+    with pytest.warns(
+        OutputWarning, match="'y' does not have one value per observation"
+    ):
         im.predict(X, n=3, shard_axis="draw", progress=False)
-    with pytest.warns(OutputWarning, match="'y' does not have one value per row"):
+    with pytest.warns(
+        OutputWarning, match="'y' does not have one value per observation"
+    ):
         im.predict_on_batch(X, n=3)
-    with pytest.warns(OutputWarning, match="'y' does not have one value per row"):
+    with pytest.warns(
+        OutputWarning, match="'y' does not have one value per observation"
+    ):
         im.sample_prior_predictive_on_batch(X, n=3, num_samples=2)
     # A loader streams it when each device evaluates as many rows as the count
     dt = im.predict(
@@ -588,7 +596,9 @@ def test_predict_global_event() -> None:
 
     im = ImpactModel(weights, rng_key=random.key(0), inference=make_svi(weights))
     im.set_posterior_sample({"w": np.ones((4, 6))})
-    with pytest.warns(PerformanceWarning, match="as long as the input's rows"):
+    with pytest.warns(
+        PerformanceWarning, match="as long as the number of observations"
+    ):
         im.predict(np.ones((6, 6)), return_sites="mu", store="memory", progress=False)
     with warnings.catch_warnings():
         warnings.simplefilter("error", PerformanceWarning)

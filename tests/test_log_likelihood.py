@@ -192,7 +192,7 @@ def test_log_likelihood_row_sizes(monkeypatch: pytest.MonkeyPatch) -> None:
     expected = log_likelihood(walk, posterior, X, y)["y"]
     im = ImpactModel(walk, rng_key=random.key(0), inference=make_svi(walk))
     im.set_posterior_sample(posterior)
-    with pytest.warns(PerformanceWarning, match="follows the input's rows"):
+    with pytest.warns(PerformanceWarning, match="follows the number of observations"):
         dt = im.log_likelihood(X, y, store="memory", progress=False)
     np.testing.assert_allclose(dt.log_likelihood["y"].values[0], expected, rtol=1e-5)
 
