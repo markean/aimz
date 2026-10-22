@@ -96,7 +96,7 @@ A guide that computes the site from each observation's inputs, such as an amorti
 :meth:`~aimz.ImpactModel.sample_prior_predictive` has no posterior to replicate and needs no rerun: under ``shard_axis="obs"`` it draws local latents within each batch and shares only the global latents across batches.
 See :ref:`user-guide-sharding` for how the two sharding strategies differ, when to choose each, and a worked comparison of a compatible kernel and one that triggers the rerun.
 A local latent's posterior applies only to the observations the model was fitted on.
-For an array input with another number of observations, prediction and :meth:`~aimz.ImpactModel.log_likelihood` raise a ``ValueError`` that names the site, unless the site is intervened on.
+For an array input with another number of observations, prediction and :meth:`~aimz.ImpactModel.log_likelihood` raise a ``ValueError`` that names the site, unless the site is named in ``intervention``.
 The fitted values are reused without notice for an input with the same number of observations.
 A data loader is checked one device batch at a time, so a loader batch that gives each device exactly the fitted number of observations passes too.
 A data loader cannot rerun under ``shard_axis="draw"``, so a call with one raises the error for the fitted observations too whenever its batches or the devices split them; pass them as an array instead.
