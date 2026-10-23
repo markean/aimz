@@ -37,8 +37,9 @@ if TYPE_CHECKING:
 class ArrayLoader:
     """Data loader yielding mappings of named arrays.
 
-    Shuffling advances ``rng_key`` on each iteration. Model methods handle device
-    placement and any padding required for sharding.
+    Shuffling advances ``rng_key`` on each iteration. Without shuffling, a NumPy batch
+    is a view of the data, so writing into it changes the dataset. Model methods handle
+    device placement and any padding required for sharding.
     """
 
     def __init__(
@@ -93,8 +94,13 @@ class ArrayLoader:
             indices = np.random.default_rng(seed).permutation(len(self.dataset))
         for start in range(0, len(self.dataset), self.batch_size):
             end = start + self.batch_size
-            batch_idx = indices[start:end]
-            yield {k: arr[batch_idx] for k, arr in self.dataset.arrays.items()}
+            batch_idx = indices[start:end] if self.shuffle else slice(start, end)
+            yield {
+                k: jnp.take(arr, batch_idx, axis=0)
+                if isinstance(arr, Array) and not isinstance(batch_idx, slice)
+                else arr[batch_idx]
+                for k, arr in self.dataset.arrays.items()
+            }
 
     def __len__(self) -> int:
         """Return the number of batches."""
