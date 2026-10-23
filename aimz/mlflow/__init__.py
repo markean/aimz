@@ -845,10 +845,11 @@ def autolog(
         # Copied before training, so the example and the signature see no mutation
         input_example = None
         input_example_exc = None
-        try:
-            input_example = _get_input_example(self, args, kwargs)
-        except Exception as e:
-            input_example_exc = e
+        if log_models and (log_input_examples or log_model_signatures):
+            try:
+                input_example = _get_input_example(self, args, kwargs)
+            except Exception as e:
+                input_example_exc = e
 
         model_id = None
         if log_models:
