@@ -179,11 +179,15 @@ def _setup_inputs(
     )
 
     if isinstance(X, ArrayLike):
-        X = np.asarray(X)
+        X = X if isinstance(X, Array) and not X.committed else np.asarray(X)
         if X.ndim == 0:
             msg = "`X` must have at least 1 dimension."
             raise ValueError(msg)
-        y = np.asarray(y) if y is not None else None
+        y = (
+            y
+            if y is None or (isinstance(y, Array) and not y.committed)
+            else np.asarray(y)
+        )
         if y is not None and y.ndim == 0:
             msg = "`y` must have at least 1 dimension."
             raise ValueError(msg)

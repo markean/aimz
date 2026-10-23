@@ -1760,7 +1760,7 @@ class ImpactModel(BaseModel):
 
         svi = cast("SVI", self.inference)
         # The setup runs the kernel outside the compiled step, on JAX arrays as the step
-        # sees them, since `fit` keeps its data in NumPy. A result set through
+        # sees them, since `fit` may pass NumPy batches. A result set through
         # `vi_result` may come with an SVI object that needs no initialization, so the
         # trace does not depend on it. The step's static part keys the spec too, so a
         # step with known arguments neither binds nor converts them
