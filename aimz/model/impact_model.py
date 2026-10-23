@@ -619,7 +619,7 @@ class ImpactModel(BaseModel):
                             (more, *leaf.shape[1:])
                             if grow and leaf.shape[:1] == rows
                             else leaf.shape,
-                            leaf.dtype,
+                            jnp.result_type(leaf),
                         )
                         for leaf, grow in zip(leaves, grows, strict=True)
                     ],
@@ -946,7 +946,6 @@ class ImpactModel(BaseModel):
             n_split = n_obs if shard_axis == "obs" else None
             kwargs_rows, kwargs_const = _group_kwargs(kwargs or {}, n_obs=n_split)
             constants, fields = _split_intervention(intervention, n_split)
-            constants = _to_jax(constants)
             leaves, static = _partition(kwargs_const)
 
             def values(rows: dict[str, object], leaves: list) -> dict[str, object]:
@@ -954,7 +953,7 @@ class ImpactModel(BaseModel):
                 model = (
                     do(
                         self.kernel,
-                        data=cast("dict", {**constants, **intervention_rows}),
+                        data=cast("dict", {**_to_jax(constants), **intervention_rows}),
                     )
                     if intervention
                     else self.kernel
@@ -1607,7 +1606,8 @@ class ImpactModel(BaseModel):
                 self.inference.post_warmup_state, self.inference.num_samples = saved
                 # The collection bounds follow the restored number of samples
                 self.inference._set_collection_params()
-            posterior_samples = device_get(self.inference.get_samples())
+            self.inference.transfer_states_to_host()
+            posterior_samples = dict(self.inference.get_samples())
         else:
             if self.vi_result is None:
                 msg = (
@@ -1885,7 +1885,8 @@ class ImpactModel(BaseModel):
                 self.inference.num_samples,
             )
             self.inference.run(rng_subkey, **args_bound)
-            self._posterior = device_get(self.inference.get_samples())
+            self.inference.transfer_states_to_host()
+            self._posterior = dict(self.inference.get_samples())
             self._num_chains = self.inference.num_chains
             self._num_samples = (
                 next(iter(self.posterior.values())).shape[0] if self.posterior else 0
@@ -2097,6 +2098,7 @@ class ImpactModel(BaseModel):
                     "`fit_on_batch`."
                 )
                 warn(msg, category=FitWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
+            del model_trace, site
             # Batches split a site that counts as computing across observations: one
             # recorded by control flow, or one drawn as an event whose size follows the
             # rows, which the build tells at twice the batch's rows, or all of them,
@@ -2149,6 +2151,7 @@ class ImpactModel(BaseModel):
                     )
                     init = svi.init(rng_subkey, **_to_jax({**batch, **kwargs_extra}))
                     state = init if state is None else state
+                    del guide, init
                 params = {
                     **svi.get_params(state),
                     **(getattr(state, "mutable_state", None) or {}),
@@ -2190,6 +2193,7 @@ class ImpactModel(BaseModel):
                     for k, v in zip(sorted(values), closed.jaxpr.outvars, strict=True)
                     if id(v) not in reads or id(v) in follows
                 }
+                del svi, state, params, closed
             if latent:
                 msg = (
                     f"`fit` trains on batches of {dataloader.batch_size} of {n_obs} "
