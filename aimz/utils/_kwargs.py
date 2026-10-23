@@ -49,11 +49,15 @@ def _is_per_observation(value: object, n_obs: int | None) -> bool:
     """
     if n_obs is None or not _is_arraylike(value):
         return False
+    if (
+        not hasattr(value, "shape")
+        and hasattr(value, "__len__")
+        and len(cast("Sized", value)) != n_obs
+    ):
+        return False
     try:
         shape = np.shape(cast("ArrayLike", value))
     except ValueError:
-        if len(cast("Sized", value)) != n_obs:
-            return False
         msg = (
             "A ragged keyword argument with one entry per observation cannot be "
             "split with the observations. Pad its entries into an array, or, if its "
