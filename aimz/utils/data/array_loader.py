@@ -22,7 +22,7 @@ from warnings import warn
 
 import jax.numpy as jnp
 import numpy as np
-from jax import Array, random
+from jax import Array, jit, lax, random
 
 from aimz._exceptions import AimzWarning
 
@@ -32,6 +32,9 @@ if TYPE_CHECKING:
     import numpy.typing as npt
 
     from aimz.utils.data.array_dataset import ArrayDataset
+
+# Jitted, as an eager slice of a JAX array dispatches anew for every batch
+_slice_rows = jit(lax.dynamic_slice_in_dim, static_argnums=2)
 
 
 class ArrayLoader:
@@ -76,7 +79,6 @@ class ArrayLoader:
             raise ValueError(msg)
         self.batch_size = batch_size
         self.shuffle = shuffle
-        self.indices = np.arange(len(self.dataset))
         if isinstance(rng_key, Array) and rng_key.dtype == jnp.uint32:
             msg = "Legacy `uint32` PRNGKey detected; converting to a typed key array."
             # Not `skip_file_prefixes`: skipping the aimz frames would blame MLflow's
@@ -87,20 +89,29 @@ class ArrayLoader:
 
     def __iter__(self) -> Iterator[dict[str, Array | npt.NDArray]]:
         """Yield the batches of one pass over the dataset, shuffled if asked."""
-        indices = self.indices
+        n = len(self.dataset)
+        order = None
         if self.shuffle:
             self.rng_key, subkey = random.split(self.rng_key)
             seed = np.asarray(random.key_data(subkey))
-            indices = np.random.default_rng(seed).permutation(len(self.dataset))
-        for start in range(0, len(self.dataset), self.batch_size):
-            end = start + self.batch_size
-            batch_idx = indices[start:end] if self.shuffle else slice(start, end)
-            yield {
-                k: jnp.take(arr, batch_idx, axis=0)
-                if isinstance(arr, Array) and not isinstance(batch_idx, slice)
-                else arr[batch_idx]
-                for k, arr in self.dataset.arrays.items()
-            }
+            order = np.random.default_rng(seed).permutation(n)
+        for start in range(0, n, self.batch_size):
+            stop = min(start + self.batch_size, n)
+            if order is not None:
+                rows = order[start:stop]
+                yield {
+                    k: jnp.take(arr, rows, axis=0)
+                    if isinstance(arr, Array)
+                    else arr[rows]
+                    for k, arr in self.dataset.arrays.items()
+                }
+            else:
+                yield {
+                    k: _slice_rows(arr, start, stop - start)
+                    if isinstance(arr, Array) and stop - start < n
+                    else arr[start:stop]
+                    for k, arr in self.dataset.arrays.items()
+                }
 
     def __len__(self) -> int:
         """Return the number of batches."""
