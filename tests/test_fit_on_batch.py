@@ -37,6 +37,8 @@ def test_fit_on_batch_continues_training(synthetic_data: tuple[Array, Array]) ->
     first_loss = im.vi_result.losses[0]
     im.fit_on_batch(X, y, num_steps=1000, num_samples=10, progress=False)
     assert im.vi_result.losses[-1] < first_loss
+    with pytest.raises(ValueError, match="num_steps"):
+        im.fit_on_batch(X, y, num_steps=0, progress=False)
 
     # A first loss near the end of the earlier run shows the training continued, from
     # a fresh SVI object or from the one that trained

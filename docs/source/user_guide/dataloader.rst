@@ -100,6 +100,7 @@ When JAX computes on a single accelerator, the default device or the one device 
 Any other JAX ``X`` or ``y``, such as one on the CPU, on another device, or committed by :external:func:`jax.device_put` with a device or a sharding, is converted to NumPy at this stage, and its original placement is not preserved.
 Per-observation keyword arrays keep the backend they were given, so a JAX array stays on its device, and lists become NumPy arrays.
 The batches a data loader yields are treated the same way: NumPy batches stay on the host until their turn, and each batch is padded for sharding if needed and placed on the model's device or sharding.
+When one batch covers raw arrays, as with ``batch_size=None``, :meth:`~aimz.ImpactModel.fit` moves it to the device once per call and reuses it in every epoch.
 You can keep arrays on device by constructing a loader explicitly with ``to_jax=True``:
 
 .. code-block:: python
