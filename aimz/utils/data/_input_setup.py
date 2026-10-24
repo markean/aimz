@@ -179,13 +179,23 @@ def _setup_inputs(
     )
 
     if isinstance(X, ArrayLike):
-        X = X if isinstance(X, Array) and not X.committed else np.asarray(X)
+        # JAX runs an uncommitted array on the default device, where it puts a new
+        # array, so one there stays and has its batches cut there; on the CPU, NumPy
+        # reads it without a copy instead
+        (default,) = jnp.zeros(()).devices()
+        device = None if default.platform == "cpu" else default
+        X = (
+            X
+            if isinstance(X, Array) and not X.committed and X.device == device
+            else np.asarray(X)
+        )
         if X.ndim == 0:
             msg = "`X` must have at least 1 dimension."
             raise ValueError(msg)
         y = (
             y
-            if y is None or (isinstance(y, Array) and not y.committed)
+            if y is None
+            or (isinstance(y, Array) and not y.committed and y.device == device)
             else np.asarray(y)
         )
         if y is not None and y.ndim == 0:

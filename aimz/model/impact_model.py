@@ -109,6 +109,7 @@ from aimz.utils.data._input_setup import (
     _resolve_batch_size,
     _setup_inputs,
 )
+from aimz.utils.data.array_loader import _slice_rows
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Collection, Iterable, Mapping, Sized
@@ -2044,7 +2045,9 @@ class ImpactModel(BaseModel):
         ):
             n_obs = len(dataloader.dataset)
             batch = {
-                k: v[: dataloader.batch_size]
+                k: _slice_rows(v, 0, dataloader.batch_size)
+                if isinstance(v, Array)
+                else v[: dataloader.batch_size]
                 for k, v in dataloader.dataset.arrays.items()
             }
             # The first batch already rejected an output site that is not observed
