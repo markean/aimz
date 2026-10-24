@@ -44,6 +44,7 @@ from jax import (
     device_get,
     eval_shape,
     jit,
+    lax,
     local_device_count,
     local_devices,
     make_jaxpr,
@@ -1844,23 +1845,52 @@ class ImpactModel(BaseModel):
             self._rng_key, rng_key = random.split(self._rng_key)
         rng_key, rng_subkey = random.split(rng_key)
         if isinstance(self.inference, SVI):
-            if self._vi_state is not None and self.inference.constrain_fn is None:
+            svi = self.inference
+            if self._vi_state is not None and svi.constrain_fn is None:
                 rng_key, rng_init = random.split(rng_key)
-                self.inference.init(rng_init, **args_bound)
+                svi.init(rng_init, **args_bound)
+            if num_steps < 1:
+                msg = "num_steps must be a positive integer."
+                raise ValueError(msg)
             logger.info("Performing variational inference optimization")
-            vi_result = self.inference.run(
-                rng_subkey,
-                num_steps=num_steps,
-                progress_bar=progress,
-                init_state=self._vi_state,
-                **args_bound,
+            state = (
+                svi.init(rng_subkey, **args_bound)
+                if self._vi_state is None
+                else self._vi_state
             )
+
+            # The steps run as one scan over the data, as SVI's own run does without a
+            # bar, which passes the data as arguments instead of compiling them in. The
+            # scan runs in up to 20 chunks of one length, so it compiles once and the
+            # bar advances between them
+            def step(state: SVIState, _: None) -> tuple[SVIState, Array]:
+                return svi.update(state, **args_bound)
+
+            size = num_steps // max(d for d in range(1, 21) if num_steps % d == 0)
+            losses: list = []
+            with tqdm(
+                total=num_steps, disable=not progress, dynamic_ncols=True
+            ) as pbar:
+                for start in range(0, num_steps + size, size):
+                    if start < num_steps:
+                        state, loss = lax.scan(step, state, None, length=size)
+                        losses.append(loss)
+                    # A chunk's losses are read while the next chunk runs, so the device
+                    # never waits for the bar
+                    if start:
+                        i = start // size - 1
+                        losses[i] = device_get(losses[i])
+                        pbar.update(size)
+                        pbar.set_postfix_str(
+                            f"init loss: {losses[0][0]:.4f}, avg. loss "
+                            f"[{start - size + 1}-{start}]: {losses[i].mean():.4f}",
+                            refresh=False,
+                        )
             self.vi_result: SVIRunResult = SVIRunResult(
-                params=vi_result.params,
-                state=vi_result.state,
-                losses=device_get(vi_result.losses),
+                params=svi.get_params(state),
+                state=state,
+                losses=np.concatenate(losses),
             )
-            self._vi_state = self.vi_result.state
 
             # Clear the previous fit first: the draw below rejects diverged parameters
             self._is_fitted = False
@@ -2208,6 +2238,14 @@ class ImpactModel(BaseModel):
                     "from each observation's inputs."
                 )
                 warn(msg, category=FitWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
+        # One batch covers the data, so it moves to the device once for every epoch
+        if (
+            isinstance(X, ArrayLike)
+            and isinstance(dataloader, ArrayLoader)
+            and len(dataloader) == 1
+            and epochs > 0
+        ):
+            dataloader = [_to_jax(dataloader.dataset.arrays)]
 
         logger.info("Performing variational inference optimization")
         losses: list[npt.NDArray] = []
@@ -2263,6 +2301,13 @@ class ImpactModel(BaseModel):
         self._posterior = None
         logger.info("Drawing posterior samples (num_samples=%d)", num_samples)
         rng_key, rng_subkey = random.split(rng_key)
+        model_kwargs = (
+            {self.param_input: X, self.param_output: y, **kwargs}
+            if isinstance(X, ArrayLike)
+            else _to_jax({**batch, **kwargs_extra})
+        )
+        # The draw runs without the training batch on the device
+        dataloader = pbar = batch = fields = None
         self._posterior = _sample_forward(
             self.inference.guide,
             rng_keys=random.split(rng_subkey, num=num_samples),
@@ -2273,11 +2318,7 @@ class ImpactModel(BaseModel):
                 **(getattr(self._vi_state, "mutable_state", None) or {}),
             },
             intervention=None,
-            model_kwargs=(
-                {self.param_input: X, self.param_output: y, **kwargs}
-                if isinstance(X, ArrayLike)
-                else _to_jax({**batch, **kwargs_extra})
-            ),
+            model_kwargs=model_kwargs,
         )
         self._num_samples = num_samples
         self._is_fitted = True

@@ -242,7 +242,7 @@ The example below requests two batches to illustrate this case.
             optim=optim.Adam(step_size=1e-3),
             loss=Trace_ELBO(),
         ),
-    # This internally calls the `.run()` method of `SVI`
+    # This runs the SVI optimization on the whole batch
     ).fit_on_batch(X, y)
 
 .. jupyter-execute::
