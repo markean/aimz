@@ -24,7 +24,8 @@ from warnings import warn
 
 import jax.numpy as jnp
 import numpy as np
-from jax import Array, device_put
+from jax import Array, Device, default_device, device_put, local_devices
+from jax.sharding import get_mesh
 from jax.typing import ArrayLike
 
 from aimz._exceptions import _SKIP_FILE_PREFIXES, OutputWarning
@@ -179,14 +180,21 @@ def _setup_inputs(
     )
 
     if isinstance(X, ArrayLike):
-        # JAX runs an uncommitted array on the default device, where it puts a new
-        # array, so one there stays and has its batches cut there; on the CPU, NumPy
-        # reads it without a copy instead
-        (default,) = jnp.zeros(()).devices()
-        device = None if default.platform == "cpu" else default
+        # JAX runs an uncommitted array on the devices of the mesh set by `set_mesh`, or
+        # else on the default device, so one there stays and has its batches cut there;
+        # on the CPU, NumPy reads it without a copy instead
+        default = default_device.value
+        if not isinstance(default, Device):
+            default = local_devices(backend=default)[0]
+        mesh = get_mesh()
+        devices = {
+            d
+            for d in (mesh.devices.flat if not mesh.empty else (default,))
+            if d.platform != "cpu"
+        }
         X = (
             X
-            if isinstance(X, Array) and not X.committed and X.device == device
+            if isinstance(X, Array) and not X.committed and X.devices() == devices
             else np.asarray(X)
         )
         if X.ndim == 0:
@@ -195,7 +203,7 @@ def _setup_inputs(
         y = (
             y
             if y is None
-            or (isinstance(y, Array) and not y.committed and y.device == device)
+            or (isinstance(y, Array) and not y.committed and y.devices() == devices)
             else np.asarray(y)
         )
         if y is not None and y.ndim == 0:
