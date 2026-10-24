@@ -54,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - {meth}`~aimz.ImpactModel.fit` and the streaming methods now read only the length of a list or tuple keyword argument that does not have one entry per observation, instead of converting every array in it to NumPy, which copied JAX arrays on an accelerator to the host ([#538](https://github.com/markean/aimz/issues/538)).
 - {meth}`~aimz.ImpactModel.fit`, and the streaming methods under `shard_axis="obs"`, now keep a JAX `X` and `y` that are not committed to a device and sit on the single accelerator that JAX computes on, and cut each batch from them there, instead of copying them to the host and uploading every batch ([#540](https://github.com/markean/aimz/issues/540)).
 - {class}`~aimz.utils.data.ArrayLoader` now slices the data when it does not shuffle, instead of indexing it with an array, so the NumPy batches that {meth}`~aimz.ImpactModel.fit` with the default `batch_size` and the streaming methods under `shard_axis="obs"` cut from an array input are views instead of copies ([#541](https://github.com/markean/aimz/issues/541)).
+- {meth}`~aimz.ImpactModel.fit_on_batch` with SVI now runs its steps as one compiled scan that takes the data as arguments, in chunks that the progress bar advances between, instead of through NumPyro's `SVI.run`, whose progress bar compiled the data into a new program on every call, which on an accelerator sent a JAX dataset to the host and back ([#543](https://github.com/markean/aimz/issues/543)).
 
 ### Fixed
 
