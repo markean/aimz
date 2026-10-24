@@ -209,6 +209,7 @@ class ImpactModel(BaseModel):
     def _init_runtime_attrs(self) -> None:
         """Initialize runtime attributes."""
         self._fn_vi_update: Callable | None = None
+        self._fn_vi_run: Callable | None = None
         # The return sites a streamed call cannot split, whether the kernel failed on
         # one row fewer, and the posterior sites whose size follows the rows, by the
         # call's shapes and constants, and the calls that passed `log_likelihood`'s
@@ -1822,7 +1823,8 @@ class ImpactModel(BaseModel):
             rng_key: A pseudo-random number generator key, split from an internal key by
                 default.
             progress: Whether to display a progress bar. Ignored for MCMC.
-            **kwargs: Additional arguments passed to the model.
+            **kwargs: Additional arguments passed to the model; with SVI, arrays are
+                traced and the rest static.
 
         Returns:
             The fitted model instance.
@@ -1830,7 +1832,8 @@ class ImpactModel(BaseModel):
         Raises:
             TypeError: If :attr:`~aimz.ImpactModel.param_input` or
                 :attr:`~aimz.ImpactModel.param_output` is passed as an argument.
-            ValueError: If ``y`` does not share ``X``'s leading-axis size.
+            ValueError: If ``y`` does not share ``X``'s leading-axis size, or
+                ``num_steps`` is less than one with SVI.
         """
         X, y = _validate_X_y_to_jax(X, y=y)
 
@@ -1858,14 +1861,24 @@ class ImpactModel(BaseModel):
                 if self._vi_state is None
                 else self._vi_state
             )
+            # The steps run as a scan that takes the arrays as traced arguments, as in
+            # `train_on_batch`, in up to 20 chunks of one length, so the bar advances
+            # between chunks and later calls with the same shapes reuse the program
+            if self._fn_vi_run is None:
 
-            # The steps run as one scan over the data, as SVI's own run does without a
-            # bar, which passes the data as arguments instead of compiling them in. The
-            # scan runs in up to 20 chunks of one length, so it compiles once and the
-            # bar advances between them
-            def step(state: SVIState, _: None) -> tuple[SVIState, Array]:
-                return svi.update(state, **args_bound)
+                def run(
+                    state: SVIState,
+                    leaves: list,
+                    static: tuple,
+                    length: int,
+                ) -> tuple[SVIState, Array]:
+                    def step(state: SVIState, _: None) -> tuple[SVIState, Array]:
+                        return svi.update(state, **_combine(leaves, static))
 
+                    return lax.scan(step, state, None, length=length)
+
+                self._fn_vi_run = jit(run, static_argnums=(2, 3))
+            leaves, static = _partition(args_bound)
             size = num_steps // max(d for d in range(1, 21) if num_steps % d == 0)
             losses: list = []
             with tqdm(
@@ -1873,7 +1886,7 @@ class ImpactModel(BaseModel):
             ) as pbar:
                 for start in range(0, num_steps + size, size):
                     if start < num_steps:
-                        state, loss = lax.scan(step, state, None, length=size)
+                        state, loss = self._fn_vi_run(state, leaves, static, size)
                         losses.append(loss)
                     # A chunk's losses are read while the next chunk runs, so the device
                     # never waits for the bar
@@ -2306,7 +2319,7 @@ class ImpactModel(BaseModel):
             if isinstance(X, ArrayLike)
             else _to_jax({**batch, **kwargs_extra})
         )
-        # The draw runs without the training batch on the device
+        # Release the training copy before the draw; assigned, as `epochs=0` binds none
         dataloader = pbar = batch = fields = None
         self._posterior = _sample_forward(
             self.inference.guide,
