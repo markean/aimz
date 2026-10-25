@@ -2086,6 +2086,7 @@ class ImpactModel(BaseModel):
                     ).get_trace(**_combine(arrays, static))
 
             eval_shape(run, arrays)
+            del arrays
         # Commit model state only once the inputs are accepted
         self._rng_key = rng_key_model
         # Release the placement of the posterior this call replaces
@@ -2334,6 +2335,7 @@ class ImpactModel(BaseModel):
         )
         # Release the training copy before the draw; assigned, as `epochs=0` binds none
         dataloader = pbar = batch = fields = None
+        kwargs_extra = {}
         self._posterior = _sample_forward(
             self.inference.guide,
             rng_keys=random.split(rng_subkey, num=num_samples),
