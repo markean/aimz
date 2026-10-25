@@ -29,7 +29,7 @@ from itertools import count
 from pathlib import Path
 from shutil import rmtree
 from tempfile import TemporaryDirectory
-from typing import TYPE_CHECKING, Any, Literal, Self, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self, cast
 from warnings import warn
 from weakref import WeakSet
 
@@ -138,7 +138,7 @@ def _reduce_key(key: Array) -> str | tuple[Any, ...]:
 class ImpactModel(BaseModel):
     """Impact modeling interface: fit, sample, predict, and estimate effects."""
 
-    _models = WeakSet()
+    _models: ClassVar[WeakSet[ImpactModel]] = WeakSet()
 
     def __init__(
         self,
