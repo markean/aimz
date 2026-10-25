@@ -18,6 +18,7 @@ import warnings
 from functools import partial
 
 import jax.numpy as jnp
+import numpy as np
 import numpyro
 import numpyro.distributions as dist
 import pytest
@@ -169,7 +170,7 @@ def test_kernel_body_validation(synthetic_data: tuple[Array, Array]) -> None:
 
 
 def test_dual_branch_kernel_sites(synthetic_data: tuple[Array, Array]) -> None:
-    """Sites found before a fit stay known and requestable after it."""
+    """Sites a kernel records only with or without data stay known and requestable."""
     X, y = synthetic_data
     im = ImpactModel(
         lm_dual_branch,
@@ -188,3 +189,17 @@ def test_dual_branch_kernel_sites(synthetic_data: tuple[Array, Array]) -> None:
         warnings.filterwarnings("error", message=".*missing from the output.*")
         dt = im.predict_on_batch(X, return_sites=["z"])
     assert "z" in dt["posterior_predictive"]
+
+    # A fitted kernel that names its output otherwise without data still predicts
+    def kernel(X: Array, y: Array | None = None) -> None:
+        b = sample("b", dist.Normal())
+        with numpyro.plate("obs", X.shape[0]):
+            mu = deterministic("mu", b * X)
+            sample("y" if y is not None else "y_new", dist.Normal(mu, 1.0), obs=y)
+
+    X = np.linspace(-1.0, 1.0, 12)
+    im = ImpactModel(kernel, rng_key=random.key(0), inference=make_svi(kernel))
+    im.fit_on_batch(X, 2 * X, num_steps=5, num_samples=4, progress=False)
+    dt = im.predict_on_batch(X, return_sites="y_new")
+
+    assert set(dt.posterior_predictive.data_vars) == {"y_new"}

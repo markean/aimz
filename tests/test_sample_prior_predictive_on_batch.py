@@ -22,11 +22,11 @@ from aimz import ImpactModel
 from tests.conftest import lm, lm_subsample, make_svi
 
 
-def test_sample_prior_predictive_on_batch_lm(
+def test_sample_prior_predictive_on_batch(
     synthetic_data: tuple[Array, Array],
     im_lm_svi_fitted: ImpactModel,
 ) -> None:
-    """Prior draws come back as a tree or a dictionary of the requested sites."""
+    """Prior draws follow the request and interventions; kernel errors pass through."""
     X, _ = synthetic_data
     samples = im_lm_svi_fitted.sample_prior_predictive_on_batch(
         X=X,
@@ -46,9 +46,7 @@ def test_sample_prior_predictive_on_batch_lm(
     assert im_lm_svi_fitted.kernel_spec.traced
     assert im_lm_svi_fitted.kernel_spec.output_observed
 
-
-def test_sample_prior_predictive_on_batch_intervention() -> None:
-    """Prior interventions change downstream draws without fitting the model."""
+    # Prior interventions change downstream draws without fitting the model
     X = np.arange(24, dtype=np.float32).reshape(12, 2) / 24
     im = ImpactModel(lm, rng_key=random.key(0), inference=make_svi(lm))
     draws = []
@@ -64,9 +62,7 @@ def test_sample_prior_predictive_on_batch_intervention() -> None:
     expected = np.broadcast_to(X.sum(axis=1) + 2, (1, 9, len(X)))
     np.testing.assert_allclose(draws[1] - draws[0], expected, atol=1e-6)
 
-
-def test_sample_prior_predictive_on_batch_kernel_error() -> None:
-    """A new model passes on the error of a kernel that cannot run on the input."""
+    # A new model passes on the error of a kernel that cannot run on the input
     X = np.ones((300, 2), dtype=np.float32)
     im = ImpactModel(
         lm_subsample,

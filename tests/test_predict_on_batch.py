@@ -52,9 +52,12 @@ def test_predict_on_batch_lm_with_kwargs_array(
     np.testing.assert_array_equal(samples["y"], dt.posterior_predictive["y"][0])
 
 
-def test_predict_on_batch_mlm(synthetic_data: tuple[Array, Array]) -> None:
-    """A multivariate output keeps its target axis as a named dimension."""
+def test_predict_on_batch_default_dimension_names(
+    synthetic_data: tuple[Array, Array],
+) -> None:
+    """Default names name the axes a kernel leaves unnamed, skipping site names."""
     X, y = synthetic_data
+    # A multivariate output keeps its target axis as a named dimension
     im = ImpactModel(mlm, rng_key=random.key(42), inference=make_svi(mlm))
     im.fit_on_batch(
         X, jnp.stack([y, y], axis=1), num_steps=10, num_samples=10, progress=False
@@ -62,6 +65,25 @@ def test_predict_on_batch_mlm(synthetic_data: tuple[Array, Array]) -> None:
     sizes = im.predict_on_batch(X).posterior_predictive["y"].sizes
 
     assert (sizes["data"], sizes["y_dim_0"]) == (len(X), 2)
+
+    # A default dimension name that is a site of the group skips to the next one
+    def named_like_default(X: Array, y: Array | None = None) -> None:
+        b = sample("b", dist.Normal().expand([3]).to_event(1))
+        with plate("obs", X.shape[0]):
+            mu = deterministic("mu", X[:, :1] + b)
+            sample("y", dist.Normal(mu.sum(-1), 1.0), obs=y)
+        deterministic("mu_dim_0", b.sum())
+
+    im = ImpactModel(
+        named_like_default,
+        rng_key=random.key(0),
+        inference=make_svi(named_like_default),
+    )
+    im.fit_on_batch(X, y, num_steps=5, num_samples=4, progress=False)
+    with pytest.warns(OutputWarning, match="'mu' skip those that name a site"):
+        dt = im.predict_on_batch(X)
+    assert dt.posterior_predictive["mu"].dims == ("chain", "draw", "obs", "mu_dim_1")
+    assert "mu_dim_0" in dt.posterior_predictive.data_vars
 
 
 def test_predict_on_batch_warns_on_dimension_names_that_cannot_apply() -> None:
@@ -132,45 +154,3 @@ def test_predict_on_batch_warns_on_dimension_names_that_cannot_apply() -> None:
         )
     assert dt.prior_predictive["w"].dims == ("chain", "draw", "w_dim_0")
     assert "q" in dt.prior_predictive.data_vars
-
-
-def test_predict_on_batch_default_names_skip_sites(
-    synthetic_data: tuple[Array, Array],
-) -> None:
-    """A default dimension name that is a site of the group skips to the next one."""
-    X, y = synthetic_data
-
-    def named_like_default(X: Array, y: Array | None = None) -> None:
-        b = sample("b", dist.Normal().expand([3]).to_event(1))
-        with plate("obs", X.shape[0]):
-            mu = deterministic("mu", X[:, :1] + b)
-            sample("y", dist.Normal(mu.sum(-1), 1.0), obs=y)
-        deterministic("mu_dim_0", b.sum())
-
-    im = ImpactModel(
-        named_like_default,
-        rng_key=random.key(0),
-        inference=make_svi(named_like_default),
-    )
-    im.fit_on_batch(X, y, num_steps=5, num_samples=4, progress=False)
-    with pytest.warns(OutputWarning, match="'mu' skip those that name a site"):
-        dt = im.predict_on_batch(X)
-    assert dt.posterior_predictive["mu"].dims == ("chain", "draw", "obs", "mu_dim_1")
-    assert "mu_dim_0" in dt.posterior_predictive.data_vars
-
-
-def test_predict_on_batch_output_named_otherwise_without_data() -> None:
-    """A fitted kernel that names its output otherwise without data still predicts."""
-
-    def kernel(X: Array, y: Array | None = None) -> None:
-        b = sample("b", dist.Normal())
-        with plate("obs", X.shape[0]):
-            mu = deterministic("mu", b * X)
-            sample("y" if y is not None else "y_new", dist.Normal(mu, 1.0), obs=y)
-
-    X = np.linspace(-1.0, 1.0, 12)
-    im = ImpactModel(kernel, rng_key=random.key(0), inference=make_svi(kernel))
-    im.fit_on_batch(X, 2 * X, num_steps=5, num_samples=4, progress=False)
-    dt = im.predict_on_batch(X, return_sites="y_new")
-
-    assert set(dt.posterior_predictive.data_vars) == {"y_new"}
