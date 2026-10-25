@@ -378,11 +378,15 @@ class _OutputStreamer:
             req,
             batch=stream[2] if stream is not None else None,
         )
-        kwargs_const, kwargs_static = _partition(kwargs_extra)
+        kwargs_jax, kwargs_static = _partition(_to_jax(kwargs_extra))
         kwargs_const = [
-            _replicate(v, sharding=self._ctx.replicated_sharding) for v in kwargs_const
+            _replicate(v, sharding=self._ctx.replicated_sharding) for v in kwargs_jax
         ]
         params = device_put(params or {}, device=self._ctx.replicated_sharding)
+        intervention_placed = device_put(
+            intervention,
+            device=self._ctx.replicated_sharding,
+        )
         kind = "prior_predictive" if group == "prior_predictive" else "predict"
         fn = self._cached_fn(
             kind,
@@ -400,7 +404,7 @@ class _OutputStreamer:
                 req.return_sites,
                 step.samples,
                 params,
-                intervention,
+                intervention_placed,
                 self._ctx.param_input,
                 kwargs_key,
                 kwargs_static,
@@ -445,7 +449,7 @@ class _OutputStreamer:
             # keeping the placement of the constants as passed
             kwargs_probe = {
                 "intervention": _to_jax(intervention),
-                "kwargs_const": _partition(_to_jax(kwargs_extra))[0],
+                "kwargs_const": kwargs_jax,
                 "kwargs_static": kwargs_static,
             }
             samples = _sample_probe(
