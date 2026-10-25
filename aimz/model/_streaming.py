@@ -198,13 +198,14 @@ class _OutputStreamer:
         batch: Mapping[str, Array | np.ndarray],
         constants: Mapping[str, object],
     ) -> AbstractSet[str]:
-        """Return the sites of ``unread`` that this call also records as deterministic.
+        """Return the sites of ``unread`` that this call does not read.
 
         The earlier traces' record may not hold for this call, whose arguments can make
         the kernel sample such a site, so the kernel is traced abstractly on the first
-        batch. A kernel that this trace rejects keeps every site.
+        batch, or on the whole input under ``shard_axis="draw"``. A kernel that this
+        trace rejects keeps every site.
         """
-        if not unread or self._ctx.replicated_sharding is None:
+        if not unread:
             return unread
         rows, _ = _split_intervention_fields(dict(batch))
         leaves, static = _partition(constants)
@@ -216,7 +217,7 @@ class _OutputStreamer:
         )
         if key in self._recomputed_cache:
             return self._recomputed_cache[key]
-        deterministic: set[str] = set()
+        read: set[str] = set()
 
         def record(rows: Mapping[str, object]) -> None:
             with validation_enabled(is_validate=False):
@@ -230,15 +231,15 @@ class _OutputStreamer:
                         ),
                     ),
                 ).get_trace(**rows, **constants)
-            deterministic.update(
-                k for k, v in model_trace.items() if v["type"] == "deterministic"
+            read.update(
+                k for k, v in model_trace.items() if v["type"] != "deterministic"
             )
 
         try:
             eval_shape(record, rows)
+            self._recomputed_cache[key] = frozenset(unread - read)
         except Exception:
-            deterministic.clear()
-        self._recomputed_cache[key] = frozenset(unread & deterministic)
+            self._recomputed_cache[key] = frozenset()
 
         return self._recomputed_cache[key]
 
@@ -304,23 +305,19 @@ class _OutputStreamer:
     ) -> dict[str, Array]:
         """Return the posterior placed on devices, cached by ``sharding``.
 
-        Replicated across devices, a site in ``unread``, which the call recomputes,
-        keeps no rows.
-        A placement is replaced when the sites it holds whole change, and the cache is
-        rebuilt when ``posterior`` is replaced, by identity.
+        A site in ``unread``, which the call does not read, keeps no rows.
+        A placement is replaced when the call needs a site whole that it holds without
+        rows, and the cache is rebuilt when ``posterior`` is replaced, by identity.
         """
-        if not posterior:
-            return {}
         if self._posterior_device_src is not posterior:
             self._posterior_device_cache = {}
             self._posterior_device_src = posterior
+        if not posterior:
+            return {}
         cache = self._posterior_device_cache
-        # One device holds a single copy, which keeps every site for a call that samples
-        # a site the traces recorded as deterministic
-        whole = frozenset(
-            posterior.keys() - unread if sharding is not None else posterior
-        )
-        if sharding not in cache or cache[sharding][0] != whole:
+        whole = frozenset(posterior.keys() - unread)
+        # A placement that holds more sites whole serves the call too
+        if sharding not in cache or not whole <= cache[sharding][0]:
             # Placed once, instead of being transferred on every jit call
             cache[sharding] = (
                 whole,
@@ -416,10 +413,19 @@ class _OutputStreamer:
         desc = f"{phase} predictive sampling [{', '.join(req.return_sites)}]"
         # Draw-parallel opened no observation stream
         if stream is None:
+            unread = self._recomputed(
+                unread,
+                kernel=kernel,
+                batch={self._ctx.param_input: cast("Array", req.X)},
+                constants=kwargs_extra,
+            )
             chunk_posterior = (
                 {}
                 if group == "prior_predictive"
-                else cast("dict[str, Array]", posterior)
+                else {
+                    k: v[:, :0] if k in unread and v.ndim > 1 else v
+                    for k, v in cast("dict[str, Array]", posterior).items()
+                }
             )
             return self._write_draws(
                 req,
@@ -569,11 +575,24 @@ class _OutputStreamer:
         desc = f"Computing log-likelihood [{site}]"
         # Draw-parallel opened no observation stream
         if stream is None:
+            y = _replicate(
+                cast("ArrayLike", y),
+                sharding=self._ctx.replicated_sharding,
+            )
+            unread = self._recomputed(
+                unread,
+                kernel=kernel,
+                batch={self._ctx.param_input: cast("Array", req.X), site: y},
+                constants=kwargs_extra,
+            )
             return self._write_draws(
                 req,
                 compute=compute,
-                y=cast("ArrayLike", y),
-                posterior=cast("dict[str, Array]", posterior),
+                y=y,
+                posterior={
+                    k: v[:, :0] if k in unread and v.ndim > 1 else v
+                    for k, v in cast("dict[str, Array]", posterior).items()
+                },
                 rng_key=None,
                 desc=desc,
             )
