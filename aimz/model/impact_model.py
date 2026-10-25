@@ -51,6 +51,7 @@ from jax import (
     make_mesh,
     random,
 )
+from jax.core import eval_context
 from jax.sharding import AxisType, NamedSharding, PartitionSpec
 from jax.typing import ArrayLike
 from numpyro import validation_enabled
@@ -641,10 +642,10 @@ class ImpactModel(BaseModel):
             )
         # Abstract arrays stand in for NumPy arrays, uncopied, so that the kernel's
         # operations on them are recorded, not run, as on JAX arrays; JAX arrays and
-        # scalars stay as given, as `_to_jax` keeps them. Without NumPy arrays nothing
-        # encloses the trace: JAX compares the site scales of NumPyro's abstract trace
-        # with those of an earlier one, and an enclosing trace records that comparison
-        # instead of running it
+        # scalars stay as given, as `_to_jax` keeps them. JAX compares the site scales
+        # of NumPyro's abstract trace with those of an earlier one; an enclosing trace
+        # would record that comparison instead of running it, so NumPyro's trace runs
+        # in the eval context, and without NumPy arrays nothing encloses it
         deps: dict[str, object] = {"prior_dependencies": {}}
         with suppress(Exception):
             if not any(isinstance(leaf, np.ndarray) and leaf.ndim for leaf in leaves):
@@ -652,7 +653,7 @@ class ImpactModel(BaseModel):
             else:
                 eval_shape(
                     lambda arrays: deps.update(
-                        get_dependencies(
+                        eval_context()(get_dependencies)(
                             self.kernel,
                             model_kwargs=_combine(
                                 (
@@ -1768,15 +1769,22 @@ class ImpactModel(BaseModel):
         # trace does not depend on it. The step's static part keys the spec too, so a
         # step with known arguments neither binds nor converts them
         leaves, static = _partition(batch)
+        if (
+            static not in self._specs
+            or self._vi_state is None
+            or svi.constrain_fn is None
+        ):
+            batch = _to_jax(batch)
+            leaves = _partition(batch)[0]
         if static not in self._specs:
             self._specs[static] = self._build_kernel_spec(
-                signature(self.kernel).bind(**_to_jax(batch)).arguments,
+                signature(self.kernel).bind(**batch).arguments,
                 with_output=True,
             )
         if self._vi_state is None or svi.constrain_fn is None:
             if rng_key is None:
                 self._rng_key, rng_key = random.split(self._rng_key)
-            state = svi.init(rng_key, **_to_jax(batch))
+            state = svi.init(rng_key, **batch)
             self._vi_state = state if self._vi_state is None else self._vi_state
         # Array leaves are traced; every other value is static
         if self._fn_vi_update is None:
@@ -2054,6 +2062,7 @@ class ImpactModel(BaseModel):
             )
         else:
             signature(self.kernel).bind_partial(**kwargs)
+        kwargs_extra = _to_jax(kwargs_extra)
         # A keyword array as long as a batch, but not as the data, is passed whole, so
         # every batch would get the same values; as in `fit_on_batch`, the fit fails
         # when the kernel does not run on all the rows with it
@@ -2091,12 +2100,14 @@ class ImpactModel(BaseModel):
             dataloader.dataset,
         ):
             n_obs = len(dataloader.dataset)
-            batch = {
-                k: _slice_rows(v, 0, dataloader.batch_size)
-                if isinstance(v, Array)
-                else v[: dataloader.batch_size]
-                for k, v in dataloader.dataset.arrays.items()
-            }
+            batch = _to_jax(
+                {
+                    k: _slice_rows(v, 0, dataloader.batch_size)
+                    if isinstance(v, Array)
+                    else v[: dataloader.batch_size]
+                    for k, v in dataloader.dataset.arrays.items()
+                },
+            )
             # The first batch already rejected an output site that is not observed
             with validation_enabled(is_validate=False):
                 model_trace = trace(
@@ -2104,7 +2115,7 @@ class ImpactModel(BaseModel):
                         seed(self.kernel, rng_seed=self.rng_key),
                         substitute_fn=init_to_sample,
                     ),
-                ).get_trace(**_to_jax({**batch, **kwargs_extra}))
+                ).get_trace(**{**batch, **kwargs_extra})
             site = model_trace.get(self.param_output, {})
             # The output's outermost plate is the one over the batch's rows
             frames = sorted(site.get("cond_indep_stack") or (), key=lambda f: f.dim)[:1]
@@ -2154,9 +2165,7 @@ class ImpactModel(BaseModel):
             # rows, which the build tells at twice the batch's rows, or all of them,
             # growing the batch's fields alone
             self._build_kernel_spec(
-                signature(self.kernel)
-                .bind(**_to_jax({**batch, **kwargs_extra}))
-                .arguments,
+                signature(self.kernel).bind(**{**batch, **kwargs_extra}).arguments,
                 with_output=True,
                 rows_more=min(2 * dataloader.batch_size, n_obs),
                 whole=kwargs_extra.keys(),
@@ -2199,7 +2208,7 @@ class ImpactModel(BaseModel):
                         svi.loss,
                         **svi.static_kwargs,
                     )
-                    init = svi.init(rng_subkey, **_to_jax({**batch, **kwargs_extra}))
+                    init = svi.init(rng_subkey, **{**batch, **kwargs_extra})
                     state = init if state is None else state
                     del guide, init
                 params = {
@@ -2226,12 +2235,12 @@ class ImpactModel(BaseModel):
                                 self.rng_key,
                             ),
                         )
-                        .get_trace(**rows, **_to_jax(kwargs_extra))
+                        .get_trace(**rows, **kwargs_extra)
                         .items()
                         if k in latent and v["type"] == "sample"
                     },
                     return_shape=True,
-                )(_to_jax(batch), jnp.arange(dataloader.batch_size))
+                )(batch, jnp.arange(dataloader.batch_size))
                 reads = {id(v) for v in closed.jaxpr.invars[:-1]}
                 follows = {id(closed.jaxpr.invars[-1])}
                 for eqn in closed.jaxpr.eqns:

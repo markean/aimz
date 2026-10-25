@@ -64,6 +64,7 @@ Users can configure the sampler, warm-up steps, and other MCMC-specific paramete
 Calling :meth:`~aimz.ImpactModel.fit_on_batch` initiates the sampling process.
 Internally, aimz executes the sampler via the :external:meth:`~numpyro.infer.mcmc.MCMC.run` method and stores the posterior samples using :external:meth:`~numpyro.infer.mcmc.MCMC.get_samples`.
 The sampler's draws are then kept in host memory, so ``im.inference.get_samples()`` returns NumPy arrays.
+:meth:`~aimz.ImpactModel.fit_on_batch` and :meth:`~aimz.ImpactModel.sample` pass the data to :external:meth:`~numpyro.infer.mcmc.MCMC.run` as keyword arguments of the kernel, converting NumPy arrays to new JAX arrays in every call and passing JAX arrays as given.
 
 Note that calling :meth:`~aimz.ImpactModel.fit` with :external:class:`~numpyro.infer.mcmc.MCMC` as the inference method will raise a :exc:`TypeError`, as this method is intended for mini-batch training or subsampling.
 The :attr:`~aimz.ImpactModel.posterior` property holds the samples combined across chains (``num_chains``).
