@@ -721,8 +721,8 @@ class ImpactModel(BaseModel):
     def _recomputed_sites(self) -> set[str]:
         """Return the posterior sites traced as deterministic with a value per row.
 
-        A streamed call keeps off the devices those that its own trace also records as
-        deterministic, since the kernel recomputes them there.
+        A call keeps off the devices those that its own trace does not read, since the
+        kernel recomputes them there.
         """
         spec = cast("KernelSpec", self._kernel_spec)
 
@@ -1847,6 +1847,8 @@ class ImpactModel(BaseModel):
         if rng_key is None:
             self._rng_key, rng_key = random.split(self._rng_key)
         rng_key, rng_subkey = random.split(rng_key)
+        # Release the placement of the posterior this call replaces
+        self._streamer.place_posterior(None, sharding=None)
         if isinstance(self.inference, SVI):
             svi = self.inference
             if self._vi_state is not None and svi.constrain_fn is None:
@@ -2077,6 +2079,8 @@ class ImpactModel(BaseModel):
             eval_shape(run, arrays)
         # Commit model state only once the inputs are accepted
         self._rng_key = rng_key_model
+        # Release the placement of the posterior this call replaces
+        self._streamer.place_posterior(None, sharding=None)
 
         rng_key, rng_subkey = random.split(rng_key)
         # The scale a batch gives the output site tells whether the kernel scales it to
@@ -2491,6 +2495,8 @@ class ImpactModel(BaseModel):
                     "can still make a call rerun under `shard_axis='draw'`."
                 )
                 warn(msg, category=AimzWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
+        # Release the placement of the posterior this call replaces
+        self._streamer.place_posterior(None, sharding=None)
         self._posterior = posterior_sample
         self._num_chains = num_chains
         if self._kernel_spec is None:
@@ -2598,7 +2604,14 @@ class ImpactModel(BaseModel):
                 self.kernel,
                 rng_keys=random.split(rng_key, num=self._num_samples),
                 return_sites=sites,
-                samples=self._streamer.place_posterior(self.posterior, sharding=None),
+                samples=self._streamer.place_posterior(
+                    self.posterior,
+                    sharding=None,
+                    # Unless the call's own trace failed
+                    unread=self._recomputed_sites()
+                    if self._specs.get(_partition(args_bound)[1])
+                    else frozenset(),
+                ),
                 params={
                     **self.vi_result.params,
                     **(getattr(self.vi_result.state, "mutable_state", None) or {}),
