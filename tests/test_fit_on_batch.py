@@ -29,7 +29,7 @@ from tests.conftest import lm, make_svi
 
 
 def test_fit_on_batch_continues_training(synthetic_data: tuple[Array, Array]) -> None:
-    """A second call, or a result set through `vi_result`, continues the training."""
+    """Training continues from a second call or `vi_result`; a scaled kernel refits."""
     X, y = synthetic_data
     im = ImpactModel(lm, rng_key=random.key(42), inference=make_svi(lm))
     im.fit_on_batch(X, y, num_steps=1000, num_samples=10, progress=False)
@@ -54,6 +54,19 @@ def test_fit_on_batch_continues_training(synthetic_data: tuple[Array, Array]) ->
         getattr(im, method)(X, y, num_samples=10, progress=False, **kwargs)
         assert im.vi_result.losses[0] < trained.losses[-50:].mean() * 1.2
         assert im.kernel_spec.output_observed
+
+    # A kernel weighting its rows through a scale fits again in a new model
+    def kernel(X: Array, w: Array, y: Array | None = None) -> None:
+        b = sample("b", dist.Normal().expand([X.shape[1]]).to_event(1))
+        with plate("obs", X.shape[0]), handlers.scale(scale=w):
+            sample("y", dist.Normal(X @ b, 1.0), obs=y)
+
+    w = np.linspace(0.5, 1.5, len(X), dtype=np.float32)
+    # NumPyro's dependency trace fails for the second model, which still fits
+    for weights in (jnp.asarray(w), w):
+        im = ImpactModel(kernel, rng_key=random.key(0), inference=make_svi(kernel))
+        im.fit_on_batch(X, y, w=weights, num_steps=10, num_samples=5, progress=False)
+        assert im.is_fitted()
 
 
 def test_fit_on_batch_mcmc_keeps_chains(synthetic_data: tuple[Array, Array]) -> None:
@@ -109,20 +122,3 @@ def test_fit_on_batch_input_validation(synthetic_data: tuple[Array, Array]) -> N
         im.fit_on_batch(X=X, y=1.0)
     with pytest.raises(ValueError, match="must have the same leading-axis size"):
         im.fit_on_batch(X=X, y=y[:-1])
-
-
-def test_fit_on_batch_scaled_kernel_refits(synthetic_data: tuple[Array, Array]) -> None:
-    """A kernel weighting its rows through a scale fits again in a new model."""
-    X, y = synthetic_data
-
-    def kernel(X: Array, w: Array, y: Array | None = None) -> None:
-        b = sample("b", dist.Normal().expand([X.shape[1]]).to_event(1))
-        with plate("obs", X.shape[0]), handlers.scale(scale=w):
-            sample("y", dist.Normal(X @ b, 1.0), obs=y)
-
-    w = np.linspace(0.5, 1.5, len(X), dtype=np.float32)
-    # NumPyro's dependency trace fails for the second model, which still fits
-    for weights in (jnp.asarray(w), w):
-        im = ImpactModel(kernel, rng_key=random.key(0), inference=make_svi(kernel))
-        im.fit_on_batch(X, y, w=weights, num_steps=10, num_samples=5, progress=False)
-        assert im.is_fitted()

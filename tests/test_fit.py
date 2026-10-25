@@ -31,7 +31,7 @@ from tests.conftest import lm, lm_subsample, lm_with_kwargs_array, make_svi
 
 
 def test_fit_argument_errors(synthetic_data: tuple[Array, Array]) -> None:
-    """MCMC inference, and kernel arguments that do not bind or fit the rows, raise."""
+    """Rejected calls raise and leave the model's key and draw count unchanged."""
     X, y = synthetic_data
     mcmc = MCMC(NUTS(lm), num_warmup=10, num_samples=10, progress_bar=False)
     im = ImpactModel(lm, rng_key=random.key(42), inference=mcmc)
@@ -55,6 +55,27 @@ def test_fit_argument_errors(synthetic_data: tuple[Array, Array]) -> None:
     )
     with pytest.raises(TypeError, match="incompatible shapes"):
         im.fit(X, y, c=jnp.zeros(20), batch_size=20, progress=False)
+
+    # A rejected call changes neither the key nor the draw count
+    num_samples = 5
+    im = ImpactModel(lm, rng_key=random.key(42), inference=make_svi(lm))
+    im.fit(X=X, y=y, num_samples=num_samples, batch_size=len(X), progress=False)
+    key_before = random.key_data(im.rng_key)
+    loader = ArrayLoader(ArrayDataset(X=X, y=y), rng_key=random.key(0))
+
+    with pytest.raises(TypeError, match="must be `None` when `X` is already"):
+        im.fit(X=loader, y=y, progress=False)
+    with pytest.raises(TypeError, match="unexpected keyword argument 'c'"):
+        im.fit(X=X, y=y, c=1.0, progress=False)
+
+    np.testing.assert_array_equal(random.key_data(im.rng_key), key_before)
+    assert im._num_samples == num_samples
+    out = im.predict(X, store="memory", progress=False)
+    assert out.posterior_predictive["y"].sizes["draw"] == num_samples
+
+    # A one-shot iterator is exhausted after its first epoch
+    with pytest.raises(ValueError, match="yielded no batches in epoch 2"):
+        im.fit(iter([{"X": X, "y": y}]), epochs=2, progress=False)
 
 
 def test_fit_nan_warning(synthetic_data: tuple[Array, Array]) -> None:
@@ -186,34 +207,8 @@ def test_fit_loader_with_custom_param_names(
         im.fit([{"x": X}], progress=False)
 
 
-def test_fit_rejected_call_leaves_state_untouched(
-    synthetic_data: tuple[Array, Array],
-) -> None:
-    """A rejected `fit` changes neither the key nor the draw count."""
-    X, y = synthetic_data
-    num_samples = 5
-    im = ImpactModel(lm, rng_key=random.key(42), inference=make_svi(lm))
-    im.fit(X=X, y=y, num_samples=num_samples, batch_size=len(X), progress=False)
-    key_before = random.key_data(im.rng_key)
-    loader = ArrayLoader(ArrayDataset(X=X, y=y), rng_key=random.key(0))
-
-    with pytest.raises(TypeError, match="must be `None` when `X` is already"):
-        im.fit(X=loader, y=y, progress=False)
-    with pytest.raises(TypeError, match="unexpected keyword argument 'c'"):
-        im.fit(X=X, y=y, c=1.0, progress=False)
-
-    np.testing.assert_array_equal(random.key_data(im.rng_key), key_before)
-    assert im._num_samples == num_samples
-    out = im.predict(X, store="memory", progress=False)
-    assert out.posterior_predictive["y"].sizes["draw"] == num_samples
-
-    # A one-shot iterator is exhausted after its first epoch
-    with pytest.raises(ValueError, match="yielded no batches in epoch 2"):
-        im.fit(iter([{"X": X, "y": y}]), epochs=2, progress=False)
-
-
 def test_fit_array_matches_loader(synthetic_data: tuple[Array, Array]) -> None:
-    """Fitting on arrays or on the equivalent data loader gives the same result."""
+    """Arrays and the equivalent loader fit alike; the guide draws in input order."""
     X, y = synthetic_data
     rng_key = random.key(1)
     im_array = ImpactModel(
@@ -240,11 +235,7 @@ def test_fit_array_matches_loader(synthetic_data: tuple[Array, Array]) -> None:
         im_loader.predict_on_batch(X, rng_key=rng_key).posterior_predictive["y"],
     )
 
-
-def test_fit_draws_guide_on_data_in_order(synthetic_data: tuple[Array, Array]) -> None:
-    """The guide draws the posterior from the data in input order, not shuffled."""
-    X, y = synthetic_data
-
+    # The guide draws the posterior from the data in input order, not shuffled
     def kernel(X: Array, y: Array | None = None) -> None:
         w = sample("w", dist.Normal().expand([X.shape[1]]).to_event(1))
         with plate("obs", X.shape[0]):

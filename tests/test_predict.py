@@ -171,8 +171,11 @@ def test_predict_after_cleanup(
     assert set(dt.posterior_predictive.data_vars) == {"y"}
 
 
-def test_predict_per_observation_intervention() -> None:
-    """A per-observation intervention array is batched and sharded with ``X``."""
+def test_predict_per_observation_intervention(
+    synthetic_data: tuple[Array, Array],
+    im_lm_svi_fitted: ImpactModel,
+) -> None:
+    """Per-observation interventions follow ``X``; equal ones reuse the program."""
     X = np.arange(40, dtype=np.float32).reshape(20, 2) / 40
     im = ImpactModel(
         latent_intervention_model,
@@ -205,35 +208,7 @@ def test_predict_per_observation_intervention() -> None:
             progress=False,
         )
 
-
-@pytest.mark.filterwarnings("ignore:subsample_size does not match")
-def test_predict_subsample_plate_keeps_row_order() -> None:
-    """Rows gathered through a plate subsampling all of them stay in order."""
-
-    def kernel(X: Array, y: Array | None = None, k: int | None = None) -> None:
-        b = sample("b", dist.Normal())
-        with plate("obs", X.shape[0], subsample_size=k) as idx:
-            mu = deterministic("mu", b * X[idx])
-            sample("y", dist.Normal(mu, 1.0), obs=y)
-
-    X = jnp.arange(30.0)
-    im = ImpactModel(kernel, rng_key=random.key(0), inference=make_svi(kernel))
-    im.set_posterior_sample({"b": jnp.ones(4)})
-    # Each device's share of the rows is smaller than the subsample size
-    dt = im.predict(
-        X, k=len(X), return_sites="mu", batch_size=12, store="memory", progress=False
-    )
-
-    np.testing.assert_array_equal(
-        dt["posterior_predictive"]["mu"].values[0], np.tile(X, (4, 1))
-    )
-
-
-def test_predict_intervention_reuses_compiled_program(
-    synthetic_data: tuple[Array, Array],
-    im_lm_svi_fitted: ImpactModel,
-) -> None:
-    """Repeated calls with an equal intervention reuse the compiled program."""
+    # Repeated calls with an equal intervention reuse the compiled program
     X, _ = synthetic_data
     im = im_lm_svi_fitted
     im.predict(X, intervention={"b": 1.0}, store="memory", progress=False)
@@ -322,11 +297,12 @@ def test_predict_param_site(
     assert not prior["mu"].any()
 
 
+@pytest.mark.filterwarnings("ignore:subsample_size does not match")
 def test_predict_generator_matches_array(
     synthetic_data: tuple[Array, Array],
     im_lm_svi_fitted: ImpactModel,
 ) -> None:
-    """A one-shot generator of regular batches reproduces the array result exactly."""
+    """Generator batches match the array result; a subsampling plate keeps row order."""
     X, _ = synthetic_data
     im = im_lm_svi_fitted
     rng_key = random.key(7)
@@ -339,6 +315,25 @@ def test_predict_generator_matches_array(
     np.testing.assert_array_equal(
         ref.posterior_predictive["y"].values,
         via.posterior_predictive["y"].values,
+    )
+
+    # Rows gathered through a plate subsampling all of them stay in order
+    def kernel(X: Array, y: Array | None = None, k: int | None = None) -> None:
+        b = sample("b", dist.Normal())
+        with plate("obs", X.shape[0], subsample_size=k) as idx:
+            mu = deterministic("mu", b * X[idx])
+            sample("y", dist.Normal(mu, 1.0), obs=y)
+
+    X = jnp.arange(30.0)
+    im = ImpactModel(kernel, rng_key=random.key(0), inference=make_svi(kernel))
+    im.set_posterior_sample({"b": jnp.ones(4)})
+    # Each device's share of the rows is smaller than the subsample size
+    dt = im.predict(
+        X, k=len(X), return_sites="mu", batch_size=12, store="memory", progress=False
+    )
+
+    np.testing.assert_array_equal(
+        dt["posterior_predictive"]["mu"].values[0], np.tile(X, (4, 1))
     )
 
 

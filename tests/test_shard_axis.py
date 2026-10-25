@@ -97,12 +97,7 @@ def test_local_latent_model(
     assert z.shape[-1] == len(X)
     assert z.std(axis=-1).mean() > min_prior_std
 
-
-def test_predict_data_reruns_draw_on_rank3_local_latent(
-    synthetic_data: tuple[Array, Array],
-) -> None:
-    """A rank-3 observation-aligned latent also reruns under `draw` and round-trips."""
-    X, y = synthetic_data
+    # A rank-3 observation-aligned latent also reruns under `draw` and round-trips
     im = ImpactModel(
         multidim_latent_model,
         rng_key=random.key(0),
@@ -247,11 +242,7 @@ def test_predict_draw_global_model(
         atol=1e-4,
     )
 
-
-def test_predict_draw_num_samples_less_than_devices(
-    synthetic_data: tuple[Array, Array],
-) -> None:
-    """`num_samples` smaller than the device count still round-trips."""
+    # `num_samples` smaller than the device count still round-trips
     X, y = synthetic_data
     n_draws = 2
     im = ImpactModel(
