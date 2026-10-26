@@ -120,6 +120,20 @@ def test_local_latent_model(
     finally:
         im.cleanup()
 
+    # `num_samples` smaller than the device count still round-trips
+    n_draws = 2
+    im = ImpactModel(
+        latent_variable_model,
+        rng_key=random.key(0),
+        inference=make_svi(latent_variable_model),
+    )
+    im.fit(X=X, y=y, num_samples=n_draws, batch_size=len(X), progress=False)
+    try:
+        dt = im.predict(X, batch_size=len(X), progress=False, shard_axis="draw")
+        assert dt["posterior_predictive"]["y"].sizes["draw"] == n_draws
+    finally:
+        im.cleanup()
+
 
 def test_kernel_across_observations_reruns_under_draw(
     synthetic_data: tuple[Array, Array],
@@ -241,21 +255,6 @@ def test_predict_draw_global_model(
         np.asarray(draw["posterior_predictive"]["y"]),
         atol=1e-4,
     )
-
-    # `num_samples` smaller than the device count still round-trips
-    X, y = synthetic_data
-    n_draws = 2
-    im = ImpactModel(
-        latent_variable_model,
-        rng_key=random.key(0),
-        inference=make_svi(latent_variable_model),
-    )
-    im.fit(X=X, y=y, num_samples=n_draws, batch_size=len(X), progress=False)
-    try:
-        dt = im.predict(X, batch_size=len(X), progress=False, shard_axis="draw")
-        assert dt["posterior_predictive"]["y"].sizes["draw"] == n_draws
-    finally:
-        im.cleanup()
 
 
 def test_streaming_argument_validation(
