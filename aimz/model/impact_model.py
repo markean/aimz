@@ -50,16 +50,23 @@ from jax import (
     make_jaxpr,
     make_mesh,
     random,
+    tree,
 )
 from jax.core import eval_context
 from jax.sharding import AxisType, NamedSharding, PartitionSpec
 from jax.typing import ArrayLike
-from numpyro import validation_enabled
-from numpyro.distributions import Distribution, Independent
+from numpyro import distributions, validation_enabled
+from numpyro.distributions import (
+    Distribution,
+    ExpandedDistribution,
+    Independent,
+    MaskedDistribution,
+)
 from numpyro.handlers import do, seed, substitute, trace
 from numpyro.infer import MCMC, SVI, init_to_sample
 from numpyro.infer.inspect import get_dependencies
 from numpyro.infer.svi import SVIRunResult, SVIState
+from numpyro.ops.provenance import eval_provenance
 from tqdm.auto import tqdm
 
 from aimz._exceptions import (
@@ -70,6 +77,7 @@ from aimz._exceptions import (
     NotFittedError,
     OutputWarning,
     PerformanceWarning,
+    ScopeWarning,
 )
 from aimz.model._core import BaseModel
 from aimz.model._streaming import (
@@ -118,6 +126,8 @@ if TYPE_CHECKING:
 
     from dask.array import Array as DaskArray
 
+    from aimz.model.causal_card import CausalCard
+
 logger = logging.getLogger(__name__)
 
 
@@ -148,6 +158,7 @@ class ImpactModel(BaseModel):
         *,
         param_input: str = "X",
         param_output: str = "y",
+        card: CausalCard | None = None,
     ) -> None:
         """Initialize an :class:`~aimz.ImpactModel` instance.
 
@@ -158,6 +169,8 @@ class ImpactModel(BaseModel):
                 :external:class:`~numpyro.infer.mcmc.MCMC` instance.
             param_input: Name of the ``kernel`` parameter for the input data.
             param_output: Name of the ``kernel`` parameter for the output data.
+            card: A :class:`~aimz.model.CausalCard` declaring the causal scope the
+                modeler asserts for the model, or ``None``.
 
         Raises:
             KernelValidationError: If the kernel takes variable arguments or
@@ -179,6 +192,9 @@ class ImpactModel(BaseModel):
         self._fitted_sites: set[str] = set()
         self._coupled_sites: set[str] = set()
         self._site_parents: dict[str, set[str]] = {}
+        self._site_upstream: dict[str, set[str]] = {}
+        self._site_arguments: dict[str, set[str]] = {}
+        self._site_dists: dict[str, str] = {}
         if isinstance(rng_key, Array) and rng_key.dtype == jnp.uint32:
             msg = "Legacy `uint32` PRNGKey detected; converting to a typed key array."
             warn(msg, category=AimzWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
@@ -206,6 +222,8 @@ class ImpactModel(BaseModel):
         self._num_samples = 0
         self._num_chains = 1
         self._init_runtime_attrs()
+        self._card: CausalCard | None = None
+        self.card = card
 
     def _init_runtime_attrs(self) -> None:
         """Initialize runtime attributes."""
@@ -322,6 +340,7 @@ class ImpactModel(BaseModel):
         self.__dict__.setdefault("_dims", {})
         self.__dict__.setdefault("_site_sizes", {})
         self.__dict__.setdefault("_observed_sites", set())
+        self.__dict__.setdefault("_card", None)
         # A model pickled by an earlier version traced only the arguments it was
         # first called or fitted with
         spec = self.__dict__.get("_kernel_spec")
@@ -331,6 +350,9 @@ class ImpactModel(BaseModel):
         )
         self.__dict__.setdefault("_coupled_sites", set())
         self.__dict__.setdefault("_site_parents", {})
+        self.__dict__.setdefault("_site_upstream", {})
+        self.__dict__.setdefault("_site_arguments", {})
+        self.__dict__.setdefault("_site_dists", {})
         self._init_runtime_attrs()
         inference = self._inference
         if (
@@ -362,6 +384,47 @@ class ImpactModel(BaseModel):
     def kernel_spec(self) -> KernelSpec | None:
         """The cached :class:`~aimz.model.KernelSpec` or ``None`` if not yet built."""
         return self._kernel_spec
+
+    @property
+    def card(self) -> CausalCard | None:
+        """The :class:`~aimz.model.CausalCard` declared for the model, or ``None``.
+
+        Setting it checks the names the card's treatments span and its unit name
+        once the kernel is traced: each has to be a declared feature, an argument of
+        the kernel, or one of its sample sites.
+        """
+        return self._card
+
+    @card.setter
+    def card(self, card: CausalCard | None) -> None:
+        """Attach a card, checking its names once the kernel is traced.
+
+        Raises:
+            ValueError: If a name a treatment spans, or the unit, is none of the
+                declared features, the kernel's arguments, or its sample sites.
+        """
+        if card is not None and (spec := self._kernel_spec) is not None and spec.traced:
+            known = {
+                *card.features,
+                *signature(self.kernel).parameters,
+                *spec.sample_sites,
+            }
+            unknown = [
+                name
+                for name in (
+                    *(name for names in card.treatments.values() for name in names),
+                    *([card.unit] if card.unit else []),
+                )
+                if name not in known
+            ]
+            if unknown:
+                msg = (
+                    f"Card name(s) {', '.join(map(repr, unknown))} are none of the "
+                    "declared features, the kernel's arguments, or its sample sites: "
+                    f"{', '.join(map(repr, sorted(known)))}."
+                )
+                raise ValueError(msg)
+        self._card = card
 
     @property
     def param_input(self) -> str:
@@ -585,6 +648,17 @@ class ImpactModel(BaseModel):
                 )
             if v.get("is_observed"):
                 self._observed_sites.add(k)
+            if v["type"] == "sample":
+                # The distribution's name, under the wrappers that only reshape it,
+                # as its factory spells it where the class carries a suffix
+                base = v["fn"]
+                while isinstance(
+                    base, (ExpandedDistribution, Independent, MaskedDistribution)
+                ):
+                    base = base.base_dist
+                name = type(base).__name__
+                short = name.removesuffix("Probs").removesuffix("Logits")
+                self._site_dists[k] = short if hasattr(distributions, short) else name
             # A site recorded by control flow, which NumPyro marks alike for `scan` and
             # `cond`, or drawn as one event over the rows, counts as computing across
             # observations. The first trace and each trace with the output decide anew
@@ -670,6 +744,78 @@ class ImpactModel(BaseModel):
                 )
         for k, v in cast("Mapping[str, Mapping]", deps["prior_dependencies"]).items():
             self._site_parents[k] = set(v) - {k}
+        # The sites and arguments each site is computed from, for `describe`: the
+        # kernel runs once more, abstractly, with the value of every sample site
+        # replaced by a stand-in tagged with the site's name and each array argument
+        # by one tagged with the argument's, so that the parameters of a site's
+        # distribution and a deterministic value carry the tags of what they are
+        # computed from, through the deterministic sites between, which keep their
+        # values. A site that control flow records has no stand-in, as its values
+        # are drawn one step at a time, and is left out; a kernel that cannot run
+        # abstractly keeps the relations of an earlier trace
+        arguments = {}
+        for name, value in args_bound.items():
+            if leaves_of := _partition({name: value})[0]:
+                arguments[f"argument:{name}"] = [
+                    ShapeDtypeStruct(leaf.shape, jnp.result_type(leaf))
+                    for leaf in leaves_of
+                ]
+        reported = {
+            k
+            for k, v in model_trace.items()
+            if v["type"] in {"sample", "deterministic"}
+            and not v.get("_control_flow_done")
+        }
+        sites = {
+            f"site:{k}": model_trace[k]["value"]
+            for k in reported
+            if model_trace[k]["type"] == "sample"
+            and hasattr(model_trace[k]["value"], "shape")
+        }
+
+        def read(**tagged: object) -> dict[str, list]:
+            computed: dict[str, list] = {}
+
+            def substitute_fn(msg: dict) -> object:
+                if msg["type"] == "sample":
+                    computed[msg["name"]] = tree.leaves(msg["fn"])
+
+                    return tagged.get(f"site:{msg['name']}")
+                if msg["type"] == "deterministic":
+                    computed[msg["name"]] = [msg["value"]]
+
+                return None
+
+            with validation_enabled(is_validate=False):
+                substitute(
+                    seed(self.kernel, rng_seed=self.rng_key),
+                    substitute_fn=substitute_fn,
+                )(
+                    **_combine(
+                        (
+                            leaf
+                            for name in args_bound
+                            for leaf in cast("list", tagged.get(f"argument:{name}", ()))
+                        ),
+                        static,
+                    ),
+                )
+
+            return {k: v for k, v in computed.items() if k in reported}
+
+        with suppress(Exception):
+            for k, tags in eval_provenance(read, **arguments, **sites).items():
+                found = frozenset().union(*tags)
+                self._site_upstream[k] = {
+                    tag.removeprefix("site:")
+                    for tag in found
+                    if tag.startswith("site:")
+                }
+                self._site_arguments[k] = {
+                    tag.removeprefix("argument:")
+                    for tag in found
+                    if tag.startswith("argument:")
+                }
         spec = KernelSpec(
             traced=True,
             sample_sites=sample_sites,
@@ -2365,11 +2511,19 @@ class ImpactModel(BaseModel):
             parameter names, the inference method, the fitted state with the number of
             chains and draws, and the sites known from the trace or the posterior. Each
             site maps to its ``kind`` (``"latent"``, ``"observed"``, or
-            ``"deterministic"``), its ``dims`` after ``chain`` and ``draw`` where the
-            trace named them (``None`` for the default ``<site>_dim_<i>`` names), and,
-            for a site in the posterior, the ``draw_shape`` of one draw. A ``factor``
-            term counts as observed, and ``param`` sites are not listed; their values
-            after an SVI fit are in :attr:`~aimz.ImpactModel.vi_result`.
+            ``"deterministic"``), the name of the ``distribution`` it samples
+            (``None`` for a deterministic site), its ``dims`` after ``chain`` and
+            ``draw`` where the trace named them (``None`` for the default
+            ``<site>_dim_<i>`` names), the ``upstream`` sample sites and the array
+            ``arguments`` of the kernel that its distribution or its deterministic
+            value is computed from, through any deterministic site between (empty
+            where no trace derived them), and, for a site in the posterior, the
+            ``draw_shape`` of one draw. The relations are derived from the kernel, so
+            they hold what it computes, not what a feature of an input means. A
+            ``factor`` term counts as observed, and ``param`` sites are not listed;
+            their values after an SVI fit are in :attr:`~aimz.ImpactModel.vi_result`.
+            The ``card`` is the :class:`~aimz.model.CausalCard` as plain values, or
+            ``None``.
         """
         spec = self._kernel_spec
         sample_sites = spec.sample_sites if spec else ()
@@ -2385,7 +2539,13 @@ class ImpactModel(BaseModel):
             else:
                 kind = "deterministic"
             dims = self._dims.get(name)
-            sites[name] = {"kind": kind, "dims": None if dims is None else list(dims)}
+            sites[name] = {
+                "kind": kind,
+                "distribution": self._site_dists.get(name),
+                "dims": None if dims is None else list(dims),
+                "upstream": sorted(self._site_upstream.get(name, ())),
+                "arguments": sorted(self._site_arguments.get(name, ())),
+            }
             if self._posterior is not None and name in self._posterior:
                 sites[name]["draw_shape"] = [
                     int(n) for n in np.shape(self._posterior[name])[1:]
@@ -2401,6 +2561,7 @@ class ImpactModel(BaseModel):
             "num_chains": self._num_chains,
             "num_samples": self._num_samples,
             "sites": sites,
+            "card": None if self._card is None else self._card.to_dict(),
         }
 
     def set_posterior_sample(
@@ -2861,6 +3022,13 @@ class ImpactModel(BaseModel):
         prior, also for an unfitted model; pass the same ``rng_key`` to both calls so
         the scenarios share their draws.
 
+        With a card attached, two scenarios given as argument dictionaries with array
+        inputs of one shape are compared by
+        :meth:`~aimz.ImpactModel.check_scenario` before they are predicted, so that a
+        harness that turns a :class:`~aimz.ScopeWarning` into an error stops before
+        the draws are made, and the facts the check returns are recorded in the
+        result's ``scenario_check`` attribute.
+
         Args:
             output_baseline: Precomputed output for the baseline scenario.
             output_intervention: Precomputed output for the intervention scenario.
@@ -2878,7 +3046,8 @@ class ImpactModel(BaseModel):
             The effect of the intervention, with the posterior samples unless the
             effect is under the prior. A scenario streamed to disk records its
             artifact path in the ``artifact_path_baseline`` or
-            ``artifact_path_intervention`` attribute.
+            ``artifact_path_intervention`` attribute, and scenarios that were checked
+            record the facts of the check in the ``scenario_check`` attribute.
 
         Raises:
             NotFittedError: If the model is not fitted and ``output_baseline`` or
@@ -2892,14 +3061,17 @@ class ImpactModel(BaseModel):
                 ``condition`` passed through ``args_baseline`` or
                 ``args_intervention`` names a site that is not a sample site of the
                 kernel, if a posterior site that is not intervened on does not fit the
-                observations a scenario evaluates, or if the scenarios do not share a
-                predictive group.
+                observations a scenario evaluates, if the scenarios do not share a
+                predictive group, or if the scenarios are checked and the card
+                declares features whose number differs from the input's.
 
         Warns:
             OutputWarning: If the scenarios differ in dimension sizes or coordinate
                 labels, if they hold different posterior samples, or if the output,
                 or any site under the prior, was not drawn in both with the same key,
                 sharding strategy, and batching.
+            ScopeWarning: If the scenarios are checked and the card declares
+                treatments that do not span an input that changed.
         """
         if output_baseline is None or output_intervention is None:
             _check_is_fitted(self)
@@ -2945,6 +3117,22 @@ class ImpactModel(BaseModel):
                 "Either `output_intervention` or `args_intervention` must be provided."
             )
             raise ValueError(msg)
+
+        # With a card, two argument dictionaries over the same observations are
+        # checked before anything is predicted, so that a harness that errors on a
+        # `ScopeWarning` stops before the draws are made
+        facts = None
+        if (
+            self._card is not None
+            and output_baseline is None
+            and output_intervention is None
+            and args_baseline is not None
+            and args_intervention is not None
+            and isinstance(args_baseline.get("X"), ArrayLike)
+            and isinstance(args_intervention.get("X"), ArrayLike)
+            and np.shape(args_baseline["X"]) == np.shape(args_intervention["X"])
+        ):
+            facts = self.check_scenario(args_baseline, args_intervention)
 
         overrides = {"return_datatree": True} if on_batch else {}
 
@@ -3112,6 +3300,8 @@ class ImpactModel(BaseModel):
                 num_chains=self._num_chains,
                 dims=self._dims,
             )
+        if facts is not None:
+            out.attrs["scenario_check"] = facts
         out.attrs.update(
             {
                 f"artifact_path_{suffix}": path
@@ -3124,6 +3314,438 @@ class ImpactModel(BaseModel):
         )
 
         return out
+
+    def build_scenario(
+        self,
+        args: Mapping[str, object],
+        changes: Mapping[str, object],
+        *,
+        observations: ArrayLike | None = None,
+    ) -> dict[str, object]:
+        """Build a scenario from another by editing its inputs by name.
+
+        A scenario is an argument dictionary of
+        :meth:`~aimz.ImpactModel.estimate_effect`: the input under ``X`` and the
+        keyword arguments of the kernel, with any ``intervention`` and ``condition``
+        mapping. The names are those the card declares, so a treatment recorded in
+        several features changes in all of them at once, and the arrays given are
+        never touched: an edited input comes back as a copy and every other entry as
+        given. Nothing is predicted, and nothing here establishes that a change is a
+        treatment; :meth:`~aimz.ImpactModel.check_scenario` compares the two
+        scenarios.
+
+        Args:
+            args: Arguments of the baseline scenario, with an array input.
+            changes: The new values by name. A name is a treatment of the card, which
+                edits every input it spans, a declared feature, a feature of a
+                two-dimensional input as ``X[i]``, the input ``X``, or a keyword
+                array. A value is set as given, broadcast to the input's shape; a
+                callable receives the input's current values and returns the new
+                ones.
+            observations: The observations to change, as a boolean mask or integer
+                indices along the input's leading axis; the others keep their
+                baseline values. By default every observation.
+
+        Returns:
+            The intervention scenario, with the keys of ``args``.
+
+        Raises:
+            TypeError: If the input is not an array, as a data loader is.
+            ValueError: If the card declares features whose number differs from the
+                input's, if a name is none of the card's treatments, its features, the
+                input's features and the keyword arrays, if it spans a sample site,
+                which ``intervention`` sets, if a value does not broadcast to the
+                input's shape, or if ``observations`` does not fit the input's
+                observations or is given for an input without a value per
+                observation.
+
+        Warns:
+            OutputWarning: If an edited keyword array is one the kernel computes no
+                site from, so the draws do not respond to it.
+        """
+        if not isinstance(args.get("X"), ArrayLike):
+            msg = (
+                "`build_scenario` edits an array input; a data loader has no "
+                "observations."
+            )
+            raise TypeError(msg)
+        X = np.asarray(args["X"])
+        n_obs = X.shape[0]
+        card = self._card
+        features = card.features if card is not None else ()
+        if features and (X.ndim <= 1 or len(features) != X.shape[1]):
+            msg = (
+                f"The card names {len(features)} feature(s), but the input has shape "
+                f"{X.shape}."
+            )
+            raise ValueError(msg)
+        # The inputs by name: the input, its features by their declared names or as
+        # `X[i]`, and the keyword arrays, among which the method's own parameters
+        # and the mapped sites do not count
+        own = {
+            name
+            for method in (self.predict, self.predict_on_batch)
+            for name, p in signature(method).parameters.items()
+            if p.kind is not p.VAR_KEYWORD
+        }
+        inputs: dict[str, tuple[str, int | None]] = {"X": ("X", None)}
+        if X.ndim > 1:
+            for j in range(X.shape[1]):
+                inputs[features[j] if features else f"X[{j}]"] = ("X", j)
+        inputs.update(
+            (name, (name, None))
+            for name, value in args.items()
+            if name not in own and isinstance(value, ArrayLike) and np.ndim(value)
+        )
+        index = None
+        if observations is not None:
+            index = np.asarray(observations)
+            fits = (
+                index.shape == (n_obs,)
+                if index.dtype == bool
+                else index.ndim == 1
+                and np.issubdtype(index.dtype, np.integer)
+                and bool(((-n_obs <= index) & (index < n_obs)).all())
+            )
+            if not fits:
+                msg = (
+                    f"`observations` must be a boolean mask over the {n_obs} "
+                    "observations or integer indices among them."
+                )
+                raise ValueError(msg)
+        treatments = card.treatments if card is not None else {}
+        spec = self._kernel_spec
+        sites = set(spec.sample_sites) if spec is not None and spec.traced else set()
+        edited: dict[str, np.ndarray] = {}
+        for name, change in changes.items():
+            for each in treatments.get(name, (name,)):
+                if each not in inputs:
+                    msg = (
+                        f"{each!r} is a sample site, which `intervention` sets."
+                        if each in sites
+                        else f"{each!r} is none of the inputs a scenario can edit: "
+                        f"{', '.join(map(repr, (*treatments, *inputs)))}."
+                    )
+                    raise ValueError(msg)
+                argument, column = inputs[each]
+                if argument not in edited:
+                    edited[argument] = np.array(args[argument])
+                array = edited[argument]
+                current = array if column is None else array[:, column]
+                value = np.asarray(change(current) if callable(change) else change)
+                try:
+                    new = np.broadcast_to(value, current.shape)
+                except ValueError:
+                    msg = (
+                        f"The value for {each!r} has shape {value.shape}, which does "
+                        f"not broadcast to {current.shape}."
+                    )
+                    raise ValueError(msg) from None
+                if index is None:
+                    current[...] = new
+                elif array.shape[0] != n_obs:
+                    msg = (
+                        f"`observations` selects among the {n_obs} observations, but "
+                        f"{argument!r} has no value per observation."
+                    )
+                    raise ValueError(msg)
+                else:
+                    current[index] = new[index]
+        # The draws respond to an edited keyword array only where the kernel computes
+        # a site from it
+        if self._site_arguments:
+            reached = set().union(*self._site_arguments.values())
+            if unreached := sorted(name for name in edited if name not in reached):
+                msg = (
+                    f"Argument(s) {', '.join(map(repr, unreached))} are ones the "
+                    "kernel computes no site from, so the draws do not respond to "
+                    "them."
+                )
+                warn(
+                    msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES
+                )
+
+        return {**args, **edited}
+
+    def check_scenario(
+        self,
+        args_baseline: Mapping[str, object],
+        args_intervention: Mapping[str, object],
+        *,
+        by: Mapping[str, ArrayLike] | None = None,
+        pattern: Iterable[str] | Mapping[str, Iterable[str]] | None = None,
+        absent: Mapping[str, object] | None = None,
+    ) -> dict[str, object]:
+        """Compare two scenarios against the declared causal scope and the data.
+
+        The scenarios are the argument dictionaries of
+        :meth:`~aimz.ImpactModel.estimate_effect`: the input under ``X``, the keyword
+        arguments of the kernel, and the ``intervention`` and ``condition`` mappings.
+        Nothing is predicted. The scenarios are compared observation by observation,
+        and the observations that change are compared with the baseline's. Every
+        value returned is a fact about the scenarios and the data, not a verdict:
+        what a share means for an answer is the caller's decision, and nothing here
+        establishes that a contrast is causal. With a card attached,
+        :meth:`~aimz.ImpactModel.estimate_effect` runs this check with its defaults
+        on two such scenarios and records the result in its ``scenario_check``
+        attribute; a call of its own takes ``by``, ``pattern`` and ``absent``.
+
+        Args:
+            args_baseline: Arguments of the baseline scenario, with an array input.
+            args_intervention: Arguments of the intervention scenario, over the same
+                observations.
+            by: Label arrays an effect will be grouped by, keyed by name. Only the
+                names are read, to flag those the card declares post-treatment.
+            pattern: The inputs whose presence pattern the support and crowding
+                shares are computed over: names, each a group of its own, or a
+                mapping of group name to the names whose presence it combines. By
+                default the card's treatments, each over the names it spans that
+                are per observation, else the inputs that changed, each a group of
+                its own. A wide pattern makes support small, so group the inputs
+                that belong together, such as the features one treatment is
+                recorded in.
+            absent: The value that counts as absence for an input, by name, for inputs
+                whose zero is elsewhere after preprocessing; zero for every other
+                input.
+
+        Returns:
+            ``n_obs``, the observations compared. ``changed``, each input that
+            differs, with the share of observations whose value differs: a feature of
+            a two-dimensional input by its declared name or ``X[i]``, a keyword array
+            by its argument name, a site of ``intervention`` or ``condition`` by its
+            name, and a value that is not per observation with share one.
+            ``obs_changed``, the share of observations where anything differs.
+            ``undeclared``, the changed names that no treatment of the card spans,
+            empty when the card declares none. ``extrapolation``, for
+            each changed numeric input, the share of its changed observations whose
+            intervention value lies outside the range the baseline observes.
+            ``pattern``, the groups the presence pattern is made of. ``support``, the
+            share of changed observations whose intervention pattern occurs among the
+            baseline's observations, and ``crowded``, the share whose pattern holds
+            more intervention observations than baseline observations; both ``None``
+            when nothing changed or no pattern applies. ``post_treatment``, the names
+            in ``by`` that the card declares post-treatment.
+
+        Raises:
+            TypeError: If an input is not an array, as a data loader is.
+            ValueError: If the two inputs differ in shape, if the card declares
+                features whose number differs from the input's, or if ``pattern`` or
+                ``absent`` names an input that is not per observation in both
+                scenarios.
+
+        Warns:
+            ScopeWarning: If the card declares treatments and an undeclared input
+                changed, or if ``by`` names a variable the card declares
+                post-treatment.
+        """
+        card = self._card
+        if not all(
+            isinstance(args["X"], ArrayLike)
+            for args in (args_baseline, args_intervention)
+        ):
+            msg = (
+                "`check_scenario` compares array inputs; a data loader has no "
+                "observations."
+            )
+            raise TypeError(msg)
+        X_b, X_i = np.asarray(args_baseline["X"]), np.asarray(args_intervention["X"])
+        if X_b.shape != X_i.shape:
+            msg = (
+                f"The scenarios' inputs differ in shape, {X_b.shape} against "
+                f"{X_i.shape}; a scenario compares the same observations."
+            )
+            raise ValueError(msg)
+        n_obs = X_b.shape[0]
+        features = card.features if card is not None else ()
+        if features and (X_b.ndim <= 1 or len(features) != X_b.shape[1]):
+            msg = (
+                f"The card names {len(features)} feature(s), but the input has shape "
+                f"{X_b.shape}."
+            )
+            raise ValueError(msg)
+
+        # Per-observation values by name: the input's features, then the keyword
+        # arrays and the mapped sites whose leading axis follows the observations
+        values: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+        if X_b.ndim > 1:
+            for j in range(X_b.shape[1]):
+                values[features[j] if features else f"X[{j}]"] = (
+                    X_b[:, j].reshape(n_obs, -1),
+                    X_i[:, j].reshape(n_obs, -1),
+                )
+        else:
+            values["X"] = (X_b.reshape(n_obs, -1), X_i.reshape(n_obs, -1))
+        own = {
+            name
+            for method in (self.predict, self.predict_on_batch)
+            for name, p in signature(method).parameters.items()
+            if p.kind is not p.VAR_KEYWORD
+        }
+        pairs = [
+            (name, args_baseline.get(name), args_intervention.get(name))
+            for name in sorted({*args_baseline, *args_intervention} - own)
+        ]
+        for name in ("intervention", "condition"):
+            mappings = [
+                cast("Mapping[str, object]", args.get(name) or {})
+                for args in (args_baseline, args_intervention)
+            ]
+            pairs.extend(
+                (site, mappings[0].get(site), mappings[1].get(site))
+                for site in sorted({*mappings[0], *mappings[1]})
+            )
+        whole: dict[str, bool] = {}
+        for name, a, b in pairs:
+            if a is None or b is None:
+                whole[name] = True
+                continue
+            arrays = (np.asarray(a), np.asarray(b))
+            if (
+                arrays[0].ndim >= 1
+                and arrays[0].shape == arrays[1].shape
+                and arrays[0].shape[0] == n_obs
+            ):
+                values[name] = (
+                    arrays[0].reshape(n_obs, -1),
+                    arrays[1].reshape(n_obs, -1),
+                )
+            else:
+                whole[name] = arrays[0].shape != arrays[1].shape or not np.array_equal(
+                    *arrays,
+                )
+
+        changed: dict[str, float] = {}
+        masks: dict[str, np.ndarray] = {}
+        any_changed = np.zeros(n_obs, dtype=bool)
+        for name, (a, b) in values.items():
+            neq = a != b
+            if np.issubdtype(a.dtype, np.floating) and np.issubdtype(
+                b.dtype,
+                np.floating,
+            ):
+                neq &= ~(np.isnan(a) & np.isnan(b))
+            rows = neq.any(axis=1)
+            if rows.any():
+                changed[name] = float(rows.mean())
+                masks[name] = rows
+                any_changed |= rows
+        for name, differs in whole.items():
+            if differs:
+                changed[name] = 1.0
+                any_changed[:] = True
+
+        treatments = card.treatments if card is not None else {}
+        spanned = {name for names in treatments.values() for name in names}
+        undeclared = sorted(
+            name
+            for name in changed
+            if spanned
+            and name not in spanned
+            and not (name.startswith("X[") and "X" in spanned)
+        )
+        extrapolation: dict[str, float] = {}
+        for name, rows in masks.items():
+            a, b = values[name]
+            if a.shape[1] != 1 or not np.issubdtype(a.dtype, np.number):
+                continue
+            new = b[rows, 0]
+            extrapolation[name] = float(
+                ((new < np.nanmin(a)) | (new > np.nanmax(a))).mean(),
+            )
+
+        per_obs = {name for name, (a, _) in values.items() if a.shape[1] == 1}
+        if pattern is None:
+            groups = {
+                group: tuple(name for name in names if name in per_obs)
+                for group, names in treatments.items()
+            }
+            groups = {group: names for group, names in groups.items() if names} or {
+                name: (name,) for name in changed if name in per_obs
+            }
+        elif hasattr(pattern, "items"):
+            groups = {
+                str(group): tuple(names)
+                for group, names in cast(
+                    "Mapping[str, Iterable[str]]",
+                    pattern,
+                ).items()
+            }
+        else:
+            groups = {name: (name,) for name in cast("Iterable[str]", pattern)}
+        zero = dict(absent or {})
+        unknown = sorted(
+            name
+            for name in {*zero, *(name for names in groups.values() for name in names)}
+            if name not in per_obs
+        )
+        if unknown:
+            msg = (
+                f"Name(s) {', '.join(map(repr, unknown))} in `pattern` or `absent` "
+                "are not inputs with one value per observation in both scenarios: "
+                f"{', '.join(map(repr, sorted(per_obs)))}."
+            )
+            raise ValueError(msg)
+        support = crowded = None
+        if groups and any_changed.any():
+            packed = [
+                np.packbits(
+                    np.stack(
+                        [
+                            np.any(
+                                [
+                                    values[name][side][:, 0] != zero.get(name, 0)
+                                    for name in names
+                                ],
+                                axis=0,
+                            )
+                            for names in groups.values()
+                        ],
+                        axis=1,
+                    ),
+                    axis=1,
+                )
+                for side in (0, 1)
+            ]
+            void = np.dtype((np.void, packed[0].shape[1]))
+            keys_b = np.ascontiguousarray(packed[0]).view(void).ravel()
+            keys_i = np.ascontiguousarray(packed[1]).view(void).ravel()[any_changed]
+            index = np.unique(np.concatenate([keys_b, keys_i]), return_inverse=True)[1]
+            index_b, index_i = index[: len(keys_b)], index[len(keys_b) :]
+            count_b = np.bincount(index_b, minlength=index.max() + 1)
+            count_i = np.bincount(index_i, minlength=index.max() + 1)
+            support = float((count_b[index_i] > 0).mean())
+            crowded = float((count_i[index_i] > count_b[index_i]).mean())
+
+        post = sorted(
+            name
+            for name in (by or {})
+            if card is not None and name in card.post_treatment
+        )
+        if undeclared:
+            msg = (
+                f"Changed input(s) {', '.join(map(repr, undeclared))} are not among "
+                f"the card's treatments ({', '.join(map(repr, treatments))}); the "
+                "scenario is outside the declared causal scope."
+            )
+            warn(msg, category=ScopeWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
+        if post:
+            msg = (
+                f"Grouping by {', '.join(map(repr, post))}, which the card declares "
+                "post-treatment; a contrast within these groups is descriptive."
+            )
+            warn(msg, category=ScopeWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
+
+        return {
+            "n_obs": int(n_obs),
+            "changed": changed,
+            "obs_changed": float(any_changed.mean()) if n_obs else 0.0,
+            "undeclared": undeclared,
+            "extrapolation": extrapolation,
+            "pattern": {group: list(names) for group, names in groups.items()},
+            "support": support,
+            "crowded": crowded,
+            "post_treatment": post,
+        }
 
     def log_likelihood(
         self,

@@ -15,6 +15,7 @@ Attributes
 .. autosummary::
    :toctree: generated/
 
+   ImpactModel.card
    ImpactModel.inference
    ImpactModel.kernel
    ImpactModel.kernel_spec
@@ -62,6 +63,8 @@ Miscellaneous
    :toctree: generated/
 
    ImpactModel.describe
+   ImpactModel.build_scenario
+   ImpactModel.check_scenario
    ImpactModel.estimate_effect
    ImpactModel.cleanup
    ImpactModel.cleanup_models

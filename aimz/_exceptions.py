@@ -24,6 +24,7 @@ __all__ = [
     "NotFittedError",
     "OutputWarning",
     "PerformanceWarning",
+    "ScopeWarning",
 ]
 
 # Warnings skip the frames in this package to point at the caller's own line
@@ -52,3 +53,7 @@ class OutputWarning(AimzWarning):
 
 class PerformanceWarning(AimzWarning):
     """Warning class for a call that runs correctly but by a fallback or slower path."""
+
+
+class ScopeWarning(AimzWarning):
+    """Warning class for a scenario outside the causal scope a card declares."""

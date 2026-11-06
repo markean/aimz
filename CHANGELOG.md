@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file and are best
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- {class}`~aimz.CausalCard`, an optional declaration of a model's causal scope: the input's feature names, the treatments, each a name mapped to the inputs it spans, for a treatment recorded in several features, the outcome, the unit, the post-treatment variables, the claimed adjustment set, a graph of declared edges, and free-form extras such as evidence and policy. It is attached through the `card` argument of {class}`~aimz.ImpactModel` or its `card` property, which checks the treatment and unit names against the kernel once it is traced, returned by {meth}`~aimz.ImpactModel.describe`, and recorded by {func}`~aimz.mlflow.save_model` under the `aimz` flavor of the `MLmodel` file, from which {func}`~aimz.mlflow.load_model` attaches it when the pickle holds no card, warning instead of raising when its names do not fit the kernel ([#XXX](https://github.com/markean/aimz/issues/XXX)).
+- {meth}`~aimz.ImpactModel.check_scenario`, which compares the two scenarios of an effect against the declared scope and the baseline data without predicting, and returns the inputs that changed with the share of observations each changes, the changes the card does not declare as treatments, the share of changed observations outside the observed range, and the support and crowding of their presence patterns over the card's treatments, or over groups the caller names ([#XXX](https://github.com/markean/aimz/issues/XXX)).
+- {meth}`~aimz.ImpactModel.build_scenario`, which builds the intervention scenario from the baseline's argument dictionary by editing its inputs by name, a treatment of the card over every feature it spans, a declared feature, a feature as `X[i]`, the input or a keyword array, by a value or a callable of the current values and for some or all observations, in copies that leave the baseline as it is, and warns when an edited keyword array is one the kernel computes no site from ([#XXX](https://github.com/markean/aimz/issues/XXX)).
+- {class}`~aimz.ScopeWarning`, issued by {meth}`~aimz.ImpactModel.check_scenario`, directly or through {meth}`~aimz.ImpactModel.estimate_effect`, for a change the card does not declare as a treatment and for grouping by a variable the card declares post-treatment, so that a harness can turn a scenario outside the declared scope into an error ([#XXX](https://github.com/markean/aimz/issues/XXX)).
+
+### Changed
+
+- {meth}`~aimz.ImpactModel.describe` now reports for each site the name of the distribution it samples and the `upstream` sample sites and array `arguments` of the kernel that its distribution or its deterministic value is computed from, derived from a trace of the kernel, instead of only its kind, dimension names, and draw shape ([#XXX](https://github.com/markean/aimz/issues/XXX)).
+- {meth}`~aimz.ImpactModel.estimate_effect` now runs {meth}`~aimz.ImpactModel.check_scenario` on its two argument dictionaries when a card is attached and both hold array inputs of one shape, before the scenarios are predicted, so that a change the card does not declare as a treatment warns with {class}`~aimz.ScopeWarning` before the draws are made, and records the facts of the check in the `scenario_check` attribute of the result ([#XXX](https://github.com/markean/aimz/issues/XXX)).
+
 ## [v0.17.0](https://github.com/markean/aimz/releases/tag/v0.17.0) - 2026-10-25
 
 ### Added

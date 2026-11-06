@@ -26,12 +26,14 @@ aimz (native) format
 
 from __future__ import annotations
 
+import json
 import logging
 import pickle
 from importlib.metadata import version
 from inspect import getsource, signature
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
+from warnings import warn
 
 import mlflow
 import numpy as np
@@ -92,6 +94,8 @@ from mlflow.utils.model_utils import (
 from mlflow.utils.requirements_utils import _get_pinned_requirement
 from numpyro.infer import MCMC, SVI
 
+from aimz._exceptions import _SKIP_FILE_PREFIXES, ScopeWarning
+from aimz.model.causal_card import CausalCard
 from aimz.utils._kwargs import _is_per_observation
 from aimz.utils._validation import _is_arraylike
 
@@ -184,6 +188,10 @@ def save_model(
         metadata: {{ metadata }}
         extra_files: {{ extra_files }}
 
+    A model with a :class:`~aimz.model.CausalCard` is saved with the card recorded
+    under the ``aimz`` flavor of its ``MLmodel`` file, so that its declared scope can
+    be read without unpickling it.
+
     .. code-block:: python
         :caption: Example
 
@@ -238,6 +246,12 @@ def save_model(
     model_class = _get_fully_qualified_class_name(model)
 
     extra_files_config = _copy_extra_files(extra_files, path)
+    # The card is recorded as plain values; what YAML cannot represent is a string
+    card_config = (
+        {}
+        if model.card is None
+        else {"causal_card": json.loads(json.dumps(model.card.to_dict(), default=str))}
+    )
 
     pyfunc.add_to_model(
         mlflow_model,
@@ -255,6 +269,7 @@ def save_model(
         serialization_format=SERIALIZATION_FORMAT_CLOUDPICKLE,
         code=code_dir_subpath,
         **extra_files_config,
+        **card_config,
     )
     if size := get_total_file_size(path):
         mlflow_model.model_size_bytes = size
@@ -300,7 +315,7 @@ def _save_model(
     output_path: Path,
     serialization_format: str,
 ) -> None:
-    """Pickle the model to ``output_path`` in the given serialization format.
+    """Pickle the model to ``output_path``.
 
     Raises:
         MlflowException: If the serialization format is unknown.
@@ -460,7 +475,17 @@ def _load_model_from_local_file(
 
 
 def _load_model(path: str | Path) -> ImpactModel:
-    """Load the model of an MLflow Model directory, or of its ``model.pkl``."""
+    """Load the model of an MLflow Model directory, or of its ``model.pkl``.
+
+    A card recorded under the ``aimz`` flavor of the ``MLmodel`` file is attached
+    when the pickle holds no card, so a card can be added to a logged model through
+    that file. A card whose names the kernel does not know is left off with a
+    warning.
+
+    Warns:
+        ScopeWarning: If the card recorded in the ``MLmodel`` file is not one the
+            model accepts.
+    """
     path = Path(path)
     model_dir = path.parent if path.is_file() else path
     flavor_conf = _get_flavor_configuration(
@@ -474,7 +499,16 @@ def _load_model(path: str | Path) -> ImpactModel:
         SERIALIZATION_FORMAT_CLOUDPICKLE,
     )
 
-    return _load_model_from_local_file(aimz_model_path, serialization_format)
+    model = _load_model_from_local_file(aimz_model_path, serialization_format)
+    card = flavor_conf.get("causal_card")
+    if model.card is None and card is not None:
+        try:
+            model.card = CausalCard.from_dict(card)
+        except (TypeError, ValueError) as e:
+            msg = f"The card in {model_dir / MLMODEL_FILE_NAME} was not attached: {e}"
+            warn(msg, category=ScopeWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
+
+    return model
 
 
 def _load_pyfunc(path: str) -> _AimzModelWrapper:
@@ -492,7 +526,8 @@ def load_model(model_uri: str | Path, dst_path: str | None = None) -> ImpactMode
             default a local output path is created.
 
     Returns:
-        An aimz model (an instance of :class:`~aimz.ImpactModel`).
+        An aimz model (an instance of :class:`~aimz.ImpactModel`), with the card
+        recorded in its ``MLmodel`` file when the pickle holds none.
 
     .. code-block:: python
         :caption: Example

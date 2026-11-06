@@ -24,7 +24,14 @@ import pytest
 from jax import Array, random
 from numpyro import deterministic, plate, sample
 
-from aimz import ImpactModel, OutputWarning, PerformanceWarning
+from aimz import (
+    CausalCard,
+    ImpactModel,
+    OutputWarning,
+    PerformanceWarning,
+    ScopeWarning,
+)
+from aimz.utils.data import ArrayDataset, ArrayLoader
 from tests.conftest import latent_intervention_model, lm, make_svi
 
 
@@ -293,5 +300,93 @@ def test_estimate_effect_warns_on_stale_baseline(
         im.estimate_effect(
             output_baseline=baseline,
             args_intervention={"X": X, "return_sites": "mu"},
+            on_batch=True,
+        )
+
+
+def test_estimate_effect_records_scenario_check(
+    synthetic_data: tuple[Array, Array],
+) -> None:
+    """With a card, lazily generated scenarios are checked and the facts recorded."""
+    X, y = synthetic_data
+    X_b = np.asarray(X)
+    features = tuple(f"x{j}" for j in range(X_b.shape[1]))
+    im = ImpactModel(lm, rng_key=random.key(0), inference=make_svi(lm))
+    im.fit_on_batch(X_b, y, num_steps=10, num_samples=5, progress=False)
+    args = {"X": X_b}
+
+    # Without a card, nothing is checked
+    scenario = im.build_scenario(args, {"X[0]": 0.0})
+    effect = im.estimate_effect(
+        args_baseline=args,
+        args_intervention=scenario,
+        on_batch=True,
+    )
+    assert "scenario_check" not in effect.attrs
+
+    # With a card, the facts are those of the check, and a change the card does not
+    # declare warns from the estimate before anything is predicted: under a filter
+    # that turns the warning into an error, no stream is started
+    im.card = CausalCard(features=features, treatments={"t": ("x0", "x1")})
+    mask = X_b[:, 5] > 0
+    declared = im.build_scenario(args, {"t": 0.0}, observations=mask)
+    effect = im.estimate_effect(
+        args_baseline=args,
+        args_intervention=declared,
+        on_batch=True,
+    )
+    assert effect.attrs["scenario_check"] == im.check_scenario(args, declared)
+    assert effect.attrs["scenario_check"]["changed"] == {
+        "x0": mask.mean(),
+        "x1": mask.mean(),
+    }
+    undeclared = im.build_scenario(args, {"x2": 0.0})
+    with pytest.warns(ScopeWarning, match="x2"):
+        effect = im.estimate_effect(
+            args_baseline=args,
+            args_intervention=undeclared,
+            on_batch=True,
+        )
+    assert effect.attrs["scenario_check"]["undeclared"] == ["x2"]
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", ScopeWarning)
+        with pytest.raises(ScopeWarning, match="x2"):
+            im.estimate_effect(
+                args_baseline={**args, "progress": False},
+                args_intervention={**undeclared, "progress": False},
+            )
+    assert im.temp_dir is None
+
+    # Scenarios over other observations, precomputed outputs, and data loaders are
+    # not checked
+    with pytest.warns(OutputWarning, match="different dimension sizes"):
+        effect = im.estimate_effect(
+            args_baseline=args,
+            args_intervention={"X": X_b[:80]},
+            on_batch=True,
+        )
+    assert "scenario_check" not in effect.attrs
+    rng_key = random.key(0)
+    effect = im.estimate_effect(
+        output_baseline=im.predict_on_batch(X_b, rng_key=rng_key),
+        output_intervention=im.predict_on_batch(declared["X"], rng_key=rng_key),
+    )
+    assert "scenario_check" not in effect.attrs
+    loaders = [
+        ArrayLoader(ArrayDataset(X=arrays["X"]), rng_key=random.key(0))
+        for arrays in (args, declared)
+    ]
+    effect = im.estimate_effect(
+        args_baseline={"X": loaders[0], "store": "memory", "progress": False},
+        args_intervention={"X": loaders[1], "store": "memory", "progress": False},
+    )
+    assert "scenario_check" not in effect.attrs
+
+    # A card whose features do not fit the input raises, as the check does
+    im.card = CausalCard(features=("a",), treatments=("a",))
+    with pytest.raises(ValueError, match="feature"):
+        im.estimate_effect(
+            args_baseline=args,
+            args_intervention=declared,
             on_batch=True,
         )

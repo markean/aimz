@@ -307,3 +307,46 @@ Comparing these two distributions allows us to estimate the effect of ``Z`` on `
     :hide-code:
 
     effect
+
+
+Declaring the Causal Scope
+--------------------------
+aimz derives nothing about identification from a kernel: which inputs are treatments, which variables are downstream of them, and which covariates adjust for confounding are the modeler's assertions.
+A :class:`~aimz.model.CausalCard` records them, so that they travel with the fitted model and a scenario can be compared against them.
+Attach it through the ``card`` argument of :class:`~aimz.ImpactModel` or the :attr:`~aimz.ImpactModel.card` property; :meth:`~aimz.ImpactModel.describe` returns it as plain values, and :func:`~aimz.mlflow.save_model` records it under the ``aimz`` flavor of the ``MLmodel`` file, where it can be read without unpickling the model.
+The card declares what the kernel cannot state, such as what a feature of an input means or an edge among inputs; what the kernel does state, the distribution of each site and the sample sites and arguments it is computed from, :meth:`~aimz.ImpactModel.describe` derives from a trace and reports beside the card.
+A treatment maps its name to the inputs it spans, for a treatment recorded in several features, so that a scenario over them is one scenario; a sequence of names declares each as a treatment of its own.
+Once the kernel is traced, the names the treatments span and the unit name are checked against the declared features, the kernel's arguments and its sample sites; the other fields are free, since a label an effect is grouped by need not reach the kernel.
+
+.. code-block:: python
+
+    from aimz import CausalCard, ImpactModel
+
+    card = CausalCard(
+        features=["t_1", "t_2", "w", "z"],
+        treatments={"t": ["t_1", "t_2"], "w": ["w"]},
+        post_treatment=["g"],
+        adjustment=["z"],
+        graph=[["t", "y"], ["w", "y"], ["z", "t"]],
+        extra={"design": "within-unit", "verdict_date": "2026-10-01"},
+    )
+    im = ImpactModel(model, rng_key=rng_key, inference=inference, card=card)
+
+:meth:`~aimz.ImpactModel.build_scenario` builds the intervention scenario from the baseline's argument dictionary by editing its inputs by name: a treatment of the card, which edits every input it spans, a declared feature, a feature as ``X[i]``, the input ``X``, or a keyword array.
+A value is set as given, a callable receives the current values and returns the new ones, and ``observations`` restricts the change to some of the observations, as a mask or as indices along the input's leading axis.
+The arrays given are never touched, so the baseline stays as it is, and a keyword array the kernel computes no site from warns with :class:`~aimz.OutputWarning`, since the draws cannot respond to it.
+:meth:`~aimz.ImpactModel.check_scenario` takes the two argument dictionaries of :meth:`~aimz.ImpactModel.estimate_effect` and compares them without predicting anything.
+It returns the inputs that differ with the share of observations each changes, the changes the card does not declare as treatments, the share of changed observations whose new values lie outside the range the baseline observes, and the support and crowding of their presence patterns: the share of changed observations whose pattern of present treatments occurs in the baseline, and the share whose pattern holds more intervention observations than baseline observations.
+Presence means a value other than zero, or other than the value ``absent`` names for an input whose zero moved in preprocessing.
+By default the pattern is made of the card's treatments, each present where one of the inputs it spans is; ``pattern`` regroups the inputs, keeping those that belong together in one group, since a wide pattern makes support small.
+A change outside the declared treatments, or grouping by a declared post-treatment variable, warns with :class:`~aimz.ScopeWarning`, which a harness can turn into an error like the other categories.
+With a card attached, :meth:`~aimz.ImpactModel.estimate_effect` runs the check itself on two argument dictionaries with array inputs of one shape, before anything is predicted, so that such an error stops the estimate before the draws are made, and records the facts in the ``scenario_check`` attribute of the result; a call of :meth:`~aimz.ImpactModel.check_scenario` takes ``by``, ``pattern`` and ``absent``.
+Every value is a fact about the scenarios and the data; whether a share is acceptable is the caller's decision, and nothing here establishes that a contrast is causal.
+
+.. code-block:: python
+
+    args = {"X": X}
+    scenario = im.build_scenario(args, {"t": 0.0})  # t absent, in both of its features
+    effect = im.estimate_effect(args_baseline=args, args_intervention=scenario)
+    report = effect.attrs["scenario_check"]  # as im.check_scenario(args, scenario)
+    report["changed"], report["extrapolation"], report["support"], report["crowded"]

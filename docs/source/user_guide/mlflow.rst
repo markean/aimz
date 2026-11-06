@@ -76,6 +76,7 @@ Artifacts
 * Contents inside the MLflow Model artifact:
 
   - Pickled model (requires ``cloudpickle``; logged if ``log_models=True``)
+  - The model's :class:`~aimz.CausalCard`, when one is attached, recorded under the ``aimz`` flavor of the ``MLmodel`` file so that its declared scope can be read without unpickling the model
   - Conda / requirements / Python environment descriptors (for reproducibility)
   - Optional input example and signature (if ``log_input_examples`` or ``log_model_signatures`` are enabled and ``log_models=True``), where:
 
