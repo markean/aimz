@@ -1556,6 +1556,10 @@ class ImpactModel(BaseModel):
     ) -> xr.DataTree | dict[str, npt.NDArray]:
         """Draw posterior samples from the model's inference state.
 
+        Under SVI, each draw is a call of the guide, so a guide whose call is a point
+        estimate gives that point in every draw; set draws made another way with
+        :meth:`~aimz.ImpactModel.set_posterior_sample`.
+
         Args:
             num_samples: The number of posterior samples to draw. Under MCMC, it counts
                 per chain and before thinning, as the sampler's ``num_samples`` does.
@@ -1823,6 +1827,10 @@ class ImpactModel(BaseModel):
         give the new model a new guide too, since an autoguide keeps the sites of its
         first call.
 
+        Under SVI, each draw is a call of the guide, so a guide whose call is a point
+        estimate gives that point in every draw; set draws made another way with
+        :meth:`~aimz.ImpactModel.set_posterior_sample`.
+
         Args:
             X: Input array with observations on the leading axis.
             y: Output array with observations on the leading axis.
@@ -1973,6 +1981,10 @@ class ImpactModel(BaseModel):
         lacks it and the predictive methods draw it from its prior. For such a site,
         give the new model a new guide too, since an autoguide keeps the sites of its
         first call.
+
+        Each draw is a call of the guide, so a guide whose call is a point estimate
+        gives that point in every draw; set draws made another way with
+        :meth:`~aimz.ImpactModel.set_posterior_sample`.
 
         Args:
             X: Input array with observations on the leading axis, or a data loader
