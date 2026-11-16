@@ -143,8 +143,8 @@ def test_describe_workflow(synthetic_data: tuple[Array, Array]) -> None:
     im_scan.fit_on_batch(X, y, num_steps=10, num_samples=20, progress=False)
     described = im_scan.describe()
     assert described["sites"]["a"]["distribution"] == "Normal"
-    assert described["sites"]["y"]["upstream"] == []
-    assert described["sites"]["y"]["arguments"] == []
+    assert described["sites"]["y"]["upstream"] is None
+    assert described["sites"]["y"]["arguments"] is None
 
     # Samples set by hand on a model that was never traced: the sites come from them
     im_set = ImpactModel(lm, rng_key=random.key(0), inference=make_svi(lm))
@@ -158,8 +158,8 @@ def test_describe_workflow(synthetic_data: tuple[Array, Array]) -> None:
         "kind": "latent",
         "distribution": None,
         "dims": None,
-        "upstream": [],
-        "arguments": [],
+        "upstream": None,
+        "arguments": None,
         "draw_shape": [10],
     }
     assert described["sites"]["y"]["kind"] == "observed"

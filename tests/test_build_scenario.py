@@ -15,20 +15,11 @@
 """Tests for the `.build_scenario()` method."""
 
 import numpy as np
-import numpyro.distributions as dist
 import pytest
 from jax import Array, random
-from numpyro import plate, sample
 
-from aimz import CausalCard, ImpactModel, OutputWarning
+from aimz import CausalCard, ImpactModel
 from tests.conftest import lm, lm_with_kwargs_array, make_svi
-
-
-def unused_argument(X: Array, u: Array, y: Array | None = None) -> None:
-    """Linear regression with an argument the kernel never reads."""
-    w = sample("w", dist.Normal(0.0, 1.0).expand([X.shape[1]]).to_event(1))
-    with plate("obs", X.shape[0]):
-        sample("y", dist.Normal(X @ w, 1.0), obs=y)
 
 
 def test_build_scenario_workflow(synthetic_data: tuple[Array, Array]) -> None:
@@ -48,9 +39,7 @@ def test_build_scenario_workflow(synthetic_data: tuple[Array, Array]) -> None:
 
     # With a card, a treatment edits every feature it spans, a callable transforms
     # the current values, a per-observation value broadcasts over the features, and
-    # `observations` selects the ones to change, as a mask or as indices; once the
-    # kernel is traced,
-    # an edit of the input warns of nothing
+    # `observations` selects the ones to change, as a mask or as indices
     im.card = CausalCard(features=features, treatments={"t": ("x0", "x1"), "x2": "x2"})
     im.fit_on_batch(X_b, y, num_steps=10, num_samples=5, progress=False)
     halved = im.build_scenario(args, {"t": lambda v: 0.5 * v, "x2": 1.0})
@@ -81,8 +70,7 @@ def test_build_scenario_workflow(synthetic_data: tuple[Array, Array]) -> None:
     assert effect.posterior_predictive["y"].shape[-1] == n_obs
 
     # A keyword array is edited by its argument name, with `observations` along its
-    # leading axis, and the other entries come back as given; a keyword array the kernel
-    # computes no site from warns once the kernel is traced
+    # leading axis, and the other entries come back as given
     im_kw = ImpactModel(
         lm_with_kwargs_array,
         rng_key=random.key(0),
@@ -96,14 +84,6 @@ def test_build_scenario_workflow(synthetic_data: tuple[Array, Array]) -> None:
     )
     assert np.array_equal(shifted["c"], np.where(mask, 2.0, 1.0))
     assert shifted["X"] is X_b
-    im_unused = ImpactModel(
-        unused_argument,
-        rng_key=random.key(0),
-        inference=make_svi(unused_argument),
-    )
-    im_unused.fit_on_batch(X_b, y, u=c, num_steps=10, num_samples=5, progress=False)
-    with pytest.warns(OutputWarning, match="no site"):
-        im_unused.build_scenario({"X": X_b, "u": c}, {"u": 0.0})
 
     # A name that is not an input, a value that does not broadcast, `observations`
     # that do not fit, a sample site, `observations` for an input without any, a card

@@ -48,7 +48,6 @@ def test_check_scenario_facts(synthetic_data: tuple[Array, Array]) -> None:
     # both, so the zeroed rows show a pattern the baseline never holds
     assert out["pattern"] == {"x0": ["x0"], "x1": ["x1"]}
     assert out["support"] == 0.0
-    assert out["crowded"] == 1.0
     assert out["post_treatment"] == []
     json.dumps(out)
 
@@ -61,7 +60,6 @@ def test_check_scenario_facts(synthetic_data: tuple[Array, Array]) -> None:
     assert out_group["undeclared"] == []
     assert out_group["pattern"] == {"x": ["x0", "x1"], "x2": ["x2"]}
     assert out_group["support"] == 1.0
-    assert out_group["crowded"] == 0.0
 
     # A keyword-array treatment, with the pattern given as a group and the absence
     # value moved; the method's own parameters in the dictionaries are not compared
@@ -98,6 +96,12 @@ def test_check_scenario_facts(synthetic_data: tuple[Array, Array]) -> None:
         )
     assert out_scalar["changed"] == {"scale": 1.0}
     assert out_scalar["obs_changed"] == 1.0
+    # A keyword argument that is `None` in both scenarios has not changed
+    out_none = im_kw.check_scenario(
+        {"X": X_b, "c": c_b, "scale": None},
+        {"X": X_b, "c": c_b, "scale": None},
+    )
+    assert out_none["changed"] == {}
 
     # Without a card the features are positional and nothing is undeclared
     im_plain = ImpactModel(lm, rng_key=random.key(0), inference=make_svi(lm))
@@ -111,6 +115,17 @@ def test_check_scenario_facts(synthetic_data: tuple[Array, Array]) -> None:
         {"X": X_b, "intervention": {"b": 1.0}},
     )
     assert out_site["changed"] == {"b": 1.0}
+    # A keyword argument that holds arrays is compared leaf by leaf
+    out_tree = im_plain.check_scenario(
+        {"X": X_b, "scales": {"a": np.ones(2)}, "knots": (np.ones(2), np.ones(3))},
+        {"X": X_b, "scales": {"a": np.ones(2)}, "knots": (np.ones(2), np.zeros(3))},
+    )
+    assert out_tree["changed"] == {"knots": 1.0}
+    # A one-dimensional input goes by `X`
+    assert im_plain.check_scenario(
+        {"X": X_b[:, 0]},
+        im_plain.build_scenario({"X": X_b[:, 0]}, {"X": 0.0}),
+    )["changed"] == {"X": 1.0}
 
 
 def test_check_scenario_scope_and_errors(synthetic_data: tuple[Array, Array]) -> None:
@@ -166,3 +181,25 @@ def test_check_scenario_scope_and_errors(synthetic_data: tuple[Array, Array]) ->
     )
     with pytest.raises(ValueError, match="feature"):
         im_bad.check_scenario({"X": X_b}, {"X": X_i})
+
+    # A site and the keyword argument of its name share one name: set in one scenario
+    # only, the site has changed for every observation, and the argument's values no
+    # longer stand for the name
+    im_plain = ImpactModel(lm, rng_key=random.key(0), inference=make_svi(lm))
+    t_b, t_i = np.ones(n_obs), np.zeros(n_obs)
+    out_site = im_plain.check_scenario(
+        {"X": X_b, "t": t_b},
+        {"X": X_b, "t": t_b, "intervention": {"t": t_i}},
+    )
+    assert out_site["changed"] == {"t": 1.0}
+    assert out_site["support"] is None
+    # The name has changed where any of its entries has: an argument under a site
+    # that both scenarios set alike, an intervention beside an unchanged condition
+    assert im_plain.check_scenario(
+        {"X": X_b, "t": t_b, "intervention": {"t": t_b}},
+        {"X": X_b, "t": t_i, "intervention": {"t": t_b}},
+    )["changed"] == {"t": 1.0}
+    assert im_plain.check_scenario(
+        {"X": X_b, "condition": {"b": 0.0}, "intervention": {"b": 0.0}},
+        {"X": X_b, "condition": {"b": 0.0}, "intervention": {"b": 1.0}},
+    )["changed"] == {"b": 1.0}

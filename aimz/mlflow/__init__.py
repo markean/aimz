@@ -33,7 +33,6 @@ from importlib.metadata import version
 from inspect import getsource, signature
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
-from warnings import warn
 
 import mlflow
 import numpy as np
@@ -94,8 +93,6 @@ from mlflow.utils.model_utils import (
 from mlflow.utils.requirements_utils import _get_pinned_requirement
 from numpyro.infer import MCMC, SVI
 
-from aimz._exceptions import _SKIP_FILE_PREFIXES, ScopeWarning
-from aimz.model.causal_card import CausalCard
 from aimz.utils._kwargs import _is_per_observation
 from aimz.utils._validation import _is_arraylike
 
@@ -189,8 +186,8 @@ def save_model(
         extra_files: {{ extra_files }}
 
     A model with a :class:`~aimz.model.CausalCard` is saved with the card recorded
-    under the ``aimz`` flavor of its ``MLmodel`` file, so that its declared scope can
-    be read without unpickling it.
+    as ``causal_card`` under the ``aimz`` flavor of its ``MLmodel`` file, so that its
+    declared scope can be read without unpickling it.
 
     .. code-block:: python
         :caption: Example
@@ -475,17 +472,7 @@ def _load_model_from_local_file(
 
 
 def _load_model(path: str | Path) -> ImpactModel:
-    """Load the model of an MLflow Model directory, or of its ``model.pkl``.
-
-    A card recorded under the ``aimz`` flavor of the ``MLmodel`` file is attached
-    when the pickle holds no card, so a card can be added to a logged model through
-    that file. A card whose names the kernel does not know is left off with a
-    warning.
-
-    Warns:
-        ScopeWarning: If the card recorded in the ``MLmodel`` file is not one the
-            model accepts.
-    """
+    """Load the model of an MLflow Model directory, or of its ``model.pkl``."""
     path = Path(path)
     model_dir = path.parent if path.is_file() else path
     flavor_conf = _get_flavor_configuration(
@@ -499,16 +486,7 @@ def _load_model(path: str | Path) -> ImpactModel:
         SERIALIZATION_FORMAT_CLOUDPICKLE,
     )
 
-    model = _load_model_from_local_file(aimz_model_path, serialization_format)
-    card = flavor_conf.get("causal_card")
-    if model.card is None and card is not None:
-        try:
-            model.card = CausalCard.from_dict(card)
-        except (TypeError, ValueError) as e:
-            msg = f"The card in {model_dir / MLMODEL_FILE_NAME} was not attached: {e}"
-            warn(msg, category=ScopeWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
-
-    return model
+    return _load_model_from_local_file(aimz_model_path, serialization_format)
 
 
 def _load_pyfunc(path: str) -> _AimzModelWrapper:
@@ -526,8 +504,7 @@ def load_model(model_uri: str | Path, dst_path: str | None = None) -> ImpactMode
             default a local output path is created.
 
     Returns:
-        An aimz model (an instance of :class:`~aimz.ImpactModel`), with the card
-        recorded in its ``MLmodel`` file when the pickle holds none.
+        An aimz model (an instance of :class:`~aimz.ImpactModel`).
 
     .. code-block:: python
         :caption: Example

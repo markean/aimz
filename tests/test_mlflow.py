@@ -26,7 +26,7 @@ from numpyro.infer import MCMC, NUTS, SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
 from numpyro.optim import Adam
 
-from aimz import CausalCard, FitWarning, ImpactModel, ScopeWarning
+from aimz import CausalCard, FitWarning, ImpactModel
 from aimz.utils.data import ArrayDataset, ArrayLoader
 from tests.conftest import lm, lm_subsample, make_svi
 
@@ -449,7 +449,7 @@ def test_save_model_records_causal_card(
     synthetic_data: tuple[Array, Array],
     tmp_path: Path,
 ) -> None:
-    """A card is recorded in the MLmodel file, and loads when the pickle has none."""
+    """A card is recorded in the MLmodel file and comes back with the model."""
     X, y = synthetic_data
     card = CausalCard(
         features=[f"x{j}" for j in range(X.shape[1])],
@@ -466,17 +466,4 @@ def test_save_model_records_causal_card(
     assert recorded == {**card.to_dict(), "extra": {"verdict": "within", "lift": "1.5"}}
     assert load_model(str(tmp_path / "model")).card == card
 
-    # A model saved without a card takes the card recorded in its MLmodel file
-    im.card = None
-    save_model(im, tmp_path / "bare")
-    mlmodel = mlflow.models.Model.load(str(tmp_path / "bare"))
-    assert "causal_card" not in mlmodel.flavors["aimz"]
-    mlmodel.flavors["aimz"]["causal_card"] = recorded
-    mlmodel.save(str(tmp_path / "bare" / "MLmodel"))
-    assert load_model(str(tmp_path / "bare")).card == CausalCard.from_dict(recorded)
-    # A card whose names the kernel does not know is left off with a warning
-    mlmodel.flavors["aimz"]["causal_card"] = {"treatments": ["nope"]}
-    mlmodel.save(str(tmp_path / "bare" / "MLmodel"))
-    with pytest.warns(ScopeWarning, match="nope"):
-        assert load_model(str(tmp_path / "bare")).card is None
     im.cleanup()

@@ -16,11 +16,20 @@
 
 import json
 
+import numpyro.distributions as dist
 import pytest
 from jax import Array, random
+from numpyro import plate, sample
 
 from aimz import CausalCard, ImpactModel
 from tests.conftest import lm, lm_with_kwargs_array, make_svi
+
+
+def lm_other_input(data: Array, y: Array | None = None) -> None:
+    """Linear regression whose input parameter is not called `X`."""
+    w = sample("w", dist.Normal(0.0, 1.0).expand([data.shape[1]]).to_event(1))
+    with plate("obs", data.shape[0]):
+        sample("y", dist.Normal(data @ w, 1.0), obs=y)
 
 
 def test_causal_card_workflow(synthetic_data: tuple[Array, Array]) -> None:
@@ -29,16 +38,20 @@ def test_causal_card_workflow(synthetic_data: tuple[Array, Array]) -> None:
     features = tuple(f"x{j}" for j in range(X.shape[1]))
     card = CausalCard(
         features=list(features),
-        treatments=["x0"],
-        post_treatment=["decile"],
-        graph=[["x0", "y"]],
+        treatments="x0",
+        post_treatment="decile",
         extra={"verdict": "within-unit"},
     )
-    # Lists are stored as tuples, treatments as a mapping of each to the names it
-    # spans, and the plain form round-trips through JSON
+    # Lists are stored as tuples, a single string as one name, treatments as a
+    # mapping of each to the names it spans, repeated feature names and a treatment
+    # that spans nothing raise, and the plain form round-trips through JSON
     assert card.features == features
     assert card.treatments == {"x0": ("x0",)}
-    assert card.graph == (("x0", "y"),)
+    assert card.post_treatment == ("decile",)
+    with pytest.raises(ValueError, match="unique"):
+        CausalCard(features=["x0", "x0"])
+    with pytest.raises(ValueError, match="span"):
+        CausalCard(treatments={"x": []})
     assert CausalCard.from_dict(json.loads(json.dumps(card.to_dict()))) == card
     # A treatment that spans several inputs is given as a mapping, with a bare name
     # standing for one input
@@ -76,3 +89,18 @@ def test_causal_card_workflow(synthetic_data: tuple[Array, Array]) -> None:
     assert im_kw.card is not None
     im_kw.card = None
     assert im_kw.describe()["card"] is None
+
+    # The whole input is `X` in a card whatever the kernel calls it, and a treatment
+    # that spans it spans the declared features
+    im_in = ImpactModel(
+        lm_other_input,
+        rng_key=random.key(0),
+        inference=make_svi(lm_other_input),
+        param_input="data",
+    )
+    im_in.fit_on_batch(X, y, num_steps=5, num_samples=10, progress=False)
+    with pytest.raises(ValueError, match="data"):
+        im_in.card = CausalCard(treatments=["data"])
+    im_in.card = CausalCard(features=features, treatments={"all": "X"})
+    scenario = im_in.build_scenario({"X": X}, {"all": 0.0})
+    assert im_in.check_scenario({"X": X}, scenario)["undeclared"] == []
