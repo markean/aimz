@@ -25,10 +25,12 @@ from aimz._exceptions import (
     OutputWarning,
     PerformanceWarning,
 )
+from aimz.model.causal_card import CausalCard
 from aimz.model.impact_model import ImpactModel
 
 __all__ = [
     "AimzWarning",
+    "CausalCard",
     "FitWarning",
     "ImpactModel",
     "KernelValidationError",

@@ -15,6 +15,7 @@ Attributes
 .. autosummary::
    :toctree: generated/
 
+   ImpactModel.card
    ImpactModel.inference
    ImpactModel.kernel
    ImpactModel.kernel_spec

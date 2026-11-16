@@ -125,6 +125,8 @@ if TYPE_CHECKING:
 
     from dask.array import Array as DaskArray
 
+    from aimz.model.causal_card import CausalCard
+
 logger = logging.getLogger(__name__)
 
 
@@ -155,6 +157,7 @@ class ImpactModel(BaseModel):
         *,
         param_input: str = "X",
         param_output: str = "y",
+        card: CausalCard | None = None,
     ) -> None:
         """Initialize an :class:`~aimz.ImpactModel` instance.
 
@@ -165,6 +168,8 @@ class ImpactModel(BaseModel):
                 :external:class:`~numpyro.infer.mcmc.MCMC` instance.
             param_input: Name of the ``kernel`` parameter for the input data.
             param_output: Name of the ``kernel`` parameter for the output data.
+            card: A :class:`~aimz.model.CausalCard` declaring the causal scope the
+                modeler asserts for the model, or ``None``.
 
         Raises:
             KernelValidationError: If the kernel takes variable arguments or
@@ -216,6 +221,8 @@ class ImpactModel(BaseModel):
         self._num_samples = 0
         self._num_chains = 1
         self._init_runtime_attrs()
+        self._card: CausalCard | None = None
+        self.card = card
 
     def _init_runtime_attrs(self) -> None:
         """Initialize runtime attributes."""
@@ -332,6 +339,7 @@ class ImpactModel(BaseModel):
         self.__dict__.setdefault("_dims", {})
         self.__dict__.setdefault("_site_sizes", {})
         self.__dict__.setdefault("_observed_sites", set())
+        self.__dict__.setdefault("_card", None)
         # A model pickled by an earlier version traced only the arguments it was
         # first called or fitted with
         spec = self.__dict__.get("_kernel_spec")
@@ -375,6 +383,51 @@ class ImpactModel(BaseModel):
     def kernel_spec(self) -> KernelSpec | None:
         """The cached :class:`~aimz.model.KernelSpec` or ``None`` if not yet built."""
         return self._kernel_spec
+
+    @property
+    def card(self) -> CausalCard | None:
+        """The :class:`~aimz.model.CausalCard` declared for the model, or ``None``.
+
+        Setting it on a model whose kernel has been traced checks the names the
+        card's treatments span and its unit name: each has to be a declared feature,
+        the input ``X``, a keyword argument of the kernel, or one of its sample
+        sites. A card given before the first trace is not checked.
+        """
+        return self._card
+
+    @card.setter
+    def card(self, card: CausalCard | None) -> None:
+        """Attach a card, checking its names if the kernel has been traced.
+
+        Raises:
+            ValueError: If the kernel has been traced and a name a treatment spans, or
+                the unit, is none of the declared features, the input ``X``, the
+                kernel's keyword arguments, or its sample sites.
+        """
+        if card is not None and (spec := self._kernel_spec) is not None and spec.traced:
+            known = {
+                "X",
+                *card.features,
+                *(signature(self.kernel).parameters.keys() - {self.param_input}),
+                *spec.sample_sites,
+            }
+            unknown = [
+                name
+                for name in (
+                    *(name for names in card.treatments.values() for name in names),
+                    *([card.unit] if card.unit else []),
+                )
+                if name not in known
+            ]
+            if unknown:
+                msg = (
+                    f"Card name(s) {', '.join(map(repr, unknown))} are none of the "
+                    "declared features, the input `X`, the kernel's keyword "
+                    "arguments, or its sample sites: "
+                    f"{', '.join(map(repr, sorted(known)))}."
+                )
+                raise ValueError(msg)
+        self._card = card
 
     @property
     def param_input(self) -> str:
@@ -2487,6 +2540,8 @@ class ImpactModel(BaseModel):
             enters that ``scan`` or ``cond``, whether or not it feeds the site. A
             ``factor`` term counts as observed, and ``param`` sites are not listed;
             their values after an SVI fit are in :attr:`~aimz.ImpactModel.vi_result`.
+            The ``card`` is the :class:`~aimz.model.CausalCard` as plain values, or
+            ``None``.
         """
         spec = self._kernel_spec
         sample_sites = spec.sample_sites if spec else ()
@@ -2526,6 +2581,7 @@ class ImpactModel(BaseModel):
             "num_chains": self._num_chains,
             "num_samples": self._num_samples,
             "sites": sites,
+            "card": None if self._card is None else self._card.to_dict(),
         }
 
     def set_posterior_sample(

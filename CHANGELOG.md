@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Added
+
+- {class}`~aimz.model.CausalCard`, an optional declaration of a model's causal scope attached through the `card` argument of {class}`~aimz.ImpactModel`, returned by {meth}`~aimz.ImpactModel.describe`, and recorded by {func}`~aimz.mlflow.save_model` in the `MLmodel` file ([#559](https://github.com/markean/aimz/issues/559)).
+
 ### Changed
 
 - {meth}`~aimz.ImpactModel.describe` now reports for each site the name of the distribution it samples and the `upstream` sample sites and array `arguments` of the kernel that its distribution or its deterministic value is computed from, derived from a trace of the kernel, instead of only its kind, dimension names, and draw shape ([#555](https://github.com/markean/aimz/issues/555)).

@@ -26,6 +26,7 @@ aimz (native) format
 
 from __future__ import annotations
 
+import json
 import logging
 import pickle
 from importlib.metadata import version
@@ -184,6 +185,10 @@ def save_model(
         metadata: {{ metadata }}
         extra_files: {{ extra_files }}
 
+    A model with a :class:`~aimz.model.CausalCard` is saved with the card recorded
+    as ``causal_card`` under the ``aimz`` flavor of its ``MLmodel`` file, so that its
+    declared scope can be read without unpickling it.
+
     .. code-block:: python
         :caption: Example
 
@@ -238,6 +243,11 @@ def save_model(
     model_class = _get_fully_qualified_class_name(model)
 
     extra_files_config = _copy_extra_files(extra_files, path)
+    card_config = (
+        {}
+        if model.card is None
+        else {"causal_card": json.loads(json.dumps(model.card.to_dict(), default=str))}
+    )
 
     pyfunc.add_to_model(
         mlflow_model,
@@ -255,6 +265,7 @@ def save_model(
         serialization_format=SERIALIZATION_FORMAT_CLOUDPICKLE,
         code=code_dir_subpath,
         **extra_files_config,
+        **card_config,
     )
     if size := get_total_file_size(path):
         mlflow_model.model_size_bytes = size
