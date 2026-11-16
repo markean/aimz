@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file and are best
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- {meth}`~aimz.ImpactModel.describe` now reports for each site the name of the distribution it samples and the `upstream` sample sites and array `arguments` of the kernel that its distribution or its deterministic value is computed from, derived from a trace of the kernel, instead of only its kind, dimension names, and draw shape ([#555](https://github.com/markean/aimz/issues/555)).
+
 ## [v0.17.0](https://github.com/markean/aimz/releases/tag/v0.17.0) - 2026-10-25
 
 ### Added

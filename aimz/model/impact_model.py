@@ -50,16 +50,23 @@ from jax import (
     make_jaxpr,
     make_mesh,
     random,
+    tree,
 )
 from jax.core import eval_context
 from jax.sharding import AxisType, NamedSharding, PartitionSpec
 from jax.typing import ArrayLike
-from numpyro import validation_enabled
-from numpyro.distributions import Distribution, Independent
+from numpyro import distributions, validation_enabled
+from numpyro.distributions import (
+    Distribution,
+    ExpandedDistribution,
+    Independent,
+    MaskedDistribution,
+)
 from numpyro.handlers import do, seed, substitute, trace
 from numpyro.infer import MCMC, SVI, init_to_sample
 from numpyro.infer.inspect import get_dependencies
 from numpyro.infer.svi import SVIRunResult, SVIState
+from numpyro.ops.provenance import eval_provenance
 from tqdm.auto import tqdm
 
 from aimz._exceptions import (
@@ -179,6 +186,9 @@ class ImpactModel(BaseModel):
         self._fitted_sites: set[str] = set()
         self._coupled_sites: set[str] = set()
         self._site_parents: dict[str, set[str]] = {}
+        self._site_upstream: dict[str, set[str]] = {}
+        self._site_arguments: dict[str, set[str]] = {}
+        self._site_dists: dict[str, str] = {}
         if isinstance(rng_key, Array) and rng_key.dtype == jnp.uint32:
             msg = "Legacy `uint32` PRNGKey detected; converting to a typed key array."
             warn(msg, category=AimzWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
@@ -331,6 +341,9 @@ class ImpactModel(BaseModel):
         )
         self.__dict__.setdefault("_coupled_sites", set())
         self.__dict__.setdefault("_site_parents", {})
+        self.__dict__.setdefault("_site_upstream", {})
+        self.__dict__.setdefault("_site_arguments", {})
+        self.__dict__.setdefault("_site_dists", {})
         self._init_runtime_attrs()
         inference = self._inference
         if (
@@ -454,6 +467,13 @@ class ImpactModel(BaseModel):
         loses its mark when a trace at ``rows_more`` rows, twice the rows by default,
         gives it the same event length; the arguments named in ``whole`` keep their
         shape there, and a failed trace keeps every mark.
+
+        For :meth:`~aimz.ImpactModel.describe`, the kernel then runs once more,
+        abstractly, with every sample site and array argument replaced by a stand-in
+        tagged with its name, so that each site carries the tags of the sites and
+        arguments it is computed from. A site that control flow records has no
+        stand-in and is left out, and a kernel that cannot run abstractly keeps the
+        relations of an earlier trace.
 
         Returns:
             The spec of the trace with these arguments.
@@ -585,6 +605,17 @@ class ImpactModel(BaseModel):
                 )
             if v.get("is_observed"):
                 self._observed_sites.add(k)
+            if v["type"] == "sample":
+                # The distribution's name, under the wrappers that only reshape it,
+                # as its factory spells it where the class carries a suffix
+                base = v["fn"]
+                while isinstance(
+                    base, (ExpandedDistribution, Independent, MaskedDistribution)
+                ):
+                    base = base.base_dist
+                name = type(base).__name__
+                short = name.removesuffix("Probs").removesuffix("Logits")
+                self._site_dists[k] = short if hasattr(distributions, short) else name
             # A site recorded by control flow, which NumPyro marks alike for `scan` and
             # `cond`, or drawn as one event over the rows, counts as computing across
             # observations. The first trace and each trace with the output decide anew
@@ -670,6 +701,70 @@ class ImpactModel(BaseModel):
                 )
         for k, v in cast("Mapping[str, Mapping]", deps["prior_dependencies"]).items():
             self._site_parents[k] = set(v) - {k}
+        # The sites and arguments each site is computed from, for `describe`
+        arguments = {}
+        for name, value in args_bound.items():
+            if leaves_of := _partition({name: value})[0]:
+                arguments[f"argument:{name}"] = [
+                    ShapeDtypeStruct(leaf.shape, jnp.result_type(leaf))
+                    for leaf in leaves_of
+                ]
+        reported = {
+            k
+            for k, v in model_trace.items()
+            if v["type"] in {"sample", "deterministic"}
+            and not v.get("_control_flow_done")
+        }
+        sites = {
+            f"site:{k}": model_trace[k]["value"]
+            for k in reported
+            if model_trace[k]["type"] == "sample"
+            and hasattr(model_trace[k]["value"], "shape")
+        }
+
+        def read(**tagged: object) -> dict[str, list]:
+            computed: dict[str, list] = {}
+
+            def substitute_fn(msg: dict) -> object:
+                if msg["type"] == "sample":
+                    computed[msg["name"]] = tree.leaves(msg["fn"])
+
+                    return tagged.get(f"site:{msg['name']}")
+                if msg["type"] == "deterministic":
+                    computed[msg["name"]] = [msg["value"]]
+
+                return None
+
+            with validation_enabled(is_validate=False):
+                substitute(
+                    seed(self.kernel, rng_seed=self.rng_key),
+                    substitute_fn=substitute_fn,
+                )(
+                    **_combine(
+                        (
+                            leaf
+                            for name in args_bound
+                            for leaf in cast("list", tagged.get(f"argument:{name}", ()))
+                        ),
+                        static,
+                    ),
+                )
+
+            return {k: v for k, v in computed.items() if k in reported}
+
+        with suppress(Exception):
+            for k, tags in eval_provenance(read, **arguments, **sites).items():
+                found = frozenset().union(*tags)
+                self._site_upstream[k] = {
+                    tag.removeprefix("site:")
+                    for tag in found
+                    if tag.startswith("site:")
+                }
+                self._site_arguments[k] = {
+                    tag.removeprefix("argument:")
+                    for tag in found
+                    if tag.startswith("argument:")
+                }
         spec = KernelSpec(
             traced=True,
             sample_sites=sample_sites,
@@ -2377,11 +2472,21 @@ class ImpactModel(BaseModel):
             parameter names, the inference method, the fitted state with the number of
             chains and draws, and the sites known from the trace or the posterior. Each
             site maps to its ``kind`` (``"latent"``, ``"observed"``, or
-            ``"deterministic"``), its ``dims`` after ``chain`` and ``draw`` where the
-            trace named them (``None`` for the default ``<site>_dim_<i>`` names), and,
-            for a site in the posterior, the ``draw_shape`` of one draw. A ``factor``
-            term counts as observed, and ``param`` sites are not listed; their values
-            after an SVI fit are in :attr:`~aimz.ImpactModel.vi_result`.
+            ``"deterministic"``), the name of the ``distribution`` it samples (``None``
+            for a deterministic site and where no trace recorded it, as in a model an
+            earlier version pickled until a call traces the site again), its ``dims``
+            after ``chain`` and ``draw`` where the trace named them (``None`` for the
+            default ``<site>_dim_<i>`` names), the ``upstream`` sample sites and the
+            array ``arguments`` of the kernel that its distribution or its deterministic
+            value is computed from, through any deterministic site between (``None``
+            where no trace derived them), and, for a site in the posterior, the
+            ``draw_shape`` of one draw. The relations are derived from the kernel, so
+            they hold what it computes, not what a feature of an input means. They name
+            the input by the kernel's own parameter name, and a site computed from a
+            site that ``scan`` or ``cond`` records can list in its place everything that
+            enters that ``scan`` or ``cond``, whether or not it feeds the site. A
+            ``factor`` term counts as observed, and ``param`` sites are not listed;
+            their values after an SVI fit are in :attr:`~aimz.ImpactModel.vi_result`.
         """
         spec = self._kernel_spec
         sample_sites = spec.sample_sites if spec else ()
@@ -2397,7 +2502,15 @@ class ImpactModel(BaseModel):
             else:
                 kind = "deterministic"
             dims = self._dims.get(name)
-            sites[name] = {"kind": kind, "dims": None if dims is None else list(dims)}
+            upstream = self._site_upstream.get(name)
+            arguments = self._site_arguments.get(name)
+            sites[name] = {
+                "kind": kind,
+                "distribution": self._site_dists.get(name),
+                "dims": None if dims is None else list(dims),
+                "upstream": None if upstream is None else sorted(upstream),
+                "arguments": None if arguments is None else sorted(arguments),
+            }
             if self._posterior is not None and name in self._posterior:
                 sites[name]["draw_shape"] = [
                     int(n) for n in np.shape(self._posterior[name])[1:]
