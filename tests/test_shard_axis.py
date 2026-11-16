@@ -25,6 +25,7 @@ from numpyro import deterministic, sample
 from numpyro.contrib.control_flow import scan
 
 from aimz import ImpactModel, PerformanceWarning
+from aimz.model._planning import _output_nbytes, _plan_execution
 from aimz.utils.data import ArrayDataset, ArrayLoader
 from tests.conftest import latent_variable_model, make_svi, multidim_latent_model
 
@@ -178,13 +179,22 @@ def test_plan_execution_aligned_posterior(
     im = im_latent_var_svi_fitted
 
     def plan(batch_size: int | None) -> tuple[str, int | None]:
-        return im._plan_execution(
+        return _plan_execution(
             X,
             shard_axis="obs",
             batch_size=batch_size,
             num_samples=im._num_samples,
-            nbytes=im._output_nbytes(("y",)),
+            nbytes=_output_nbytes(im._site_sizes, ("y",)),
             posterior=im.posterior,
+            kernel=im.kernel,
+            rng_key=im.rng_key,
+            param_input=im.param_input,
+            param_output=im.param_output,
+            kernel_spec=im.kernel_spec,
+            coupled_sites=im._coupled_sites,
+            observed_sites=im._observed_sites,
+            num_devices=im._num_devices,
+            plan_cache=im._plan_cache,
         )
 
     # On several devices the observation axis is always sharded
