@@ -25,11 +25,13 @@ from warnings import warn
 
 import numpy as np
 import xarray as xr
+from jax import random
 from xarray import open_zarr
 from zarr import config as zarr_config
 from zarr import open_group
 
 from aimz._exceptions import _SKIP_FILE_PREFIXES, OutputWarning
+from aimz.utils.data import ArrayLoader
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -46,6 +48,34 @@ def _make_attrs() -> dict[str, str]:
         "created_at": dt.datetime.now(dt.UTC).isoformat(),
         "aimz_version": version("aimz"),
     }
+
+
+def _draw_attrs(
+    rng_key: Array,
+    *,
+    X: object = None,
+    shard_axis: str | None = None,
+    batch_size: int | None = None,
+    num_devices: int | None = None,
+) -> dict[str, object]:
+    """Describe what the draws of a predictive call depend on.
+
+    :meth:`~aimz.ImpactModel.estimate_effect` compares these attributes between two
+    scenarios to tell whether their draws are paired. The values are strings,
+    integers, or lists of integers, so a tree written to a file keeps them.
+    """
+    attrs: dict[str, object] = {"rng_key": random.key_data(rng_key).tolist()}
+    if shard_axis is not None:
+        attrs["shard_axis"] = shard_axis
+    if shard_axis == "obs":
+        attrs["num_devices"] = num_devices
+        # Another loader than `ArrayLoader` has no fixed batch size to record
+        if isinstance(X, ArrayLoader):
+            batch_size = X.batch_size
+        if batch_size is not None:
+            attrs["batch_size"] = batch_size
+
+    return attrs
 
 
 def _site_dims(

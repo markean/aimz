@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from collections.abc import Set as AbstractSet
 from inspect import Parameter, signature
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from warnings import warn
 
 import jax.numpy as jnp
@@ -249,6 +249,38 @@ def _warn_unreachable_intervention(
             "posterior or intervened on, so the draws do not respond to them."
         )
         warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
+
+
+def _coerce_return_sites(
+    return_sites: str | Iterable[str] | None,
+    intervention: Mapping[str, object] | None = None,
+    spec: KernelSpec | None = None,
+) -> tuple[str, ...]:
+    """Return the requested site names as a tuple, or the default return sites.
+
+    The defaults are those of ``spec``: the spec of the call's arguments, or else the
+    model's.
+
+    Warns:
+        OutputWarning: If a requested site is intervened on, since it comes back
+            with its own draws, not the set value.
+    """
+    if return_sites is None:
+        return cast("KernelSpec", spec).return_sites
+    requested = (
+        (return_sites,)
+        if isinstance(return_sites, str)
+        else tuple(str(s) for s in return_sites)
+    )
+    if intervened := [site for site in requested if site in (intervention or {})]:
+        msg = (
+            f"Return site(s) {', '.join(map(repr, intervened))} are intervened on, "
+            "so they come back with their own draws, not the set values. Read the "
+            "effect of the intervention from the sites downstream of them."
+        )
+        warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
+
+    return requested
 
 
 def _warn_missing_return_sites(
