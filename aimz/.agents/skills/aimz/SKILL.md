@@ -79,7 +79,7 @@ Use these unless the task says otherwise.
 
 ## Where the treatment lives
 
-How a scenario is expressed depends on how the kernel receives the treatment, so find that out first: `im.describe()` lists the kernel's arguments and its sites with their kinds, though not its `param` sites, whose values after an `SVI` fit are in `im.vi_result.params`, and a `factor` term shows as observed.
+How a scenario is expressed depends on how the kernel receives the treatment, so find that out first: `im.describe()` lists the kernel's arguments and its sites with their kinds, the distribution each samples, and the `upstream` sample sites and the array `arguments` each is computed from, so an argument's edit reaches the output through that chain of sites. Both are `None` for a site that `scan` or `cond` records, and for every site of a model whose kernel this version has not traced, as after `set_posterior_sample` on a new model or after loading a model fitted with an earlier version, until a predictive call with an array input traces it: the relations were not derived, which does not mean the site is computed from nothing. A site computed from a site that `scan` or `cond` records can list in its place everything that enters that `scan` or `cond`, whether or not it feeds the site. `im.describe()` does not list `param` sites, whose values after an `SVI` fit are in `im.vi_result.params`, and a `factor` term shows as observed.
 
 | The treatment is | Express a scenario by |
 |---|---|
