@@ -107,8 +107,8 @@ A treatment that the kernel does not contain cannot be varied, so no scenario of
 ## Loading a fitted model
 
 - A pickled model loads with `cloudpickle.load`. A kernel defined in a module is stored by reference, so that module has to be importable. A kernel defined in `__main__` is stored with the model.
-- A model saved or logged through `aimz.mlflow` loads with `aimz.mlflow.load_model(uri)`, which returns the `ImpactModel`. `mlflow.pyfunc.load_model(uri)` only predicts, and a model saved with a signature drops what the signature does not record, such as `intervention`, so do not build scenarios on it.
-- Then `im.describe()` tells whether the model holds posterior draws, and lists its arguments and its sites with their kinds and the names of their dimensions.
+- A model saved or logged through `aimz.mlflow` loads with `aimz.mlflow.load_model(uri)`, which returns the `ImpactModel`. `mlflow.pyfunc.load_model(uri)` only predicts, and a model saved with a signature drops what the signature does not record, such as `intervention`, so do not build scenarios on it. The card of a logged model is recorded under the `aimz` flavor of its `MLmodel` file, so `mlflow.models.Model.load(uri).flavors["aimz"].get("causal_card")` reads the declared scope without unpickling the model, and gives `None` for a model logged without a card.
+- Then `im.describe()` tells whether the model holds posterior draws, lists its arguments and its sites with their kinds, their distributions, the names of their dimensions and the `upstream` sites and array `arguments` each is computed from, all derived from the kernel, and returns the model's `card` when one was declared: the input's features, the treatments with the inputs each spans, the outcome, the unit, the post-treatment variables, the adjustment set, and whatever the project put under `extra`. The card is the modeler's declaration of what the kernel cannot state, such as what a feature of an input means, not something aimz derived; the relations of the sites are.
 
 ## Mistakes that return a number
 

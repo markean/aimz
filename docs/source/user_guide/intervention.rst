@@ -307,3 +307,28 @@ Comparing these two distributions allows us to estimate the effect of ``Z`` on `
     :hide-code:
 
     effect
+
+
+Declaring the Causal Scope
+--------------------------
+aimz derives nothing about identification from a kernel: which inputs are treatments, which variables are downstream of them, and which covariates adjust for confounding are the modeler's assertions.
+A :class:`~aimz.model.CausalCard` records them, so that they travel with the fitted model.
+Attach it through the ``card`` argument of :class:`~aimz.ImpactModel` or the :attr:`~aimz.ImpactModel.card` property; :meth:`~aimz.ImpactModel.describe` returns it as plain values, and :func:`~aimz.mlflow.save_model` records it under the ``aimz`` flavor of the ``MLmodel`` file, where it can be read without unpickling the model.
+The card declares what the kernel cannot state, such as what a feature of an input means; what the kernel does state, the distribution of each site and the sample sites and arguments it is computed from, :meth:`~aimz.ImpactModel.describe` derives from a trace and reports beside the card.
+A treatment maps its name to the inputs it spans, for a treatment recorded in several features, so that a scenario over them is one scenario; a sequence of names declares each as a treatment of its own.
+When a card is set on a model whose kernel has been traced, the names the treatments span and the unit name are checked against the declared features, the input ``X``, the kernel's keyword arguments and its sample sites; a card given before the first trace is not checked.
+The other fields are free, since a label an effect is grouped by need not reach the kernel.
+Suppose the input holds four features, of which the first two record one treatment:
+
+.. code-block:: python
+
+    from aimz import CausalCard, ImpactModel
+
+    card = CausalCard(
+        features=["t_1", "t_2", "w", "z"],
+        treatments={"t": ["t_1", "t_2"], "w": ["w"]},
+        post_treatment=["g"],
+        adjustment=["z"],
+        extra={"design": "within-unit"},
+    )
+    im = ImpactModel(model, ..., card=card)  # Supply the inference configuration.

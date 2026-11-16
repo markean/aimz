@@ -14,7 +14,8 @@
 
 """Model implementations."""
 
+from aimz.model.causal_card import CausalCard
 from aimz.model.impact_model import ImpactModel
 from aimz.model.kernel_spec import KernelSpec
 
-__all__ = ["ImpactModel", "KernelSpec"]
+__all__ = ["CausalCard", "ImpactModel", "KernelSpec"]
