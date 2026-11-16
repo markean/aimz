@@ -3308,6 +3308,139 @@ class ImpactModel(BaseModel):
 
         return out
 
+    def build_scenario(
+        self,
+        args: Mapping[str, object],
+        changes: Mapping[str, object],
+        *,
+        observations: ArrayLike | None = None,
+    ) -> dict[str, object]:
+        """Build a scenario from another by editing its inputs by name.
+
+        A scenario is an argument dictionary of
+        :meth:`~aimz.ImpactModel.estimate_effect`: the input under ``X`` and the
+        keyword arguments of the kernel, with any ``intervention`` and ``condition``
+        mapping. The names are those the card declares, so a treatment recorded in
+        several features changes in all of them at once, and the arrays given are
+        never touched: an edited input comes back as a copy and every other entry as
+        given. Nothing is predicted, and nothing here establishes that a change is a
+        treatment.
+
+        Args:
+            args: Arguments of the baseline scenario, with an array input.
+            changes: The new values by name. A name is a treatment of the card, which
+                edits every input it spans, a feature by its declared name, or as
+                ``X[i]`` where no features are declared, the input ``X``, or a keyword
+                array. A value is cast to the input's data type, which the edited
+                copy keeps, and broadcast to the input's shape; a callable receives
+                the input's current values and returns the new ones.
+            observations: The observations to change, as a boolean mask or integer
+                indices along the input's leading axis; the others keep their
+                baseline values. By default every observation.
+
+        Returns:
+            The intervention scenario, with the keys of ``args``.
+
+        Raises:
+            TypeError: If the input is not an array, as a data loader is.
+            ValueError: If the card declares features whose number differs from the
+                input's, if a name is none of the card's treatments, the input ``X``,
+                its features as ``changes`` names them and the keyword arrays, if a
+                treatment spans a name that is none of these inputs, as a sample
+                site is, which ``intervention`` sets, if a value does not broadcast
+                to the input's shape, or if ``observations`` does not fit the input's
+                observations or is given for an input without a value per
+                observation.
+        """
+        if not isinstance(args.get("X"), ArrayLike):
+            msg = (
+                "`build_scenario` edits an array input; a data loader has no "
+                "observations."
+            )
+            raise TypeError(msg)
+        X = np.asarray(args["X"])
+        n_obs = X.shape[0]
+        card = self._card
+        features = card.features if card is not None else ()
+        if features and (X.ndim <= 1 or len(features) != X.shape[1]):
+            msg = (
+                f"The card names {len(features)} feature(s), but the input has shape "
+                f"{X.shape}."
+            )
+            raise ValueError(msg)
+        # The inputs by name: the input, its features, and the keyword arrays
+        own = {
+            name
+            for method in (self.predict, self.predict_on_batch)
+            for name, p in signature(method).parameters.items()
+            if p.kind is not p.VAR_KEYWORD
+        }
+        inputs: dict[str, tuple[str, int | None]] = {"X": ("X", None)}
+        if X.ndim > 1:
+            for j in range(X.shape[1]):
+                inputs[features[j] if features else f"X[{j}]"] = ("X", j)
+        inputs.update(
+            (name, (name, None))
+            for name, value in args.items()
+            if name not in own and isinstance(value, ArrayLike) and np.ndim(value)
+        )
+        index = None
+        if observations is not None:
+            index = np.asarray(observations)
+            fits = (
+                index.shape == (n_obs,)
+                if index.dtype == bool
+                else index.ndim == 1
+                and np.issubdtype(index.dtype, np.integer)
+                and bool(((-n_obs <= index) & (index < n_obs)).all())
+            )
+            if not fits:
+                msg = (
+                    f"`observations` must be a boolean mask over the {n_obs} "
+                    "observations or integer indices among them."
+                )
+                raise ValueError(msg)
+        treatments = card.treatments if card is not None else {}
+        spec = self._kernel_spec
+        sites = set(spec.sample_sites) if spec is not None and spec.traced else set()
+        edited: dict[str, np.ndarray] = {}
+        for name, change in changes.items():
+            for each in treatments.get(name, (name,)):
+                if each not in inputs:
+                    msg = (
+                        f"{each!r} is a sample site, which `intervention` sets."
+                        if each in sites
+                        else f"{each!r} is none of the inputs a scenario can edit: "
+                        f"{', '.join(map(repr, (*treatments, *inputs)))}."
+                    )
+                    raise ValueError(msg)
+                argument, column = inputs[each]
+                if argument not in edited:
+                    edited[argument] = np.array(args[argument])
+                array = edited[argument]
+                current = array if column is None else array[:, column]
+                value = np.asarray(change(current) if callable(change) else change)
+                try:
+                    new = np.broadcast_to(value, current.shape)
+                except ValueError:
+                    msg = (
+                        f"The value for {each!r} has shape {value.shape}, which does "
+                        f"not broadcast to {current.shape}."
+                    )
+                    raise ValueError(msg) from None
+                if index is None:
+                    current[...] = new
+                elif array.shape[0] != n_obs:
+                    msg = (
+                        f"`observations` selects among the {n_obs} observations, but "
+                        f"{argument!r} has no value per observation."
+                    )
+                    raise ValueError(msg)
+                else:
+                    current[index] = new[index]
+
+        return {**args, **edited}
+
     def log_likelihood(
         self,
         X: ArrayLike | ArrayLoader | Iterable[Mapping[str, Array | np.ndarray]],

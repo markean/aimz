@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - {class}`~aimz.model.CausalCard`, an optional declaration of a model's causal scope attached through the `card` argument of {class}`~aimz.ImpactModel`, returned by {meth}`~aimz.ImpactModel.describe`, and recorded by {func}`~aimz.mlflow.save_model` in the `MLmodel` file ([#559](https://github.com/markean/aimz/issues/559)).
+- {meth}`~aimz.ImpactModel.build_scenario`, which builds an intervention scenario from a baseline's argument dictionary by editing its inputs by name ([#561](https://github.com/markean/aimz/issues/561)).
 
 ### Changed
 

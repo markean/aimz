@@ -317,6 +317,7 @@ Attach it through the ``card`` argument of :class:`~aimz.ImpactModel` or the :at
 The card declares what the kernel cannot state, such as what a feature of an input means; what the kernel does state, the distribution of each site and the sample sites and arguments it is computed from, :meth:`~aimz.ImpactModel.describe` derives from a trace and reports beside the card.
 A treatment maps its name to the inputs it spans, for a treatment recorded in several features, so that a scenario over them is one scenario; a sequence of names declares each as a treatment of its own.
 When a card is set on a model whose kernel has been traced, the names the treatments span and the unit name are checked against the declared features, the input ``X``, the kernel's keyword arguments and its sample sites; a card given before the first trace is not checked.
+In a card, a feature of the input is named through ``features``, not as ``X[i]``.
 The other fields are free, since a label an effect is grouped by need not reach the kernel.
 Suppose the input holds four features, of which the first two record one treatment:
 
@@ -332,3 +333,13 @@ Suppose the input holds four features, of which the first two record one treatme
         extra={"design": "within-unit"},
     )
     im = ImpactModel(model, ..., card=card)  # Supply the inference configuration.
+
+:meth:`~aimz.ImpactModel.build_scenario` builds the intervention scenario from the baseline's argument dictionary by editing its inputs by name: a treatment of the card, which edits every input it spans, a feature by its declared name, or as ``X[i]`` where no features are declared, the input ``X``, or a keyword array.
+A value is cast to the input's data type, which the edited copy keeps, a callable receives the current values and returns the new ones, and ``observations`` restricts the change to some of the observations, as a mask or as indices along the input's leading axis.
+The arrays given are never touched, so the baseline stays as it is.
+
+.. code-block:: python
+
+    args = {"X": X}
+    scenario = im.build_scenario(args, {"t": 0.0})  # t absent, in both of its features
+    effect = im.estimate_effect(args_baseline=args, args_intervention=scenario)

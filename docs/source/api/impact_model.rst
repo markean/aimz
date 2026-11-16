@@ -63,6 +63,7 @@ Miscellaneous
    :toctree: generated/
 
    ImpactModel.describe
+   ImpactModel.build_scenario
    ImpactModel.estimate_effect
    ImpactModel.cleanup
    ImpactModel.cleanup_models
