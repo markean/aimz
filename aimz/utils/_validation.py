@@ -204,25 +204,39 @@ def _warn_unreachable_intervention(
     *,
     output: str,
     parents: Mapping[str, AbstractSet[str]],
+    upstream: Mapping[str, AbstractSet[str]],
     fixed: AbstractSet[str],
 ) -> None:
     """Warn for the intervened sites whose values cannot reach the output.
+
+    The sites are walked up from the output twice, once through every site and once
+    stopping at the fixed and intervened sites; a site only the first walk meets is
+    blocked. An intervened site that is no latent parent, as an observed one, also
+    counts as a parent of the sites computed from it, unless the trace leaves out the
+    output's upstream.
 
     Warns:
         OutputWarning: If an intervened site reaches the output only through sites
             whose values are fixed or intervened on.
     """
-    if not intervention:
+    if not intervention or not parents:
         return
-    # Walk up from the output once through every site and once stopping at the fixed
-    # and intervened sites; a site only the first walk meets is blocked
+    # The intervened sites that are no latent parent, as an observed one
+    observed = (
+        intervention.keys() - set().union(*parents.values())
+        if output in upstream
+        else set()
+    )
     reached = []
     for stop in (frozenset(), fixed | intervention.keys()):
         seen = {output}
         frontier = [output]
         edges = set()
         while frontier:
-            for parent in parents.get(frontier.pop(), ()):
+            site = frontier.pop()
+            for parent in parents.get(site, set()) | (
+                upstream.get(site, set()) & observed
+            ):
                 edges.add(parent)
                 if parent not in seen and parent not in stop:
                     seen.add(parent)

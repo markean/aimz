@@ -45,8 +45,8 @@ Before fitting, you can explore the model's prior predictions with ``z`` fixed a
 
 After fitting, the same mapping applies the intervention while using posterior samples for the other latent sites.
 A latent site downstream of the intervened one keeps its posterior draws and does not pass the intervention on, which :meth:`~aimz.ImpactModel.predict` warns about with :class:`~aimz.OutputWarning`; :doc:`estimands` shows how to write the kernel so that the path runs through deterministic computations.
-On a kernel built on :external:func:`~numpyro.contrib.control_flow.scan`, the warning does not fire when that path runs through a latent site inside the body.
-A keyword argument or ``X`` that reaches the output only through a latent site that keeps its posterior draws, and an intervention whose only path to the output runs through an observed site whose data are passed, change nothing either, and no warning says so: the effect is exactly zero.
+On a kernel built on :external:func:`~numpyro.contrib.control_flow.scan`, the warning does not fire when that path runs through a latent site inside the body, nor, for an intervened site that is observed, when the output is a site inside the body.
+A keyword argument or ``X`` that reaches the output only through a latent site that keeps its posterior draws, and an intervention whose only path to the output runs through an observed site that is not intervened on and whose data are passed, change nothing either, and no warning says so: the effect is exactly zero.
 Here, the baseline holds ``z`` at one and the modified scenario holds it at zero, both drawn with the same key:
 
 .. code-block:: python
