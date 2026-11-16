@@ -26,8 +26,10 @@ class CausalCard:
     """The causal scope a modeler declares for an :class:`~aimz.ImpactModel`.
 
     aimz derives none of this from the kernel. The card records what the modeler
-    asserts and travels with the model. ``unit`` is checked with the names the
-    treatments span, and the other fields are carried for the readers of a fitted
+    asserts, travels with the model, and lets :meth:`~aimz.ImpactModel.check_scenario`
+    compare a scenario against it. Only ``features``, ``treatments`` and
+    ``post_treatment`` enter the scenario methods; ``unit`` is checked with the names
+    the treatments span, and the other fields are carried for the readers of a fitted
     model. Sequences passed as lists are stored as tuples, and ``treatments`` as a
     mapping of each treatment's name to the names it spans; a single name may be
     given as a string.

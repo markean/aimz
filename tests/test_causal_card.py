@@ -90,7 +90,8 @@ def test_causal_card_workflow(synthetic_data: tuple[Array, Array]) -> None:
     im_kw.card = None
     assert im_kw.describe()["card"] is None
 
-    # The whole input is `X` in a card whatever the kernel calls it
+    # The whole input is `X` in a card whatever the kernel calls it, and a treatment
+    # that spans it spans the declared features
     im_in = ImpactModel(
         lm_other_input,
         rng_key=random.key(0),
@@ -101,3 +102,5 @@ def test_causal_card_workflow(synthetic_data: tuple[Array, Array]) -> None:
     with pytest.raises(ValueError, match="data"):
         im_in.card = CausalCard(treatments=["data"])
     im_in.card = CausalCard(features=features, treatments={"all": "X"})
+    scenario = im_in.build_scenario({"X": X}, {"all": 0.0})
+    assert im_in.check_scenario({"X": X}, scenario)["undeclared"] == []

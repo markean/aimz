@@ -23,7 +23,7 @@ from tests.conftest import lm, lm_with_kwargs_array, make_svi
 
 
 def test_build_scenario_workflow(synthetic_data: tuple[Array, Array]) -> None:
-    """A scenario is built from the baseline by name and estimated."""
+    """A scenario is built from the baseline by name, checked and estimated."""
     X, y = synthetic_data
     X_b = np.asarray(X)
     n_obs, n_cols = X_b.shape
@@ -59,7 +59,9 @@ def test_build_scenario_workflow(synthetic_data: tuple[Array, Array]) -> None:
     assert (by_mask["X"][mask, :2] == 0.0).all()
     assert np.array_equal(by_mask["X"][~mask], X_b[~mask])
 
-    # The built scenario is what the estimate takes
+    # The built scenario is what the check and the estimate take
+    report = im.check_scenario(args, by_mask)
+    assert report["changed"] == {"x0": mask.mean(), "x1": mask.mean()}
     effect = im.estimate_effect(
         args_baseline=args,
         args_intervention=by_mask,

@@ -14,3 +14,5 @@ Exceptions and Warnings
 .. autoexception:: OutputWarning
 
 .. autoexception:: PerformanceWarning
+
+.. autoexception:: ScopeWarning
