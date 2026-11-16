@@ -31,7 +31,7 @@ JIT-compiled, sharded sampling streams results to chunked [Zarr](https://zarr.re
 - **Structured outputs:**
 Predictions, samples, and effect estimates are materialized as [Xarray](https://xarray.dev/) objects backed by Zarr or host memory, integrating cleanly with the scientific Python ecosystem.
 - **Intervention handling and impact modeling:**
-Specify interventions declaratively and estimate effects from prior or posterior predictive distributions.
+Specify interventions declaratively, declare the causal scope a model is meant for, check scenarios against it, and estimate effects from prior or posterior predictive distributions.
 - **Experiment tracking:**
 [MLflow](https://mlflow.org/) integration for logging runs, parameters, metrics, and model artifacts with full lineage.
 
