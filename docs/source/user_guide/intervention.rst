@@ -312,7 +312,7 @@ Comparing these two distributions allows us to estimate the effect of ``Z`` on `
 Declaring the Causal Scope
 --------------------------
 aimz derives nothing about identification from a kernel: which inputs are treatments, which variables are downstream of them, and which covariates adjust for confounding are the modeler's assertions.
-A :class:`~aimz.model.CausalCard` records them, so that they travel with the fitted model.
+A :class:`~aimz.model.CausalCard` records them, so that they travel with the fitted model and a scenario can be compared against them.
 Attach it through the ``card`` argument of :class:`~aimz.ImpactModel` or the :attr:`~aimz.ImpactModel.card` property; :meth:`~aimz.ImpactModel.describe` returns it as plain values, and :func:`~aimz.mlflow.save_model` records it under the ``aimz`` flavor of the ``MLmodel`` file, where it can be read without unpickling the model.
 The card declares what the kernel cannot state, such as what a feature of an input means; what the kernel does state, the distribution of each site and the sample sites and arguments it is computed from, :meth:`~aimz.ImpactModel.describe` derives from a trace and reports beside the card.
 A treatment maps its name to the inputs it spans, for a treatment recorded in several features, so that a scenario over them is one scenario; a sequence of names declares each as a treatment of its own.
@@ -337,9 +337,20 @@ Suppose the input holds four features, of which the first two record one treatme
 :meth:`~aimz.ImpactModel.build_scenario` builds the intervention scenario from the baseline's argument dictionary by editing its inputs by name: a treatment of the card, which edits every input it spans, a feature by its declared name, or as ``X[i]`` where no features are declared, the input ``X``, or a keyword array.
 A value is cast to the input's data type, which the edited copy keeps, a callable receives the current values and returns the new ones, and ``observations`` restricts the change to some of the observations, as a mask or as indices along the input's leading axis.
 The arrays given are never touched, so the baseline stays as it is.
+:meth:`~aimz.ImpactModel.check_scenario` takes the two argument dictionaries of :meth:`~aimz.ImpactModel.estimate_effect` and compares them without predicting anything.
+It returns the inputs that differ with the share of observations each changes, the changes the card does not declare as treatments, the share of changed observations whose new values lie outside the range the baseline observes, and the support of their presence patterns: the share of changed observations whose pattern of present treatments occurs in the baseline.
+Presence means a value other than zero, or other than the value ``absent`` names for an input whose zero moved in preprocessing, so the support says something only about inputs in which a value marks absence.
+By default the pattern is made of the card's treatments, each over the inputs it spans that hold an array with one scalar per observation in both scenarios, ``X`` standing for the input's features, and present where one of them is, or, where that leaves no group, as without a card, of the changed inputs that hold one in both, each a group of its own; ``pattern`` regroups the inputs, keeping those that belong together in one group, since a wide pattern makes support small.
+A site that ``intervention`` or ``condition`` sets in one scenario only, or to differing values that are not both arrays over the observations, has changed for every observation, and a keyword array of its name then no longer stands for the name, in the pattern or in the extrapolation share; set the site to an array with one value per observation in both scenarios to have it compared observation by observation.
+The range and the patterns are those of the baseline scenario, not of the data the model was fitted on.
+A change outside the declared treatments, where the card declares any, or grouping by a declared post-treatment variable, warns with :class:`~aimz.ScopeWarning`, which a harness can turn into an error like the other categories.
+:meth:`~aimz.ImpactModel.estimate_effect` does not run the check, so call it before the estimate, with ``by`` holding the labels the effect will be grouped by, keyed by name.
+Every value is a fact about the scenarios and the data; whether a share is acceptable is the caller's decision, and nothing here establishes that a contrast is causal.
 
 .. code-block:: python
 
     args = {"X": X}
     scenario = im.build_scenario(args, {"t": 0.0})  # t absent, in both of its features
+    report = im.check_scenario(args, scenario)
+    report["changed"], report["extrapolation"], report["support"]
     effect = im.estimate_effect(args_baseline=args, args_intervention=scenario)

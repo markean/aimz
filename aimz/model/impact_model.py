@@ -77,6 +77,7 @@ from aimz._exceptions import (
     NotFittedError,
     OutputWarning,
     PerformanceWarning,
+    ScopeWarning,
 )
 from aimz.model._core import BaseModel
 from aimz.model._streaming import (
@@ -93,6 +94,7 @@ from aimz.utils._format import (
 from aimz.utils._kwargs import (
     _combine,
     _group_kwargs,
+    _is_per_observation,
     _partition,
     _split_intervention,
     _split_intervention_fields,
@@ -3324,7 +3326,8 @@ class ImpactModel(BaseModel):
         several features changes in all of them at once, and the arrays given are
         never touched: an edited input comes back as a copy and every other entry as
         given. Nothing is predicted, and nothing here establishes that a change is a
-        treatment.
+        treatment; :meth:`~aimz.ImpactModel.check_scenario` compares the two
+        scenarios.
 
         Args:
             args: Arguments of the baseline scenario, with an array input.
@@ -3342,7 +3345,7 @@ class ImpactModel(BaseModel):
             The intervention scenario, with the keys of ``args``.
 
         Raises:
-            TypeError: If the input is not an array, as a data loader is.
+            TypeError: If ``args`` holds no array under ``X``, as with a data loader.
             ValueError: If the card declares features whose number differs from the
                 input's, if a name is none of the card's treatments, the input ``X``,
                 its features as ``changes`` names them and the keyword arrays, if a
@@ -3354,8 +3357,8 @@ class ImpactModel(BaseModel):
         """
         if not isinstance(args.get("X"), ArrayLike):
             msg = (
-                "`build_scenario` edits an array input; a data loader has no "
-                "observations."
+                "`build_scenario` edits an array passed under `X`, whatever the "
+                "kernel names its input; a data loader has no observations."
             )
             raise TypeError(msg)
         X = np.asarray(args["X"])
@@ -3440,6 +3443,327 @@ class ImpactModel(BaseModel):
                     current[index] = new[index]
 
         return {**args, **edited}
+
+    def check_scenario(
+        self,
+        args_baseline: Mapping[str, object],
+        args_intervention: Mapping[str, object],
+        *,
+        by: Mapping[str, ArrayLike] | None = None,
+        pattern: Iterable[str] | Mapping[str, Iterable[str]] | None = None,
+        absent: Mapping[str, object] | None = None,
+    ) -> dict[str, object]:
+        """Compare two scenarios against the declared causal scope and the data.
+
+        The scenarios are the argument dictionaries of
+        :meth:`~aimz.ImpactModel.estimate_effect`: the input under ``X``, the keyword
+        arguments of the kernel, and the ``intervention`` and ``condition`` mappings.
+        Nothing is predicted. The scenarios are compared observation by observation,
+        and the observations that change are compared with the baseline's. Every
+        value returned is a fact about the scenarios and the data, not a verdict:
+        what a share means for an answer is the caller's decision, and nothing here
+        establishes that a contrast is causal.
+
+        Args:
+            args_baseline: Arguments of the baseline scenario, with an array input.
+            args_intervention: Arguments of the intervention scenario, over the same
+                observations.
+            by: Label arrays an effect will be grouped by, keyed by name. Only the
+                names are read, to flag those the card declares post-treatment.
+            pattern: The inputs whose presence pattern the support share is
+                computed over: names, each a group of its own, or a
+                mapping of group name to the names whose presence it combines. By
+                default the card's treatments, each over the names it spans that
+                hold one value per observation, ``X`` standing for the input's
+                features, else the inputs that changed and hold one, each a group
+                of its own. A wide pattern makes support small, so group the
+                inputs that belong together, such as the features one treatment
+                is recorded in.
+            absent: The value that counts as absence for an input, by name, for inputs
+                whose zero is elsewhere after preprocessing; zero for every other
+                input. A value is compared exactly, a Python float or a float64 in
+                the input's precision, so give it as the input holds it.
+
+        Returns:
+            ``n_obs``, the observations compared. ``changed``, each input that
+            differs, with the share of observations whose value differs: a feature of
+            the input by its declared name or ``X[i]``, a keyword array
+            by its argument name, a site of ``intervention`` or ``condition`` by its
+            name, and a value that is not per observation with share one, compared
+            leaf by leaf where it holds several arrays. A keyword argument given in
+            only one scenario counts as changed, and so does a site that only one
+            scenario sets: set it in both to have it compared observation by
+            observation. Each entry is compared with the same entry of the other
+            scenario, and a name that several share, as a site and the keyword
+            argument of its name do, has changed where any of them has. Of the
+            entries of such a name that hold values per observation, one stands for
+            it in ``extrapolation``, over the observations where that entry differs,
+            and in ``pattern`` and ``support``: the last that differs, or the last
+            where none does, in the order in which a call lets them stand, a
+            feature, the keyword argument, what ``condition`` sets, what
+            ``intervention`` sets. An entry that changes as a whole voids those
+            before it, a feature apart, and where none is left the name holds no
+            value per observation.
+            ``obs_changed``, the share of observations where anything differs.
+            ``undeclared``, the changed names that no treatment of the card spans,
+            empty when the card declares none. ``extrapolation``, for each changed
+            numeric input with one value per observation, the share of its changed
+            observations whose intervention value lies outside the range the
+            baseline observes.
+            ``pattern``, the groups the presence pattern is made of. ``support``, the
+            share of changed observations whose intervention pattern occurs among the
+            baseline's observations; ``None`` when nothing changed or no pattern
+            applies. A changed name without one value per observation is in no
+            group, so ``support`` says nothing about it. ``post_treatment``, the
+            names in ``by`` that the card declares post-treatment.
+
+        Raises:
+            TypeError: If a scenario holds no array under ``X``, as with a data loader.
+            ValueError: If the two inputs differ in shape, if the card declares
+                features whose number differs from the input's, or if ``pattern`` or
+                ``absent`` names an input without one value per observation in both
+                scenarios.
+
+        Warns:
+            ScopeWarning: If the card declares treatments and an undeclared input
+                changed, or if ``by`` names a variable the card declares
+                post-treatment.
+        """
+        card = self._card
+        if not all(
+            isinstance(args.get("X"), ArrayLike)
+            for args in (args_baseline, args_intervention)
+        ):
+            msg = (
+                "`check_scenario` compares arrays passed under `X`, whatever the "
+                "kernel names its input; a data loader has no observations."
+            )
+            raise TypeError(msg)
+        X_b, X_i = np.asarray(args_baseline["X"]), np.asarray(args_intervention["X"])
+        if X_b.shape != X_i.shape:
+            msg = (
+                f"The scenarios' inputs differ in shape, {X_b.shape} against "
+                f"{X_i.shape}; a scenario compares the same observations."
+            )
+            raise ValueError(msg)
+        n_obs = X_b.shape[0]
+        features = card.features if card is not None else ()
+        if features and (X_b.ndim <= 1 or len(features) != X_b.shape[1]):
+            msg = (
+                f"The card names {len(features)} feature(s), but the input has shape "
+                f"{X_b.shape}."
+            )
+            raise ValueError(msg)
+
+        # Per-observation pairs by name, in the order a call lets them stand
+        stacked: dict[str, list[tuple[np.ndarray, np.ndarray]]] = {}
+        if X_b.ndim > 1:
+            for j in range(X_b.shape[1]):
+                stacked[features[j] if features else f"X[{j}]"] = [
+                    (X_b[:, j].reshape(n_obs, -1), X_i[:, j].reshape(n_obs, -1)),
+                ]
+        else:
+            stacked["X"] = [(X_b.reshape(n_obs, -1), X_i.reshape(n_obs, -1))]
+        columns = tuple(stacked)
+        own = {
+            name
+            for method in (self.predict, self.predict_on_batch)
+            for name, p in signature(method).parameters.items()
+            if p.kind is not p.VAR_KEYWORD
+        }
+        pairs = [
+            (name, args_baseline.get(name), args_intervention.get(name))
+            for name in sorted({*args_baseline, *args_intervention} - own)
+        ]
+        for name in ("condition", "intervention"):
+            mappings = [
+                cast("Mapping[str, object]", args.get(name) or {})
+                for args in (args_baseline, args_intervention)
+            ]
+            pairs.extend(
+                (site, mappings[0].get(site), mappings[1].get(site))
+                for site in sorted({*mappings[0], *mappings[1]})
+            )
+        whole: dict[str, bool] = {}
+        for name, a, b in pairs:
+            if a is None or b is None:
+                differs = a is not b or (name in args_baseline) != (
+                    name in args_intervention
+                )
+            # A distribution's `shape` is a method, which no array's is
+            elif (
+                not callable(getattr(a, "shape", None))
+                and not callable(getattr(b, "shape", None))
+                and _is_per_observation(a, n_obs)
+                and _is_per_observation(b, n_obs)
+                and np.asarray(a).shape == np.asarray(b).shape
+            ):
+                stacked.setdefault(name, []).append(
+                    (
+                        np.asarray(a).reshape(n_obs, -1),
+                        np.asarray(b).reshape(n_obs, -1),
+                    ),
+                )
+                continue
+            else:
+                differs = a is not b and (
+                    tree.structure(a) != tree.structure(b)
+                    or not all(map(np.array_equal, tree.leaves(a), tree.leaves(b)))
+                )
+            # A change as a whole voids the pairs read before it, a feature's own apart
+            whole[name] = whole.get(name, False) or differs
+            if differs and name in stacked:
+                stacked[name] = stacked[name][:1] if name in columns else []
+
+        values: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+        changed: dict[str, float] = {}
+        masks: dict[str, np.ndarray] = {}
+        any_changed = np.zeros(n_obs, dtype=bool)
+        for name, group in stacked.items():
+            union = np.zeros(n_obs, dtype=bool)
+            for a, b in group:
+                neq = a != b
+                if np.issubdtype(a.dtype, np.floating) and np.issubdtype(
+                    b.dtype,
+                    np.floating,
+                ):
+                    neq &= ~(np.isnan(a) & np.isnan(b))
+                rows = neq.any(axis=1)
+                union |= rows
+                # The last pair that differs stands for the name, else the last
+                if rows.any() or name not in masks:
+                    values[name] = (a, b)
+                if rows.any():
+                    masks[name] = rows
+            if union.any():
+                changed[name] = float(union.mean())
+                any_changed |= union
+        for name, differs in whole.items():
+            if differs:
+                changed[name] = 1.0
+                any_changed[:] = True
+
+        treatments = card.treatments if card is not None else {}
+        spanned = {name for names in treatments.values() for name in names}
+        undeclared = sorted(
+            name
+            for name in changed
+            if spanned
+            and name not in spanned
+            and not ("X" in spanned and (name.startswith("X[") or name in features))
+        )
+        extrapolation: dict[str, float] = {}
+        for name, rows in masks.items():
+            a, b = values[name]
+            if a.shape[1] != 1 or not np.issubdtype(a.dtype, np.number):
+                continue
+            new = b[rows, 0]
+            extrapolation[name] = float(
+                ((new < np.nanmin(a)) | (new > np.nanmax(a))).mean(),
+            )
+
+        per_obs = {name for name, (a, _) in values.items() if a.shape[1] == 1}
+        if pattern is None:
+            groups = {
+                group: tuple(
+                    name
+                    for each in names
+                    for name in (columns if each == "X" else (each,))
+                    if name in per_obs
+                )
+                for group, names in treatments.items()
+            }
+            groups = {group: names for group, names in groups.items() if names} or {
+                name: (name,) for name in changed if name in per_obs
+            }
+        elif hasattr(pattern, "items"):
+            groups = {
+                str(group): tuple(names)
+                for group, names in cast(
+                    "Mapping[str, Iterable[str]]",
+                    pattern,
+                ).items()
+            }
+        else:
+            groups = {name: (name,) for name in cast("Iterable[str]", pattern)}
+        zero = dict(absent or {})
+        unknown = sorted(
+            name
+            for name in {*zero, *(name for names in groups.values() for name in names)}
+            if name not in per_obs
+        )
+        if unknown:
+            msg = (
+                f"Name(s) {', '.join(map(repr, unknown))} in `pattern` or `absent` "
+                "are not inputs with one value per observation in both scenarios: "
+                f"{', '.join(map(repr, sorted(per_obs)))}."
+            )
+            raise ValueError(msg)
+        # As a Python float, a float64 is compared in the input's precision
+        zero = {
+            name: float(array)
+            if (array := np.asarray(value)).ndim == 0 and array.dtype == np.float64
+            else value
+            for name, value in zero.items()
+        }
+        support = None
+        if groups and any_changed.any():
+            packed = [
+                np.packbits(
+                    np.stack(
+                        [
+                            np.any(
+                                [
+                                    values[name][side][:, 0] != zero.get(name, 0)
+                                    for name in names
+                                ],
+                                axis=0,
+                            )
+                            for names in groups.values()
+                        ],
+                        axis=1,
+                    ),
+                    axis=1,
+                )
+                for side in (0, 1)
+            ]
+            void = np.dtype((np.void, packed[0].shape[1]))
+            keys_b = np.ascontiguousarray(packed[0]).view(void).ravel()
+            keys_i = np.ascontiguousarray(packed[1]).view(void).ravel()[any_changed]
+            index = np.unique(np.concatenate([keys_b, keys_i]), return_inverse=True)[1]
+            index_b, index_i = index[: len(keys_b)], index[len(keys_b) :]
+            count_b = np.bincount(index_b, minlength=index.max() + 1)
+            support = float((count_b[index_i] > 0).mean())
+
+        post = sorted(
+            name
+            for name in (by or {})
+            if card is not None and name in card.post_treatment
+        )
+        if undeclared:
+            msg = (
+                f"Changed input(s) {', '.join(map(repr, undeclared))} are not among "
+                f"the card's treatments ({', '.join(map(repr, treatments))}); the "
+                "scenario is outside the declared causal scope."
+            )
+            warn(msg, category=ScopeWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
+        if post:
+            msg = (
+                f"Grouping by {', '.join(map(repr, post))}, which the card declares "
+                "post-treatment; a contrast within these groups is descriptive."
+            )
+            warn(msg, category=ScopeWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
+
+        return {
+            "n_obs": int(n_obs),
+            "changed": changed,
+            "obs_changed": float(any_changed.mean()) if n_obs else 0.0,
+            "undeclared": undeclared,
+            "extrapolation": extrapolation,
+            "pattern": {group: list(names) for group, names in groups.items()},
+            "support": support,
+            "post_treatment": post,
+        }
 
     def log_likelihood(
         self,

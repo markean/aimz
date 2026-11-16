@@ -24,6 +24,7 @@ from aimz._exceptions import (
     NotFittedError,
     OutputWarning,
     PerformanceWarning,
+    ScopeWarning,
 )
 from aimz.model.causal_card import CausalCard
 from aimz.model.impact_model import ImpactModel
@@ -37,6 +38,7 @@ __all__ = [
     "NotFittedError",
     "OutputWarning",
     "PerformanceWarning",
+    "ScopeWarning",
 ]
 
 __version__ = version("aimz")
