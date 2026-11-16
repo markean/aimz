@@ -90,6 +90,7 @@ from aimz.sampling._forward import _sample_forward
 from aimz.utils._format import (
     _build_datatree,
     _dict_to_datatree,
+    _draw_attrs,
 )
 from aimz.utils._kwargs import (
     _combine,
@@ -102,6 +103,7 @@ from aimz.utils._kwargs import (
 )
 from aimz.utils._validation import (
     _check_is_fitted,
+    _coerce_return_sites,
     _validate_aligned_inputs,
     _validate_batch_size,
     _validate_condition,
@@ -883,38 +885,6 @@ class ImpactModel(BaseModel):
             if k in (self._posterior or {}) and self._site_sizes.get(k, (0, 0))[0]
         }
 
-    def _coerce_return_sites(
-        self,
-        return_sites: str | Iterable[str] | None,
-        intervention: Mapping[str, object] | None = None,
-        spec: KernelSpec | None = None,
-    ) -> tuple[str, ...]:
-        """Return the requested site names as a tuple, or the default return sites.
-
-        The defaults are those of ``spec``, the spec of the call's arguments, or else
-        of the model's spec.
-
-        Warns:
-            OutputWarning: If a requested site is intervened on, since it comes back
-                with its own draws, not the set value.
-        """
-        if return_sites is None:
-            return cast("KernelSpec", spec or self._kernel_spec).return_sites
-        requested = (
-            (return_sites,)
-            if isinstance(return_sites, str)
-            else tuple(str(s) for s in return_sites)
-        )
-        if intervened := [site for site in requested if site in (intervention or {})]:
-            msg = (
-                f"Return site(s) {', '.join(map(repr, intervened))} are intervened on, "
-                "so they come back with their own draws, not the set values. Read the "
-                "effect of the intervention from the sites downstream of them."
-            )
-            warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
-
-        return requested
-
     def _create_artifact_path(
         self,
         output_dir: str | Path | None,
@@ -1338,33 +1308,6 @@ class ImpactModel(BaseModel):
 
         return shard_axis, resolved
 
-    def _draw_attrs(
-        self,
-        rng_key: Array,
-        *,
-        X: object = None,
-        shard_axis: str | None = None,
-        batch_size: int | None = None,
-    ) -> dict[str, object]:
-        """Describe what the draws of a predictive call depend on.
-
-        :meth:`~aimz.ImpactModel.estimate_effect` compares these attributes between two
-        scenarios to tell whether their draws are paired. The values are strings,
-        integers, or lists of integers, so a tree written to a file keeps them.
-        """
-        attrs: dict[str, object] = {"rng_key": random.key_data(rng_key).tolist()}
-        if shard_axis is not None:
-            attrs["shard_axis"] = shard_axis
-        if shard_axis == "obs":
-            attrs["num_devices"] = self._num_devices
-            # Another loader than `ArrayLoader` has no fixed batch size to record
-            if isinstance(X, ArrayLoader):
-                batch_size = X.batch_size
-            if batch_size is not None:
-                attrs["batch_size"] = batch_size
-
-        return attrs
-
     def _stream_to_datatree(
         self,
         write: Callable[[Path | None], dict[str, DaskArray] | None],
@@ -1460,10 +1403,10 @@ class ImpactModel(BaseModel):
         args_bound = _to_jax(self._bind_kernel_args(X, kwargs=kwargs))
         spec = self._call_spec(args_bound)
         _validate_intervention(intervention, kernel_spec=spec)
-        sites = self._coerce_return_sites(
+        sites = _coerce_return_sites(
             return_sites,
             intervention=intervention,
-            spec=spec,
+            spec=spec or self._kernel_spec,
         )
 
         if rng_key is None:
@@ -1499,7 +1442,7 @@ class ImpactModel(BaseModel):
             posterior=self.posterior,
             num_chains=self._num_chains,
             dims=self._dims,
-            attrs=self._draw_attrs(rng_key),
+            attrs=_draw_attrs(rng_key),
         )
 
     def sample_prior_predictive(
@@ -1641,10 +1584,10 @@ class ImpactModel(BaseModel):
         _validate_intervention(intervention, kernel_spec=spec)
 
         requested = return_sites is not None
-        return_sites = self._coerce_return_sites(
+        return_sites = _coerce_return_sites(
             return_sites,
             intervention=intervention,
-            spec=spec,
+            spec=spec or self._kernel_spec,
         )
         shard_axis, batch_size = self._plan_execution(
             X,
@@ -1686,11 +1629,12 @@ class ImpactModel(BaseModel):
             store=store,
             output_dir=output_dir,
             group="prior_predictive",
-            attrs=self._draw_attrs(
+            attrs=_draw_attrs(
                 rng_key,
                 X=X,
                 shard_axis=shard_axis,
                 batch_size=batch_size,
+                num_devices=self._num_devices,
             ),
             requested=return_sites if requested else (),
         )
@@ -1790,9 +1734,7 @@ class ImpactModel(BaseModel):
             if return_sites is None and spec is not None and spec.output_observed:
                 return_sites = spec.sample_sites
             sites = (
-                self._coerce_return_sites(return_sites)
-                if return_sites is not None
-                else None
+                _coerce_return_sites(return_sites) if return_sites is not None else None
             )
             posterior_samples = device_get(
                 _sample_forward(
@@ -2789,10 +2731,10 @@ class ImpactModel(BaseModel):
         if rng_key is None:
             self._rng_key, rng_key = random.split(self._rng_key)
 
-        sites = self._coerce_return_sites(
+        sites = _coerce_return_sites(
             return_sites,
             intervention=intervention,
-            spec=spec,
+            spec=spec or self._kernel_spec,
         )
         samples = device_get(
             _sample_forward(
@@ -2837,7 +2779,7 @@ class ImpactModel(BaseModel):
             posterior=self.posterior,
             num_chains=self._num_chains,
             dims=self._dims,
-            attrs=self._draw_attrs(rng_key),
+            attrs=_draw_attrs(rng_key),
         )
 
     def predict(
@@ -2966,10 +2908,10 @@ class ImpactModel(BaseModel):
         )
 
         requested = return_sites is not None
-        return_sites = self._coerce_return_sites(
+        return_sites = _coerce_return_sites(
             return_sites,
             intervention=intervention,
-            spec=spec,
+            spec=spec or self._kernel_spec,
         )
         shard_axis, batch_size = self._plan_execution(
             X,
@@ -3020,11 +2962,12 @@ class ImpactModel(BaseModel):
             store=store,
             output_dir=output_dir,
             group=group,
-            attrs=self._draw_attrs(
+            attrs=_draw_attrs(
                 rng_key,
                 X=X,
                 shard_axis=shard_axis,
                 batch_size=batch_size,
+                num_devices=self._num_devices,
             ),
             requested=return_sites if requested else (),
         )
