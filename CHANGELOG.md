@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - {meth}`~aimz.ImpactModel.describe` now reports for each site the name of the distribution it samples and the `upstream` sample sites and array `arguments` of the kernel that its distribution or its deterministic value is computed from, derived from a trace of the kernel, instead of only its kind, dimension names, and draw shape ([#555](https://github.com/markean/aimz/issues/555)).
 
+### Fixed
+
+- {meth}`~aimz.ImpactModel.predict` and {meth}`~aimz.ImpactModel.predict_on_batch` now warn about an intervention that cannot reach the output also when an intervened site is observed, instead of only when it is latent ([#557](https://github.com/markean/aimz/issues/557)).
+
 ## [v0.17.0](https://github.com/markean/aimz/releases/tag/v0.17.0) - 2026-10-25
 
 ### Added

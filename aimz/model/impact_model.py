@@ -2724,6 +2724,7 @@ class ImpactModel(BaseModel):
             intervention,
             output=self.param_output,
             parents=self._site_parents,
+            upstream=self._site_upstream,
             fixed=(self._posterior or {}).keys(),
         )
 
@@ -2902,6 +2903,7 @@ class ImpactModel(BaseModel):
             intervention,
             output=self.param_output,
             parents=self._site_parents,
+            upstream=self._site_upstream,
             fixed=(self._posterior or {}).keys(),
         )
 
