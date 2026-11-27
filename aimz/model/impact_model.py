@@ -167,7 +167,9 @@ class ImpactModel(BaseModel):
 
         Warns:
             AimzWarning: If ``rng_key`` is a legacy ``uint32`` key, which is converted
-                to a typed key array.
+                to a typed key array; or if ``inference`` was built on another callable
+                than ``kernel``, since aimz fits that callable and predicts with
+                ``kernel``.
         """
         super().__init__(kernel, param_input, param_output)
         self._kernel_spec: KernelSpec | None = None
@@ -199,6 +201,24 @@ class ImpactModel(BaseModel):
                 "keyword arguments of the kernel instead."
             )
             raise ValueError(msg)
+        model = (
+            inference.model
+            if isinstance(inference, SVI)
+            else getattr(inference.sampler, "model", None)
+        )
+        # Each access of a bound method is a new object over the same function and
+        # instance
+        if model is not None and (
+            getattr(model, "__func__", model) is not getattr(kernel, "__func__", kernel)
+            or getattr(model, "__self__", None) is not getattr(kernel, "__self__", None)
+        ):
+            msg = (
+                "`inference` was built on another callable than `kernel`: aimz fits "
+                "that callable and predicts with `kernel`, drawing from the prior any "
+                "latent site the two do not share. Build `inference` on `kernel` "
+                "unless the difference is intended."
+            )
+            warn(msg, category=AimzWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
         self._inference = inference
         self._vi_result: SVIRunResult | None = None
         self._vi_state = None
@@ -217,13 +237,14 @@ class ImpactModel(BaseModel):
         # The return sites a streamed call cannot split, whether the kernel failed on
         # one row fewer, and the posterior sites whose size follows the rows, by the
         # call's shapes and constants, and the calls that passed `log_likelihood`'s
-        # check of keyword arrays as long as each device's rows
+        # check of keyword arrays as long as each device's rows or failed the trace
+        # of `_call_spec`
         self._plan_cache: dict[
             tuple,
             tuple[frozenset[str], bool, dict[str, tuple[int, ...]]],
         ] = {}
         # The spec of each set of call arguments traced so far, by their static part
-        self._specs: dict[tuple, KernelSpec | None] = {}
+        self._specs: dict[tuple, KernelSpec] = {}
         self._num_devices = local_device_count()
         if self._num_devices > 1:
             mesh = make_mesh(
@@ -467,9 +488,7 @@ class ImpactModel(BaseModel):
         """
         if not np.all(np.isfinite(vi_result.losses)):
             msg = "Loss contains NaN or Inf, indicating numerical instability."
-            # Not `skip_file_prefixes`: skipping the aimz frames would blame MLflow's
-            # autolog wrapper, which then hides the warning
-            warn(msg, category=FitWarning, stacklevel=2)
+            warn(msg, category=FitWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
         self._vi_result = vi_result
         self._vi_state = vi_result.state
 
@@ -534,11 +553,13 @@ class ImpactModel(BaseModel):
         The trace is abstract, so the arguments are copied into JAX arrays only when it
         fails, as for a kernel that reads a concrete value of an argument, which then
         runs once on them. A traced kernel that does not run on them at once, as one
-        whose subsampling plate is smaller than the input, keeps the model's spec, for
-        every later call with these arguments too.
+        whose subsampling plate is smaller than the input, keeps the model's spec for
+        the call; a later call with arrays of other shapes or types traces again.
         """
-        static = _partition(args_bound)[1]
-        if static not in self._specs:
+        leaves, static = _partition(args_bound)
+        # A failed trace is remembered with the shapes and types it failed on
+        failed = (static, *((np.shape(a), jnp.result_type(a)) for a in leaves))
+        if static not in self._specs and failed not in self._plan_cache:
             try:
                 return self._build_kernel_spec(args_bound, with_output=False)
             except AimzWarning:
@@ -549,9 +570,9 @@ class ImpactModel(BaseModel):
                 # untraced one has none to fall back on
                 if not (self._kernel_spec and self._kernel_spec.traced):
                     raise
-                self._specs[static] = None
+                self._plan_cache[failed] = (frozenset(), False, {})
 
-        return self._specs[static] or self._kernel_spec
+        return self._specs.get(static, self._kernel_spec)
 
     def _recomputed_sites(self) -> set[str]:
         """Return the posterior sites traced as deterministic with a value per row.
@@ -684,8 +705,8 @@ class ImpactModel(BaseModel):
 
         Warns:
             OutputWarning: If the output site does not have one value per observation
-                of the input, or a requested return site is intervened on, since it
-                comes back with its own draws, or missing from the output.
+                of the input, or a return site is intervened on, since it comes back
+                with its own draws, or a requested one is missing from the output.
 
         See Also:
             :meth:`~aimz.ImpactModel.sample_prior_predictive`
@@ -801,19 +822,19 @@ class ImpactModel(BaseModel):
                 a site that is not a sample site of the kernel.
             NotImplementedError: If a site's prior cannot be sampled, as for an
                 improper prior, also when the site is intervened on; or, with a data
-                loader, if a return site has no observation axis, unless it is
-                intervened on or the kernel does not run on one observation fewer than
-                a device evaluates (two when it evaluates one), or if its axis-1 size
-                does not match the number of observations a device evaluates from a
-                batch.
+                loader or an array input that the kernel does not run on as a whole,
+                if a return site has no observation axis, unless it is intervened on
+                or the kernel does not run on one observation fewer than a device
+                evaluates (two when it evaluates one), or if its axis-1 size does not
+                match the number of observations a device evaluates from a batch.
 
         Warns:
-            OutputWarning: If a requested return site is intervened on, since it comes
-                back with its own draws, or missing from the output, or if the output
-                site does not have one value per observation of an array input; under
-                ``shard_axis="obs"`` the call then reruns under ``shard_axis="draw"``.
-                Also if the batches of a data loader split a kernel that computes
-                across observations.
+            OutputWarning: If a return site is intervened on, since it comes back with
+                its own draws, or a requested one is missing from the output, or if the
+                output site does not have one value per observation of an array input;
+                under ``shard_axis="obs"`` the call then reruns under
+                ``shard_axis="draw"``. Also if the batches of a data loader split a
+                kernel that computes across observations.
             PerformanceWarning: If ``shard_axis="obs"`` cannot split an array input,
                 as for a return site without an observation axis, so the call reruns
                 under ``shard_axis="draw"``.
@@ -867,7 +888,7 @@ class ImpactModel(BaseModel):
         try:
             static = _partition(probe)[1]
             spec = (
-                self._specs[static] or self._kernel_spec
+                self._specs[static]
                 if static in self._specs
                 else self._build_kernel_spec(_to_jax(probe), with_output=False)
             )
@@ -1333,6 +1354,7 @@ class ImpactModel(BaseModel):
                 intervention=None,
                 model_kwargs=args_bound,
             )
+            self._num_chains = 1
             self._num_samples = num_samples
         elif isinstance(self.inference, MCMC):
             logger.info(
@@ -1407,8 +1429,8 @@ class ImpactModel(BaseModel):
                 :attr:`~aimz.ImpactModel.param_output` is passed as an argument, the
                 inference method is MCMC, or ``y`` is passed with a data loader ``X``.
             ValueError: If ``y`` is missing when ``X`` is array-like, ``y`` does not
-                share ``X``'s leading-axis size, or a data loader yields no batches
-                in an epoch.
+                share ``X``'s leading-axis size, ``epochs`` is less than one, or a data
+                loader yields no batches in an epoch.
 
         Warns:
             FitWarning: If the batches are smaller than the data and the kernel does
@@ -1440,6 +1462,9 @@ class ImpactModel(BaseModel):
                 "instead."
             )
             raise TypeError(msg)
+        if epochs < 1:
+            msg = "epochs must be a positive integer."
+            raise ValueError(msg)
 
         rng_key_model = self._rng_key
         if rng_key is None:
@@ -1675,7 +1700,6 @@ class ImpactModel(BaseModel):
             isinstance(X, ArrayLike)
             and isinstance(dataloader, ArrayLoader)
             and len(dataloader) == 1
-            and epochs > 0
         ):
             dataloader = [_to_jax(dataloader.dataset.arrays)]
 
@@ -1738,7 +1762,7 @@ class ImpactModel(BaseModel):
             if isinstance(X, ArrayLike)
             else _to_jax({**batch, **kwargs_extra})
         )
-        # Release the training copy before the draw; assigned, as `epochs=0` binds none
+        # Release the training copy before the draw
         dataloader = pbar = batch = fields = None
         kwargs_extra = {}
         self._posterior = _sample_forward(
@@ -1753,6 +1777,7 @@ class ImpactModel(BaseModel):
             intervention=None,
             model_kwargs=model_kwargs,
         )
+        self._num_chains = 1
         self._num_samples = num_samples
         self._is_fitted = True
 
@@ -1782,11 +1807,12 @@ class ImpactModel(BaseModel):
             they hold what it computes, not what a feature of an input means. They name
             the input by the kernel's own parameter name, and a site computed from a
             site that ``scan`` or ``cond`` records can list in its place everything that
-            enters that ``scan`` or ``cond``, whether or not it feeds the site. A
-            ``factor`` term counts as observed, and ``param`` sites are not listed;
-            their values after an SVI fit are in :attr:`~aimz.ImpactModel.vi_result`.
-            The ``card`` is the :class:`~aimz.model.CausalCard` as plain values, or
-            ``None``.
+            enters that ``scan`` or ``cond``, whether or not it feeds the site. The
+            ``arguments`` add up over the calls traced so far, since a call lists only
+            those it passes as arrays. A ``factor`` term counts as observed, and
+            ``param`` sites are not listed; their values after an SVI fit are in
+            :attr:`~aimz.ImpactModel.vi_result`. The ``card`` is the
+            :class:`~aimz.model.CausalCard` as plain values, or ``None``.
         """
         spec = self._kernel_spec
         sample_sites = spec.sample_sites if spec else ()
@@ -1851,8 +1877,9 @@ class ImpactModel(BaseModel):
 
         Raises:
             ValueError: If ``posterior_sample`` is empty, a value is 0-D, the batch
-                shapes in ``posterior_sample`` are inconsistent, or a key is ``chain``
-                or ``draw``.
+                shapes in ``posterior_sample`` are inconsistent, a key is ``chain``
+                or ``draw``, or ``num_chains`` is less than one or does not divide the
+                number of draws.
 
         Warns:
             AimzWarning: If the output site is in ``posterior_sample``; it is removed.
@@ -1907,7 +1934,13 @@ class ImpactModel(BaseModel):
                 f"Inconsistent batch shapes found in `posterior_sample`: {batch_shapes}"
             )
             raise ValueError(msg)
-        (self._num_samples,) = batch_shapes.pop()
+        (num_samples,) = batch_shapes.pop()
+        if num_chains < 1 or num_samples % num_chains:
+            msg = (
+                f"`num_chains` should be a positive divisor of the {num_samples} "
+                f"draws in `posterior_sample`, but got {num_chains!r}."
+            )
+            raise ValueError(msg)
         spec = self._kernel_spec
         if spec is not None and spec.traced:
             latent = self._fitted_sites - {*self._observed_sites, self.param_output}
@@ -1935,8 +1968,9 @@ class ImpactModel(BaseModel):
         # Release the placement of the posterior this call replaces
         self._streamer.place_posterior(None, sharding=None)
         self._posterior = posterior_sample
+        self._num_samples = num_samples
         self._num_chains = num_chains
-        if self._kernel_spec is None:
+        if self._kernel_spec is None or not self._kernel_spec.traced:
             self._kernel_spec = KernelSpec(
                 traced=False,
                 sample_sites=tuple(self._posterior.keys()),
@@ -2002,11 +2036,11 @@ class ImpactModel(BaseModel):
         Warns:
             OutputWarning: If an intervened site reaches the output only through sites
                 whose values are taken from the posterior or intervened on, so that
-                the draws do not respond to it, if a requested return site is
-                intervened on, since it comes back with its own draws, or missing from
-                the output, if a conditioned site is one the posterior holds, since it
-                keeps its posterior draws, or if the output site does not have one value
-                per observation of the input.
+                the draws do not respond to it, if a return site is intervened on,
+                since it comes back with its own draws, or a requested one is missing
+                from the output, if a conditioned site is one the posterior holds,
+                since it keeps its posterior draws, or if the output site does not have
+                one value per observation of the input.
         """
         _check_is_fitted(self)
         X = cast("Array", _validate_X_y_to_jax(X))
@@ -2158,7 +2192,8 @@ class ImpactModel(BaseModel):
                 being evaluated, as a site with one value per observation does not fit
                 other observations, and a site sized by a count, such as the number of
                 groups, does not fit another count.
-            NotImplementedError: With a data loader, if a return site has no
+            NotImplementedError: With a data loader, or an array input that the
+                kernel does not run on as a whole, if a return site has no
                 observation axis, unless it is intervened on or the kernel does not
                 run on one observation fewer than a device evaluates (two when it
                 evaluates one), or if its axis-1 size does not match the number of
@@ -2167,12 +2202,12 @@ class ImpactModel(BaseModel):
         Warns:
             OutputWarning: If an intervened site reaches the output only through sites
                 whose values are taken from the posterior or intervened on, so that
-                the draws do not respond to it, if a requested return site is
-                intervened on, since it comes back with its own draws, or missing from
-                the output, if a conditioned site is one the posterior holds, since it
-                keeps its posterior draws, or if the output site does not have one value
-                per observation of an array input; under ``shard_axis="obs"`` the call
-                then reruns under
+                the draws do not respond to it, if a return site is intervened on,
+                since it comes back with its own draws, or a requested one is missing
+                from the output, if a conditioned site is one the posterior holds,
+                since it keeps its posterior draws, or if the output site does not have
+                one value per observation of an array input; under ``shard_axis="obs"``
+                the call then reruns under
                 ``shard_axis="draw"``. Also if the batches of a data loader split a
                 kernel that computes across observations, once a call has traced the
                 kernel.
@@ -2888,7 +2923,7 @@ class ImpactModel(BaseModel):
         # the rows with it but does once the array has as many
         if shard_axis == "obs" and isinstance(X, ArrayLike):
             n_obs = len(cast("Sized", X))
-            rows = -(-min(cast("int", batch_size), n_obs) // self._num_devices)
+            rows = -(-cast("int", batch_size) // self._num_devices)
             if rows != n_obs and any(
                 np.shape(leaf)[:1] == (rows,)
                 for leaf in _partition(_group_kwargs(kwargs, n_obs=n_obs)[1])[0]
@@ -2941,12 +2976,6 @@ class ImpactModel(BaseModel):
                             raise
                     self._plan_cache[check] = (frozenset(), False, {})
 
-        # Without a posterior every latent site is drawn from the prior, which needs a
-        # seeded kernel; with one, the bare kernel keeps its identity for the cache
-        kernel = (
-            self.kernel if self.posterior else seed(self.kernel, rng_seed=self.rng_key)
-        )
-
         return self._stream_to_datatree(
             lambda artifact_path: self._streamer.write_log_likelihood(
                 _WriteRequest(
@@ -2961,7 +2990,7 @@ class ImpactModel(BaseModel):
                     kwargs=kwargs,
                     dims=self._dims,
                 ),
-                kernel=kernel,
+                kernel=self.kernel,
                 posterior=self.posterior,
                 params={
                     **self.vi_result.params,

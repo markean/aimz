@@ -67,6 +67,8 @@ def test_fit_argument_errors(synthetic_data: tuple[Array, Array]) -> None:
         im.fit(X=loader, y=y, progress=False)
     with pytest.raises(TypeError, match="unexpected keyword argument 'c'"):
         im.fit(X=X, y=y, c=1.0, progress=False)
+    with pytest.raises(ValueError, match="epochs must be a positive integer"):
+        im.fit(X=loader, epochs=0, progress=False)
 
     np.testing.assert_array_equal(random.key_data(im.rng_key), key_before)
     assert im._num_samples == num_samples

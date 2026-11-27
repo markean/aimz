@@ -14,6 +14,7 @@
 
 """Custom warnings and errors."""
 
+from importlib.machinery import PathFinder
 from os import sep
 from pathlib import Path
 
@@ -27,8 +28,19 @@ __all__ = [
     "ScopeWarning",
 ]
 
-# Warnings skip the frames in this package to point at the caller's own line
-_SKIP_FILE_PREFIXES = (f"{Path(__file__).parent}{sep}",)
+# Warnings skip the frames in this package to point at the caller's own line, and those
+# in MLflow, whose autolog wrapper would otherwise be blamed and the warning hidden.
+# `PathFinder` locates MLflow without importing it or reading `sys.modules`
+_SKIP_FILE_PREFIXES = (
+    f"{Path(__file__).parent}{sep}",
+    *(
+        f"{path}{sep}"
+        for path in getattr(
+            PathFinder.find_spec("mlflow"), "submodule_search_locations", None
+        )
+        or ()
+    ),
+)
 
 
 class NotFittedError(ValueError, AttributeError):

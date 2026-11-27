@@ -26,7 +26,7 @@ from jax import Array, random
 from numpyro import deterministic, handlers, sample
 from numpyro.infer import SVI
 
-from aimz import ImpactModel, KernelValidationError, OutputWarning
+from aimz import AimzWarning, ImpactModel, KernelValidationError, OutputWarning
 from tests.conftest import lm, make_svi
 
 
@@ -91,6 +91,9 @@ def test_kernel_signature_validation() -> None:
     assert im.describe()["arguments"] == ["X", "y"]
     with pytest.raises(TypeError, match="Unsupported inference object"):
         ImpactModel(lm, rng_key=random.key(42), inference=None)
+    # An inference object built on another callable than the kernel is flagged
+    with pytest.warns(AimzWarning, match="built on another callable"):
+        ImpactModel(lm, rng_key=random.key(42), inference=make_svi(kernel))
     vi = make_svi(lm)
     with pytest.raises(ValueError, match="static keyword arguments"):
         ImpactModel(

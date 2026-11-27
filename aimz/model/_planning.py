@@ -274,15 +274,12 @@ def _plan_execution(
         # Whether each device evaluates one row fewer than the input, where draws
         # that fit those rows would pass
         fewer_rows = not return_sites and -(
-            -min(
-                _resolve_batch_size(
-                    batch_size,
-                    axis_size=n_obs,
-                    other_size=num_samples,
-                    num_devices=num_devices,
-                    item_nbytes=num_samples * row_nbytes,
-                ),
-                n_obs,
+            -_resolve_batch_size(
+                batch_size,
+                axis_size=n_obs,
+                other_size=num_samples,
+                num_devices=num_devices,
+                item_nbytes=num_samples * row_nbytes,
             )
             // num_devices
         ) == (n_obs - 1)
@@ -312,7 +309,19 @@ def _plan_execution(
             # A call without return sites, as `log_likelihood`, traces its rows
             # only for a latent site whose draws do not fit one row fewer, or when
             # each device evaluates one row fewer, which would take such draws
-            shapes = shapes_at(n_obs) if return_sites else {}
+            try:
+                shapes = shapes_at(n_obs) if return_sites else {}
+            # A kernel that runs on its batches but not on all the rows at once, such
+            # as one whose subsampling plate is smaller than the input, plans untraced,
+            # unless the call passes an array or a collection of several values whole:
+            # one as long as a device's rows would pass there, every device taking it
+            # for its own rows
+            except Exception:
+                if any(np.ndim(v) for v in (*leaves, *constants.values())) or any(
+                    len(template) > 1 for *_, template in static
+                ):
+                    raise
+                shapes = {}
             per_row = {
                 k
                 for k, v in shapes.items()
@@ -344,10 +353,16 @@ def _plan_execution(
                     # The prior draws its global sites from one row
                     if posterior is None:
                         shapes_at(1)
+                # One row has no row fewer, so a second row tells a global site of
+                # length one from a site with one value per row
+                elif shapes and shard_axis == "obs":
+                    per_row &= {
+                        k for k, v in shapes_at(2).items() if v.shape[:1] == (2,)
+                    }
             # A kernel that does not run on fewer rows, such as one whose plate size
-            # is a fixed count, cannot be split either
+            # is a fixed count, cannot be split either; one row is never split
             except Exception:
-                failed = True
+                failed = n_obs > 1
             plan_cache[key] = (
                 frozenset(shapes.keys() & set(return_sites)) - per_row,
                 failed,

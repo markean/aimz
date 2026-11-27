@@ -262,13 +262,13 @@ def _coerce_return_sites(
     model's.
 
     Warns:
-        OutputWarning: If a requested site is intervened on, since it comes back
+        OutputWarning: If a returned site is intervened on, since it comes back
             with its own draws, not the set value.
     """
-    if return_sites is None:
-        return cast("KernelSpec", spec).return_sites
     requested = (
-        (return_sites,)
+        cast("KernelSpec", spec).return_sites
+        if return_sites is None
+        else (return_sites,)
         if isinstance(return_sites, str)
         else tuple(str(s) for s in return_sites)
     )

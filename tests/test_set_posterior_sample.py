@@ -44,6 +44,8 @@ def test_set_posterior_sample(
         im.set_posterior_sample({"a": jnp.ones((100, 10)), "b": jnp.ones((200,))})
     with pytest.raises(ValueError, match="'draw' are reserved"):
         im.set_posterior_sample({"draw": jnp.ones((100,))})
+    with pytest.raises(ValueError, match="positive divisor of the 100 draws"):
+        im.set_posterior_sample({"a": jnp.ones((100,))}, num_chains=3)
 
     num_samples = 100
     rng_key, rng_subkey = random.split(random.key(0))

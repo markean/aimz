@@ -98,7 +98,7 @@ See :ref:`user-guide-sharding` for how the two sharding strategies differ, when 
 A local latent's posterior applies only to the observations the model was fitted on.
 For an array input with another number of observations, prediction and :meth:`~aimz.ImpactModel.log_likelihood` raise a ``ValueError`` that names the site, unless the site is named in ``intervention``.
 The fitted values are reused without notice for an input with the same number of observations.
-A data loader is checked one device batch at a time, so a loader batch that gives each device exactly the fitted number of observations passes too.
+A data loader, or an array input that the kernel does not run on as a whole, is checked one device batch at a time, so a batch that gives each device exactly the fitted number of observations passes too.
 A data loader cannot rerun under ``shard_axis="draw"``, so a call with one raises the error for the fitted observations too whenever its batches or the devices split them; pass them as an array instead.
 For an array input, the rerun also covers a local latent whose observations lie on another axis, as in nested plates, since it checks whether the shape of the site's draws follows the number of observations.
 To predict other observations, draw the site from the prior: set a posterior without it, or, if it is the only latent site, use :meth:`~aimz.ImpactModel.sample_prior_predictive`, which runs ``param`` sites at their initial values.

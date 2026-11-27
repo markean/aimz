@@ -59,7 +59,7 @@ def _trace_kernel(
     param_input: str,
     param_output: str,
     kernel_spec: KernelSpec | None,
-    specs: dict[tuple, KernelSpec | None],
+    specs: dict[tuple, KernelSpec],
     dims: dict[str, tuple[str, ...]],
     site_sizes: dict[str, tuple[int, int]],
     observed_sites: set[str],
@@ -235,13 +235,12 @@ def _trace_kernel(
             site_dists[k] = short if hasattr(distributions, short) else name
         # A site recorded by control flow, which NumPyro marks alike for `scan` and
         # `cond`, or drawn as one event over the rows, counts as computing across
-        # observations. The first trace and each trace with the output decide anew
-        # for the sites they record, so a trace over all the rows clears a
-        # one-element event that a one-row trace took for one over the rows; a
-        # trace with other arguments and no output keeps the marks, which every
-        # call reads.
-        if prev is not None and prev.traced and not with_output:
-            continue
+        # observations. Every trace adds its marks, which every call reads, so a
+        # site marked only with some arguments, as in a forecast, stays marked. The
+        # first trace and each trace with the output also decide anew for the
+        # events whose leading axis, batch or event, is not the rows, so a trace
+        # over all the rows clears a one-element event that a one-row trace took for
+        # one over the rows.
         fn = v.get("fn")
         if v.get("_control_flow_done"):
             coupled_sites.add(k)
@@ -253,7 +252,12 @@ def _trace_kernel(
         ):
             coupled_sites.add(k)
             events.append(k)
-        else:
+        elif (
+            (prev is None or not prev.traced or with_output)
+            and isinstance(fn, Distribution)
+            and fn.event_shape
+            and fn.shape()[:1] != rows
+        ):
             coupled_sites.discard(k)
     # An event that keeps its length on more rows is global, as long as the rows
     # only by chance; a kernel that does not run on more rows keeps every mark
@@ -374,7 +378,9 @@ def _trace_kernel(
             site_upstream[k] = {
                 tag.removeprefix("site:") for tag in found if tag.startswith("site:")
             }
-            site_arguments[k] = {
+            # A scalar carries no tag, so a call that passes an argument as one adds
+            # to the arguments of earlier traces
+            site_arguments[k] = site_arguments.get(k, set()) | {
                 tag.removeprefix("argument:")
                 for tag in found
                 if tag.startswith("argument:")

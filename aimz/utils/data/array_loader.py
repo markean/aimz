@@ -24,7 +24,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax import Array, jit, lax, random
 
-from aimz._exceptions import AimzWarning
+from aimz._exceptions import _SKIP_FILE_PREFIXES, AimzWarning
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -81,9 +81,7 @@ class ArrayLoader:
         self.shuffle = shuffle
         if isinstance(rng_key, Array) and rng_key.dtype == jnp.uint32:
             msg = "Legacy `uint32` PRNGKey detected; converting to a typed key array."
-            # Not `skip_file_prefixes`: skipping the aimz frames would blame MLflow's
-            # autolog wrapper, which then hides the warning
-            warn(msg, category=AimzWarning, stacklevel=2)
+            warn(msg, category=AimzWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
             rng_key = random.wrap_key_data(rng_key)
         self.rng_key = rng_key
 

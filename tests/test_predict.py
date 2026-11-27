@@ -669,9 +669,11 @@ def test_predict_recomputed_sites() -> None:
         batch_size=24,
         shuffle=False,
     )
-    dt = im.predict(loader, return_sites="mu", store="memory", progress=False)
-    np.testing.assert_allclose(
-        dt.posterior_predictive["mu"].values,
-        np.broadcast_to(1.0 + X, (1, 4, 24)),
-        rtol=1e-6,
-    )
+    # An array past the plate plans untraced, so it keeps its batches as the loader
+    for data in (loader, X):
+        dt = im.predict(data, return_sites="mu", store="memory", progress=False)
+        np.testing.assert_allclose(
+            dt.posterior_predictive["mu"].values,
+            np.broadcast_to(1.0 + X, (1, 4, 24)),
+            rtol=1e-6,
+        )
