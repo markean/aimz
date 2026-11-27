@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Support for Python 3.15.
 
+### Fixed
+
+- {meth}`~aimz.ImpactModel.log_likelihood` now reuses its compiled program on a model without posterior samples, such as one whose kernel learns only `param` sites, instead of compiling and keeping a new one at every call. A latent site of such a model is now drawn from its prior under a fixed seed, instead of the model's key ([#569](https://github.com/markean/aimz/issues/569)).
+
 ## [v0.18.0](https://github.com/markean/aimz/releases/tag/v0.18.0) - 2026-11-16
 
 ### Added
