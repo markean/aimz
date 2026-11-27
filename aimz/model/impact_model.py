@@ -2941,12 +2941,6 @@ class ImpactModel(BaseModel):
                             raise
                     self._plan_cache[check] = (frozenset(), False, {})
 
-        # Without a posterior every latent site is drawn from the prior, which needs a
-        # seeded kernel; with one, the bare kernel keeps its identity for the cache
-        kernel = (
-            self.kernel if self.posterior else seed(self.kernel, rng_seed=self.rng_key)
-        )
-
         return self._stream_to_datatree(
             lambda artifact_path: self._streamer.write_log_likelihood(
                 _WriteRequest(
@@ -2961,7 +2955,7 @@ class ImpactModel(BaseModel):
                     kwargs=kwargs,
                     dims=self._dims,
                 ),
-                kernel=kernel,
+                kernel=self.kernel,
                 posterior=self.posterior,
                 params={
                     **self.vi_result.params,

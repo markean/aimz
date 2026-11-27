@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 
 import jax.numpy as jnp
 from jax import Array, lax
-from numpyro.handlers import substitute, trace
+from numpyro.handlers import seed, substitute, trace
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -133,6 +133,10 @@ def _log_likelihood(
         }
 
     if not samples:
+        # Every latent site is drawn once from the prior; seeded here, the kernel
+        # keeps its identity for the caller's cache
+        model = seed(model, rng_seed=0)
+
         return {k: v[None, ...] for k, v in _loglik_one_sample({}).items()}
 
     return lax.map(_loglik_one_sample, xs=samples)
