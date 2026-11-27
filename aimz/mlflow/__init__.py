@@ -39,11 +39,10 @@ import numpy as np
 import yaml
 from jax import random
 from jax.typing import ArrayLike
-from mlflow import pyfunc
+from mlflow import environment_variables, pyfunc
 from mlflow.data.code_dataset_source import CodeDatasetSource
 from mlflow.data.numpy_dataset import from_numpy
 from mlflow.entities.logged_model_input import LoggedModelInput
-from mlflow.environment_variables import MLFLOW_ALLOW_PICKLE_DESERIALIZATION
 from mlflow.exceptions import MlflowException
 from mlflow.models import Model
 from mlflow.models.model import MLMODEL_FILE_NAME
@@ -82,7 +81,7 @@ from mlflow.utils.environment import (
     _PythonEnv,
     _validate_env_arguments,
 )
-from mlflow.utils.file_utils import get_total_file_size, write_to
+from mlflow.utils.file_utils import get_total_file_size
 from mlflow.utils.model_utils import (
     _add_code_from_conf_to_system_path,
     _copy_extra_files,
@@ -295,8 +294,8 @@ def save_model(
         yaml.safe_dump(conda_env, stream=f, default_flow_style=False)
 
     if pip_constraints:
-        write_to(path / _CONSTRAINTS_FILE_NAME, "\n".join(pip_constraints))
-    write_to(path / _REQUIREMENTS_FILE_NAME, "\n".join(pip_requirements))
+        (path / _CONSTRAINTS_FILE_NAME).write_text("\n".join(pip_constraints), "utf-8")
+    (path / _REQUIREMENTS_FILE_NAME).write_text("\n".join(pip_requirements), "utf-8")
 
     _PythonEnv.current().to_yaml(path / _PYTHON_ENV_FILE_NAME)
 
@@ -442,7 +441,8 @@ def _load_model_from_local_file(
 
     Raises:
         MlflowException: If the serialization format is unknown, or pickle
-            deserialization is disabled through ``MLFLOW_ALLOW_PICKLE_DESERIALIZATION``.
+            deserialization is disabled through ``MLFLOW_ALLOW_MODEL_CODE_EXECUTION``
+            or the deprecated ``MLFLOW_ALLOW_PICKLE_DESERIALIZATION``.
     """
     if serialization_format not in SUPPORTED_SERIALIZATION_FORMATS:
         msg = (
@@ -452,15 +452,25 @@ def _load_model_from_local_file(
         )
         raise MlflowException(message=msg, error_code=INVALID_PARAMETER_VALUE)
 
+    # MLflow 3.18 added the first variable and deprecated the second
+    disabled = " and ".join(
+        f"environment variable '{name}'"
+        for name in (
+            "MLFLOW_ALLOW_MODEL_CODE_EXECUTION",
+            "MLFLOW_ALLOW_PICKLE_DESERIALIZATION",
+        )
+        if hasattr(environment_variables, name)
+        and not getattr(environment_variables, name).get()
+    )
     if (
-        not MLFLOW_ALLOW_PICKLE_DESERIALIZATION.get()
+        disabled
         and not is_in_databricks_runtime()
         and not is_in_databricks_model_serving_environment()
     ):
         msg = (
             "Deserializing model using pickle is disallowed, but this model is saved "
-            "in pickle format. To address this issue, you need to set environment "
-            "variable 'MLFLOW_ALLOW_PICKLE_DESERIALIZATION' to 'true'."
+            f"in pickle format. To address this issue, you need to set {disabled} to "
+            "'true'."
         )
         raise MlflowException(msg)
 

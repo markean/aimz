@@ -129,8 +129,8 @@ Extra files can be bundled into the model directory with the ``extra_files`` arg
 
 .. note::
    aimz models are serialized with ``cloudpickle`` and have no pickle-free format.
-   Loading honors MLflow's ``MLFLOW_ALLOW_PICKLE_DESERIALIZATION`` environment variable: if it is set to ``false``, loading pickled models is refused.
-   In Databricks Runtime and Databricks Model Serving, loading is always allowed regardless of this variable.
+   Loading honors MLflow's ``MLFLOW_ALLOW_MODEL_CODE_EXECUTION`` environment variable, new in MLflow 3.18, and the ``MLFLOW_ALLOW_PICKLE_DESERIALIZATION`` variable it deprecates: if either is set to ``false``, loading pickled models is refused.
+   In Databricks Runtime and Databricks Model Serving, loading is always allowed regardless of these variables.
    Only load models from sources you trust.
 
    A kernel defined in ``__main__``, such as in a script or a notebook, is stored by value, so the model loads without its source but only under the same Python minor version.

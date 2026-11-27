@@ -222,6 +222,15 @@ def test_load_model_guards(
         load_model(str(tmp_path / "gated"))
     with pytest.raises(MlflowException, match="pickle is disallowed"):
         mlflow.pyfunc.load_model(str(tmp_path / "gated"))
+    # The variable that deprecates it is honored where MLflow defines it
+    if hasattr(mlflow.environment_variables, "MLFLOW_ALLOW_MODEL_CODE_EXECUTION"):
+        monkeypatch.delenv("MLFLOW_ALLOW_PICKLE_DESERIALIZATION")
+        monkeypatch.setenv("MLFLOW_ALLOW_MODEL_CODE_EXECUTION", "false")
+        with pytest.raises(
+            MlflowException,
+            match=r"pickle is disallowed.*'MLFLOW_ALLOW_MODEL_CODE_EXECUTION' to",
+        ):
+            load_model(str(tmp_path / "gated"))
 
 
 def test_autolog_input_example_snapshot_copies_multi_input(

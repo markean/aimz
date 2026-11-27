@@ -265,7 +265,7 @@ def test_estimate_effect_scenario_compatibility(
 def test_estimate_effect_warns_on_stale_baseline(
     synthetic_data: tuple[Array, Array],
 ) -> None:
-    """A baseline kept from before a refit warns; a deterministic site stays paired."""
+    """A baseline from before a refit warns; a site of posterior draws stays paired."""
     X, y = synthetic_data
     im = ImpactModel(
         latent_intervention_model,
@@ -275,7 +275,7 @@ def test_estimate_effect_warns_on_stale_baseline(
     im.fit_on_batch(X, y, num_steps=10, progress=False)
     baseline = im.predict_on_batch(X, rng_key=random.key(0), return_sites="mu")
 
-    # A deterministic site stays paired across keys
+    # A deterministic site computed from posterior draws stays paired across keys
     with warnings.catch_warnings():
         warnings.simplefilter("error", OutputWarning)
         im.estimate_effect(

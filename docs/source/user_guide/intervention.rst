@@ -81,6 +81,7 @@ Scenarios drawn by the same method with the same ``rng_key`` are paired: they us
 Two lazily generated scenarios share a key automatically; for precomputed or mixed scenarios, pass the same ``rng_key`` to each, as in the examples below.
 The method warns if the ``posterior`` groups of the two scenarios hold different samples, as when one scenario was computed before a refit.
 It also warns if the output, or any site under the prior, was not drawn in both scenarios with the same key, sharding strategy, and batching, which it reads from the attributes of the scenarios (see :ref:`output-attributes`).
+Under the posterior, a deterministic site computed from a site that prediction draws anew, such as an observed site whose data are not passed, the output itself, or a latent site the posterior lacks, is then unpaired too, but is not checked.
 A scenario without the group or the attributes, such as a tree built by hand, is not checked.
 
 Eager (precomputed scenarios)::

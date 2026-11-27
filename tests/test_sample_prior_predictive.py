@@ -23,7 +23,7 @@ from jax import Array, device_count, random
 from numpyro import deterministic, plate, sample
 
 from aimz import ImpactModel, OutputWarning
-from tests.conftest import latent_intervention_model, lm, make_svi
+from tests.conftest import latent_intervention_model, lm, lm_subsample, make_svi
 
 
 def test_sample_prior_predictive_unfitted(
@@ -160,3 +160,12 @@ def test_sample_prior_predictive_plate_sizes() -> None:
     # rows of the local one
     offset = dt.prior_predictive["mu"].values[0] - X
     np.testing.assert_allclose(offset, offset[:, :1].repeat(len(X), axis=1), atol=1e-3)
+
+    # A subsampling plate smaller than an array input, before a fit, takes its batches
+    im = ImpactModel(
+        lm_subsample, rng_key=random.key(0), inference=make_svi(lm_subsample)
+    )
+    dt = im.sample_prior_predictive(
+        np.zeros((200, 2)), num_samples=4, batch_size=60, store="memory", progress=False
+    )
+    assert dt.prior_predictive["y"].shape == (1, 4, 200)

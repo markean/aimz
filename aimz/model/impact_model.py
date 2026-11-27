@@ -878,22 +878,19 @@ class ImpactModel(BaseModel):
             )
             obs_names = {self.param_input, *batch}
 
-        # Trace a one-row probe of the per-observation arguments, on JAX arrays as the
-        # sampling step runs the kernel; a kernel that does not run on one row, such as
-        # one whose plate needs several rows, is traced on all the rows
-        probe = {
-            k: (jnp.asarray(cast("Any", v)[:1]) if k in obs_names else v)
-            for k, v in args_bound.items()
-        }
+        # A kernel not yet traced that does not run on all the rows at once, such as
+        # one whose subsampling plate is smaller than the input, is traced on one row
+        # for this call only, so that a later call that runs on all the rows traces them
         try:
-            static = _partition(probe)[1]
-            spec = (
-                self._specs[static]
-                if static in self._specs
-                else self._build_kernel_spec(_to_jax(probe), with_output=False)
-            )
-        except Exception:
             spec = self._call_spec(args_bound)
+        except Exception:
+            spec = self._call_spec(
+                {
+                    k: (cast("Any", v)[:1] if k in obs_names else v)
+                    for k, v in args_bound.items()
+                }
+            )
+            self._specs.pop(_partition(args_bound)[1], None)
         _validate_intervention(intervention, kernel_spec=spec)
 
         requested = return_sites is not None
@@ -2372,7 +2369,10 @@ class ImpactModel(BaseModel):
             OutputWarning: If the scenarios differ in dimension sizes or coordinate
                 labels, if they hold different posterior samples, or if the output,
                 or any site under the prior, was not drawn in both with the same key,
-                sharding strategy, and batching.
+                sharding strategy, and batching. Under the posterior, a deterministic
+                site computed from a site that prediction draws anew, such as an
+                observed site whose data are not passed, is then unpaired too, but is
+                not checked.
         """
         if output_baseline is None or output_intervention is None:
             _check_is_fitted(self)
@@ -2550,8 +2550,8 @@ class ImpactModel(BaseModel):
             warn(msg, category=OutputWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
         out = xr.DataTree(name="root")
         out[group] = intervention - baseline
-        # The key and the batching decide the draws of the sites a call samples anew:
-        # every site under the prior, and the output otherwise
+        # The key and the batching decide the draws of the sites a call samples anew;
+        # the check covers every site under the prior, and the output otherwise
         attrs_baseline = dt_baseline[group].attrs
         attrs_intervention = dt_intervention[group].attrs
         unmatched = [
