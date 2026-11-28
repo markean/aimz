@@ -468,9 +468,7 @@ class ImpactModel(BaseModel):
         """
         if not np.all(np.isfinite(vi_result.losses)):
             msg = "Loss contains NaN or Inf, indicating numerical instability."
-            # Not `skip_file_prefixes`: skipping the aimz frames would blame MLflow's
-            # autolog wrapper, which then hides the warning
-            warn(msg, category=FitWarning, stacklevel=2)
+            warn(msg, category=FitWarning, skip_file_prefixes=_SKIP_FILE_PREFIXES)
         self._vi_result = vi_result
         self._vi_state = vi_result.state
 
