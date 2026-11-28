@@ -96,11 +96,14 @@ def _build_scenario(
     for name, change in changes.items():
         for each in treatments.get(name, (name,)):
             if each not in inputs:
+                # The treatments whose inputs can all be edited, then the other inputs
+                names = [t for t in treatments if {*treatments[t]} <= inputs.keys()]
+                names += [i for i in inputs if i not in names]
                 msg = (
                     f"{each!r} is a sample site, which `intervention` sets."
                     if each in sites
-                    else f"{each!r} is none of the inputs a scenario can edit: "
-                    f"{', '.join(map(repr, (*treatments, *inputs)))}."
+                    else f"{each!r} is none of the inputs a scenario can edit, "
+                    f"which hold an array in `args`: {', '.join(map(repr, names))}."
                 )
                 raise ValueError(msg)
             argument, column = inputs[each]
