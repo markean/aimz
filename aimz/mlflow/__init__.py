@@ -82,7 +82,7 @@ from mlflow.utils.environment import (
     _PythonEnv,
     _validate_env_arguments,
 )
-from mlflow.utils.file_utils import get_total_file_size, write_to
+from mlflow.utils.file_utils import get_total_file_size
 from mlflow.utils.model_utils import (
     _add_code_from_conf_to_system_path,
     _copy_extra_files,
@@ -295,8 +295,8 @@ def save_model(
         yaml.safe_dump(conda_env, stream=f, default_flow_style=False)
 
     if pip_constraints:
-        write_to(path / _CONSTRAINTS_FILE_NAME, "\n".join(pip_constraints))
-    write_to(path / _REQUIREMENTS_FILE_NAME, "\n".join(pip_requirements))
+        (path / _CONSTRAINTS_FILE_NAME).write_text("\n".join(pip_constraints), "utf-8")
+    (path / _REQUIREMENTS_FILE_NAME).write_text("\n".join(pip_requirements), "utf-8")
 
     _PythonEnv.current().to_yaml(path / _PYTHON_ENV_FILE_NAME)
 
