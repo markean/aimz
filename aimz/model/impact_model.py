@@ -687,8 +687,8 @@ class ImpactModel(BaseModel):
 
         Warns:
             OutputWarning: If the output site does not have one value per observation
-                of the input, or a requested return site is intervened on, since it
-                comes back with its own draws, or missing from the output.
+                of the input, or a return site is intervened on, since it comes back
+                with its own draws, or a requested one is missing from the output.
 
         See Also:
             :meth:`~aimz.ImpactModel.sample_prior_predictive`
@@ -811,12 +811,12 @@ class ImpactModel(BaseModel):
                 batch.
 
         Warns:
-            OutputWarning: If a requested return site is intervened on, since it comes
-                back with its own draws, or missing from the output, or if the output
-                site does not have one value per observation of an array input; under
-                ``shard_axis="obs"`` the call then reruns under ``shard_axis="draw"``.
-                Also if the batches of a data loader split a kernel that computes
-                across observations.
+            OutputWarning: If a return site is intervened on, since it comes back with
+                its own draws, or a requested one is missing from the output, or if the
+                output site does not have one value per observation of an array input;
+                under ``shard_axis="obs"`` the call then reruns under
+                ``shard_axis="draw"``. Also if the batches of a data loader split a
+                kernel that computes across observations.
             PerformanceWarning: If ``shard_axis="obs"`` cannot split an array input,
                 as for a return site without an observation axis, so the call reruns
                 under ``shard_axis="draw"``.
@@ -2009,11 +2009,11 @@ class ImpactModel(BaseModel):
         Warns:
             OutputWarning: If an intervened site reaches the output only through sites
                 whose values are taken from the posterior or intervened on, so that
-                the draws do not respond to it, if a requested return site is
-                intervened on, since it comes back with its own draws, or missing from
-                the output, if a conditioned site is one the posterior holds, since it
-                keeps its posterior draws, or if the output site does not have one value
-                per observation of the input.
+                the draws do not respond to it, if a return site is intervened on,
+                since it comes back with its own draws, or a requested one is missing
+                from the output, if a conditioned site is one the posterior holds,
+                since it keeps its posterior draws, or if the output site does not have
+                one value per observation of the input.
         """
         _check_is_fitted(self)
         X = cast("Array", _validate_X_y_to_jax(X))
@@ -2174,12 +2174,12 @@ class ImpactModel(BaseModel):
         Warns:
             OutputWarning: If an intervened site reaches the output only through sites
                 whose values are taken from the posterior or intervened on, so that
-                the draws do not respond to it, if a requested return site is
-                intervened on, since it comes back with its own draws, or missing from
-                the output, if a conditioned site is one the posterior holds, since it
-                keeps its posterior draws, or if the output site does not have one value
-                per observation of an array input; under ``shard_axis="obs"`` the call
-                then reruns under
+                the draws do not respond to it, if a return site is intervened on,
+                since it comes back with its own draws, or a requested one is missing
+                from the output, if a conditioned site is one the posterior holds,
+                since it keeps its posterior draws, or if the output site does not have
+                one value per observation of an array input; under ``shard_axis="obs"``
+                the call then reruns under
                 ``shard_axis="draw"``. Also if the batches of a data loader split a
                 kernel that computes across observations, once a call has traced the
                 kernel.
