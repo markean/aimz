@@ -1333,6 +1333,7 @@ class ImpactModel(BaseModel):
                 intervention=None,
                 model_kwargs=args_bound,
             )
+            self._num_chains = 1
             self._num_samples = num_samples
         elif isinstance(self.inference, MCMC):
             logger.info(
@@ -1753,6 +1754,7 @@ class ImpactModel(BaseModel):
             intervention=None,
             model_kwargs=model_kwargs,
         )
+        self._num_chains = 1
         self._num_samples = num_samples
         self._is_fitted = True
 
