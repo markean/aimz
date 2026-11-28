@@ -1784,11 +1784,12 @@ class ImpactModel(BaseModel):
             they hold what it computes, not what a feature of an input means. They name
             the input by the kernel's own parameter name, and a site computed from a
             site that ``scan`` or ``cond`` records can list in its place everything that
-            enters that ``scan`` or ``cond``, whether or not it feeds the site. A
-            ``factor`` term counts as observed, and ``param`` sites are not listed;
-            their values after an SVI fit are in :attr:`~aimz.ImpactModel.vi_result`.
-            The ``card`` is the :class:`~aimz.model.CausalCard` as plain values, or
-            ``None``.
+            enters that ``scan`` or ``cond``, whether or not it feeds the site. The
+            ``arguments`` add up over the calls traced so far, since a call lists only
+            those it passes as arrays. A ``factor`` term counts as observed, and
+            ``param`` sites are not listed; their values after an SVI fit are in
+            :attr:`~aimz.ImpactModel.vi_result`. The ``card`` is the
+            :class:`~aimz.model.CausalCard` as plain values, or ``None``.
         """
         spec = self._kernel_spec
         sample_sites = spec.sample_sites if spec else ()

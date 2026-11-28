@@ -378,7 +378,9 @@ def _trace_kernel(
             site_upstream[k] = {
                 tag.removeprefix("site:") for tag in found if tag.startswith("site:")
             }
-            site_arguments[k] = {
+            # A scalar carries no tag, so a call that passes an argument as one adds
+            # to the arguments of earlier traces.
+            site_arguments[k] = site_arguments.get(k, set()) | {
                 tag.removeprefix("argument:")
                 for tag in found
                 if tag.startswith("argument:")
