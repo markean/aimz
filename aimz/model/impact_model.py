@@ -217,13 +217,14 @@ class ImpactModel(BaseModel):
         # The return sites a streamed call cannot split, whether the kernel failed on
         # one row fewer, and the posterior sites whose size follows the rows, by the
         # call's shapes and constants, and the calls that passed `log_likelihood`'s
-        # check of keyword arrays as long as each device's rows
+        # check of keyword arrays as long as each device's rows or failed the trace
+        # of `_call_spec`.
         self._plan_cache: dict[
             tuple,
             tuple[frozenset[str], bool, dict[str, tuple[int, ...]]],
         ] = {}
         # The spec of each set of call arguments traced so far, by their static part
-        self._specs: dict[tuple, KernelSpec | None] = {}
+        self._specs: dict[tuple, KernelSpec] = {}
         self._num_devices = local_device_count()
         if self._num_devices > 1:
             mesh = make_mesh(
@@ -534,11 +535,13 @@ class ImpactModel(BaseModel):
         The trace is abstract, so the arguments are copied into JAX arrays only when it
         fails, as for a kernel that reads a concrete value of an argument, which then
         runs once on them. A traced kernel that does not run on them at once, as one
-        whose subsampling plate is smaller than the input, keeps the model's spec, for
-        every later call with these arguments too.
+        whose subsampling plate is smaller than the input, keeps the model's spec for
+        the call; a later call with arrays of other shapes or types traces again.
         """
-        static = _partition(args_bound)[1]
-        if static not in self._specs:
+        leaves, static = _partition(args_bound)
+        # A failed trace is remembered with the shapes and types it failed on
+        failed = (static, *((np.shape(a), jnp.result_type(a)) for a in leaves))
+        if static not in self._specs and failed not in self._plan_cache:
             try:
                 return self._build_kernel_spec(args_bound, with_output=False)
             except AimzWarning:
@@ -549,9 +552,9 @@ class ImpactModel(BaseModel):
                 # untraced one has none to fall back on
                 if not (self._kernel_spec and self._kernel_spec.traced):
                     raise
-                self._specs[static] = None
+                self._plan_cache[failed] = (frozenset(), False, {})
 
-        return self._specs[static] or self._kernel_spec
+        return self._specs.get(static, self._kernel_spec)
 
     def _recomputed_sites(self) -> set[str]:
         """Return the posterior sites traced as deterministic with a value per row.
@@ -867,7 +870,7 @@ class ImpactModel(BaseModel):
         try:
             static = _partition(probe)[1]
             spec = (
-                self._specs[static] or self._kernel_spec
+                self._specs[static]
                 if static in self._specs
                 else self._build_kernel_spec(_to_jax(probe), with_output=False)
             )

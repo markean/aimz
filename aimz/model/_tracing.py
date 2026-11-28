@@ -59,7 +59,7 @@ def _trace_kernel(
     param_input: str,
     param_output: str,
     kernel_spec: KernelSpec | None,
-    specs: dict[tuple, KernelSpec | None],
+    specs: dict[tuple, KernelSpec],
     dims: dict[str, tuple[str, ...]],
     site_sizes: dict[str, tuple[int, int]],
     observed_sites: set[str],
