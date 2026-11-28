@@ -2891,7 +2891,7 @@ class ImpactModel(BaseModel):
         # the rows with it but does once the array has as many
         if shard_axis == "obs" and isinstance(X, ArrayLike):
             n_obs = len(cast("Sized", X))
-            rows = -(-min(cast("int", batch_size), n_obs) // self._num_devices)
+            rows = -(-cast("int", batch_size) // self._num_devices)
             if rows != n_obs and any(
                 np.shape(leaf)[:1] == (rows,)
                 for leaf in _partition(_group_kwargs(kwargs, n_obs=n_obs)[1])[0]

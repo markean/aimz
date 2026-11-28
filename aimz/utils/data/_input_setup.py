@@ -110,7 +110,7 @@ def _resolve_batch_size(
 ) -> int:
     """Resolve the batch size along the chunked axis of a two-axis output.
 
-    An explicit ``batch_size`` is used as given. Otherwise each batch stays within
+    An explicit ``batch_size`` is clamped to the axis. Otherwise each batch stays within
     :data:`MAX_BYTES`, the axis splits into enough batches to occupy the writer pool,
     and no batch is smaller than :data:`_BATCH_BYTES_MIN`, the memory budget taking
     precedence; the result is rounded down to a multiple of ``num_devices`` and
@@ -125,7 +125,7 @@ def _resolve_batch_size(
             single value per element.
     """
     if batch_size is not None:
-        return batch_size
+        return min(batch_size, axis_size)
 
     # The budgets are resolved against JAX's default float type
     itemsize = jnp.result_type(float).itemsize
