@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - {meth}`~aimz.ImpactModel.log_likelihood` now reuses its compiled program on a model without posterior samples, such as one whose kernel learns only `param` sites, instead of compiling and keeping a new one at every call. A latent site of such a model is now drawn from its prior under a fixed seed, instead of the model's key ([#569](https://github.com/markean/aimz/issues/569)).
+- A {meth}`~aimz.ImpactModel.set_posterior_sample` call rejected by one of its warnings raised as an error now leaves the model's number of draws as it was, instead of recording the rejected call's, and a repeated call on a kernel not yet traced now lists the new sites in {attr}`~aimz.ImpactModel.kernel_spec` and {meth}`~aimz.ImpactModel.describe`, instead of those of the first call ([#571](https://github.com/markean/aimz/issues/571)).
 
 ## [v0.18.0](https://github.com/markean/aimz/releases/tag/v0.18.0) - 2026-11-16
 

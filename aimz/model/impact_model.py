@@ -1907,7 +1907,7 @@ class ImpactModel(BaseModel):
                 f"Inconsistent batch shapes found in `posterior_sample`: {batch_shapes}"
             )
             raise ValueError(msg)
-        (self._num_samples,) = batch_shapes.pop()
+        (num_samples,) = batch_shapes.pop()
         spec = self._kernel_spec
         if spec is not None and spec.traced:
             latent = self._fitted_sites - {*self._observed_sites, self.param_output}
@@ -1935,8 +1935,9 @@ class ImpactModel(BaseModel):
         # Release the placement of the posterior this call replaces
         self._streamer.place_posterior(None, sharding=None)
         self._posterior = posterior_sample
+        self._num_samples = num_samples
         self._num_chains = num_chains
-        if self._kernel_spec is None:
+        if self._kernel_spec is None or not self._kernel_spec.traced:
             self._kernel_spec = KernelSpec(
                 traced=False,
                 sample_sites=tuple(self._posterior.keys()),
