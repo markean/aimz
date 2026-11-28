@@ -274,15 +274,12 @@ def _plan_execution(
         # Whether each device evaluates one row fewer than the input, where draws
         # that fit those rows would pass
         fewer_rows = not return_sites and -(
-            -min(
-                _resolve_batch_size(
-                    batch_size,
-                    axis_size=n_obs,
-                    other_size=num_samples,
-                    num_devices=num_devices,
-                    item_nbytes=num_samples * row_nbytes,
-                ),
-                n_obs,
+            -_resolve_batch_size(
+                batch_size,
+                axis_size=n_obs,
+                other_size=num_samples,
+                num_devices=num_devices,
+                item_nbytes=num_samples * row_nbytes,
             )
             // num_devices
         ) == (n_obs - 1)
