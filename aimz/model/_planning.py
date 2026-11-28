@@ -344,10 +344,16 @@ def _plan_execution(
                     # The prior draws its global sites from one row
                     if posterior is None:
                         shapes_at(1)
+                # One row has no row fewer, so a second row tells a global site of
+                # length one from a site with one value per row.
+                elif shapes and shard_axis == "obs":
+                    per_row &= {
+                        k for k, v in shapes_at(2).items() if v.shape[:1] == (2,)
+                    }
             # A kernel that does not run on fewer rows, such as one whose plate size
-            # is a fixed count, cannot be split either
+            # is a fixed count, cannot be split either; one row is never split.
             except Exception:
-                failed = True
+                failed = n_obs > 1
             plan_cache[key] = (
                 frozenset(shapes.keys() & set(return_sites)) - per_row,
                 failed,
@@ -355,7 +361,7 @@ def _plan_execution(
             )
         unsplit, failed, follows = plan_cache[key]
         # A posterior site whose draws do not fit the rows fails as on one batch,
-        # though device batches with the fitted row count would take them
+        # though device batches with the fitted row count would take them.
         for k, shape in sorted(follows.items()):
             draws = (posterior or {})[k].shape[1:]
             if (
